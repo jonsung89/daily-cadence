@@ -1,0 +1,249 @@
+/* =============================================================
+   Daily Cadence — Color & Type Tokens
+   ------------------------------------------------------------- */
+
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400;1,500&family=Inter:wght@400;500;600;700&display=swap');
+
+:root {
+  /* ---------- Core palette ---------- */
+  --dc-cream:        #F5F3F0;  /* primary background, warm cream */
+  --dc-sage:         #5A7B6D;  /* primary accent, sage green */
+  --dc-sage-deep:    #3F5A4F;  /* pressed / active state */
+  --dc-sage-soft:    #D9E3DD;  /* tint for chips / subtle fills */
+  --dc-ink:          #2C2620;  /* near-black text */
+  --dc-warm-gray:    #8B8680;  /* secondary text */
+  --dc-taupe:        #EAE6E1;  /* light fill / divider */
+  --dc-taupe-deep:   #D9D3CB;  /* slightly stronger fill */
+  --dc-white:        #FFFFFF;
+
+  /* ---------- Accent palette ---------- */
+  --dc-periwinkle:      #CBCADA;  /* soft lavender-gray accent */
+  --dc-periwinkle-soft: #E6E5EE;  /* tint */
+  --dc-blush:           #F2C9C4;  /* pastel pink accent */
+  --dc-blush-soft:      #F9E2DF;  /* tint */
+  --dc-honey:           #E8B86B;  /* warm gold accent */
+
+  /* ---------- Semantic note types — natural pigments ---------- */
+  --dc-workout:      #B05B3B;  /* clay — burnt sienna */
+  --dc-workout-soft: #EED7CB;
+  --dc-meal:         #C9893A;  /* turmeric — deep ochre */
+  --dc-meal-soft:    #F3E3C3;
+  --dc-sleep:        #3E4A64;  /* dusk — dusty near-navy */
+  --dc-sleep-soft:   #D6DAE3;
+  --dc-mood:         #8B6B85;  /* plum — dusty mauve */
+  --dc-mood-soft:    #E5D9E2;
+  --dc-activity:     #7B8B52;  /* moss — olive green */
+  --dc-activity-soft:#E1E5D0;
+
+  /* ---------- Foreground / background roles ---------- */
+  --fg-1: var(--dc-ink);
+  --fg-2: var(--dc-warm-gray);
+  --fg-on-accent: #FFFFFF;
+  --bg-1: var(--dc-cream);
+  --bg-2: var(--dc-white);
+  --bg-3: var(--dc-taupe);
+  --border-1: #E3DFD9;
+  --border-2: #D1CBC2;
+
+  /* ---------- Typography ---------- */
+  --font-serif:  'Playfair Display', 'Iowan Old Style', 'Georgia', serif;
+  --font-sans:   'Inter', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif;
+  --font-mono:   ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+
+  /* Type scale — mobile-first, but values used on web too */
+  --fs-display:  44px; /* H0 — marketing / hero */
+  --fs-h1:       32px;
+  --fs-h2:       24px;
+  --fs-h3:       20px;
+  --fs-body:     16px; /* min body size */
+  --fs-small:    14px;
+  --fs-caption:  12px;
+
+  --lh-tight:    1.15;
+  --lh-snug:     1.3;
+  --lh-normal:   1.5;
+  --lh-relaxed:  1.65;
+
+  --tracking-tight: -0.02em;
+  --tracking-snug:  -0.01em;
+  --tracking-wide:  0.06em;
+
+  /* ---------- Spacing (8pt grid, with a 4 step) ---------- */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 64px;
+  --space-9: 96px;
+
+  /* ---------- Radii ---------- */
+  --radius-sm: 6px;
+  --radius-md: 10px;  /* default for cards, inputs */
+  --radius-lg: 14px;
+  --radius-pill: 999px;
+
+  /* ---------- Shadows — soft, warm, low ---------- */
+  --shadow-1: 0 1px 2px rgba(44, 38, 32, 0.04), 0 1px 1px rgba(44, 38, 32, 0.03);
+  --shadow-2: 0 4px 12px rgba(44, 38, 32, 0.06), 0 1px 2px rgba(44, 38, 32, 0.04);
+  --shadow-3: 0 12px 28px rgba(44, 38, 32, 0.10), 0 2px 6px rgba(44, 38, 32, 0.05);
+  --shadow-hover: 0 8px 20px rgba(44, 38, 32, 0.08), 0 2px 4px rgba(44, 38, 32, 0.04);
+
+  /* ---------- Motion ---------- */
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --dur-fast: 140ms;
+  --dur-med:  220ms;
+  --dur-slow: 380ms;
+}
+
+/* =============================================================
+   Dark mode — Daily Cadence after dusk
+   -------------------------------------------------------------
+   Strategy: override semantic role tokens + lift pigments.
+   Activation: <html data-theme="dark"> (set by theme-toggle.js,
+   which also honors prefers-color-scheme on first paint).
+   ============================================================= */
+
+:root[data-theme="dark"] {
+  /* Warm near-black family (keeps Daily Cadence's warmth after dark) */
+  --dc-cream:        #1A1714;  /* base surface, warm near-black */
+  --dc-white:        #221E1A;  /* elevated card surface */
+  --dc-taupe:        #2A2520;  /* subtle fill / divider bg */
+  --dc-taupe-deep:   #332D27;  /* stronger fill, hover states */
+  --dc-ink:          #F5F3F0;  /* primary text (was near-black) */
+  --dc-warm-gray:    #A39D94;  /* secondary text — lifted for legibility */
+
+  /* Sage — lifted, still muted */
+  --dc-sage:         #7FA594;  /* primary accent, brighter on dark */
+  --dc-sage-deep:    #A3C2B4;  /* pressed / active — brightest */
+  --dc-sage-soft:    #2E3F37;  /* tint becomes a deep muted fill */
+
+  /* Accents — lifted */
+  --dc-periwinkle:      #A6A4C4;
+  --dc-periwinkle-soft: #2E2D3D;
+  --dc-blush:           #E09A93;
+  --dc-blush-soft:      #3D2B29;
+  --dc-honey:           #E8B86B;
+
+  /* Semantic pigments — lifted for contrast on dark bg */
+  --dc-workout:      #D47A58;   /* clay */
+  --dc-workout-soft: #3D2A21;
+  --dc-meal:         #E2A44E;   /* turmeric */
+  --dc-meal-soft:    #3B2E1B;
+  --dc-sleep:        #7F8FAB;   /* dusk lifted */
+  --dc-sleep-soft:   #252B38;
+  --dc-mood:         #B494AE;   /* plum lifted */
+  --dc-mood-soft:    #342A33;
+  --dc-activity:     #A2B277;   /* moss lifted */
+  --dc-activity-soft:#2B3020;
+
+  /* Foreground / background roles */
+  --fg-1: var(--dc-ink);
+  --fg-2: var(--dc-warm-gray);
+  --fg-on-accent: #1A1714;
+  --bg-1: var(--dc-cream);
+  --bg-2: var(--dc-white);
+  --bg-3: var(--dc-taupe);
+  --border-1: #2E2822;
+  --border-2: #3D3730;
+
+  /* Shadows — on dark, use deeper shadow + subtle top highlight */
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.32), 0 1px 1px rgba(0, 0, 0, 0.24);
+  --shadow-2: 0 4px 12px rgba(0, 0, 0, 0.40), 0 1px 2px rgba(0, 0, 0, 0.28);
+  --shadow-3: 0 12px 28px rgba(0, 0, 0, 0.48), 0 2px 6px rgba(0, 0, 0, 0.30);
+  --shadow-hover: 0 8px 20px rgba(0, 0, 0, 0.42), 0 2px 4px rgba(0, 0, 0, 0.28);
+}
+
+/* Respect system preference before JS boots (no-flash) */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] { color-scheme: dark; }
+
+/* Auto-apply dark tokens when system prefers dark AND no explicit [data-theme]
+   is set. Pages with theme-toggle.js always set data-theme, so they bypass this.
+   Pages without it (e.g. preview review cards, embeds) will still adapt. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]):not([data-theme="dark"]) {
+    --dc-cream:        #1A1714;
+    --dc-white:        #221E1A;
+    --dc-taupe:        #2A2520;
+    --dc-taupe-deep:   #332D27;
+    --dc-ink:          #F5F3F0;
+    --dc-warm-gray:    #A39D94;
+    --dc-sage:         #7FA594;
+    --dc-sage-deep:    #A3C2B4;
+    --dc-sage-soft:    #2E3F37;
+    --dc-periwinkle:      #A6A4C4;
+    --dc-periwinkle-soft: #2E2D3D;
+    --dc-blush:           #E09A93;
+    --dc-blush-soft:      #3D2B29;
+    --dc-honey:           #E8B86B;
+    --dc-workout:      #D47A58;
+    --dc-workout-soft: #3D2A21;
+    --dc-meal:         #E2A44E;
+    --dc-meal-soft:    #3B2E1B;
+    --dc-sleep:        #7F8FAB;
+    --dc-sleep-soft:   #252B38;
+    --dc-mood:         #B494AE;
+    --dc-mood-soft:    #342A33;
+    --dc-activity:     #A2B277;
+    --dc-activity-soft:#2B3020;
+    --fg-on-accent: #1A1714;
+    --border-1: #2E2822;
+    --border-2: #3D3730;
+    --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.32), 0 1px 1px rgba(0, 0, 0, 0.24);
+    --shadow-2: 0 4px 12px rgba(0, 0, 0, 0.40), 0 1px 2px rgba(0, 0, 0, 0.28);
+    --shadow-3: 0 12px 28px rgba(0, 0, 0, 0.48), 0 2px 6px rgba(0, 0, 0, 0.30);
+    --shadow-hover: 0 8px 20px rgba(0, 0, 0, 0.42), 0 2px 4px rgba(0, 0, 0, 0.28);
+  }
+}
+
+/* =============================================================
+   Semantic element styles
+   ============================================================= */
+
+html, body {
+  background: var(--bg-1);
+  color: var(--fg-1);
+  font-family: var(--font-sans);
+  font-size: var(--fs-body);
+  line-height: var(--lh-normal);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+.dc-display, .dc-h1, .dc-h2, .dc-h3 {
+  font-family: var(--font-serif);
+  color: var(--fg-1);
+  font-weight: 600;
+  letter-spacing: var(--tracking-tight);
+  line-height: var(--lh-tight);
+  margin: 0;
+}
+.dc-display { font-size: var(--fs-display); font-weight: 700; }
+.dc-h1      { font-size: var(--fs-h1); }
+.dc-h2      { font-size: var(--fs-h2); line-height: var(--lh-snug); }
+.dc-h3      { font-size: var(--fs-h3); line-height: var(--lh-snug); font-weight: 500; }
+
+.dc-body      { font-family: var(--font-sans); font-size: var(--fs-body);   line-height: var(--lh-normal); }
+.dc-small     { font-family: var(--font-sans); font-size: var(--fs-small);  line-height: var(--lh-normal); color: var(--fg-2); }
+.dc-caption   { font-family: var(--font-sans); font-size: var(--fs-caption); line-height: var(--lh-snug); color: var(--fg-2); letter-spacing: var(--tracking-wide); text-transform: uppercase; }
+.dc-label     { font-family: var(--font-sans); font-size: var(--fs-small);  font-weight: 500; color: var(--fg-1); letter-spacing: var(--tracking-snug); }
+.dc-quote     { font-family: var(--font-serif); font-style: italic; font-size: var(--fs-h3); color: var(--fg-1); line-height: var(--lh-snug); }
+.dc-mono      { font-family: var(--font-mono); font-size: var(--fs-small); color: var(--fg-2); }
+
+/* =============================================================
+   Utility: surface
+   ============================================================= */
+.dc-card {
+  background: var(--bg-2);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-1);
+}

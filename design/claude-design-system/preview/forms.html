@@ -1,0 +1,22 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="card.css">
+<style>
+  .field { display: flex; flex-direction: column; gap: 6px; }
+  label { font-size: 12px; font-weight: 500; color: var(--fg-1); }
+  input, textarea, select { font-family: var(--font-sans); font-size: 14px; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border-1); background: var(--bg-2); color: var(--fg-1); outline: none; transition: border 140ms, box-shadow 140ms; }
+  input:focus, textarea:focus, select:focus { border-color: var(--dc-sage); box-shadow: 0 0 0 3px color-mix(in oklch, var(--dc-sage) 25%, transparent); }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .helper { font-size: 11px; color: var(--fg-2); }
+  .switch { width: 40px; height: 24px; border-radius: 999px; background: var(--dc-sage); position: relative; cursor: pointer; }
+  .switch::after { content:""; position:absolute; top:3px; left:19px; width:18px; height:18px; border-radius:999px; background:var(--fg-on-accent); box-shadow: 0 1px 2px rgba(0,0,0,.25); transition: left 140ms; }
+  .switch.off { background: var(--dc-taupe-deep); } .switch.off::after { left: 3px; }
+  .row { display: flex; justify-content: space-between; align-items: center; }
+</style></head><body>
+<div class="card">
+  <div class="grid">
+    <div class="field"><label>What did you eat?</label><input placeholder="Oatmeal, berries, coffee" /></div>
+    <div class="field"><label>Duration</label><select><option>35 min</option><option>45 min</option></select></div>
+  </div>
+  <div class="field"><label>Note</label><textarea rows="2" placeholder="Anything to remember…"></textarea><span class="helper">Saved automatically to today.</span></div>
+  <div class="row"><span class="dc-label">Remind me tomorrow</span><div class="switch"></div></div>
+  <div class="row"><span class="dc-label">Share with coach</span><div class="switch off"></div></div>
+</div></body></html>

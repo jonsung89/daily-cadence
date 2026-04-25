@@ -1,0 +1,44 @@
+[
+  {
+    "id": "inter",
+    "displayName": "Inter",
+    "source": "bundled",
+    "postscriptName": "Inter-Regular"
+  },
+  {
+    "id": "playfair",
+    "displayName": "Playfair Display",
+    "source": "bundled",
+    "postscriptName": "PlayfairDisplay-Regular"
+  },
+  {
+    "id": "new-york",
+    "displayName": "New York",
+    "source": "system",
+    "systemDesign": "serif"
+  },
+  {
+    "id": "sf-rounded",
+    "displayName": "SF Rounded",
+    "source": "system",
+    "systemDesign": "rounded"
+  },
+  {
+    "id": "baskerville",
+    "displayName": "Baskerville",
+    "source": "iosBuiltIn",
+    "postscriptName": "Baskerville"
+  },
+  {
+    "id": "american-typewriter",
+    "displayName": "American Typewriter",
+    "source": "iosBuiltIn",
+    "postscriptName": "AmericanTypewriter"
+  },
+  {
+    "id": "noteworthy",
+    "displayName": "Noteworthy",
+    "source": "iosBuiltIn",
+    "postscriptName": "Noteworthy-Light"
+  }
+]

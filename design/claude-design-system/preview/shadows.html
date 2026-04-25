@@ -1,0 +1,18 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="card.css">
+<style>
+  .row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; padding: 8px; }
+  .b { background: var(--bg-2); border-radius: 10px; height: 80px; display:flex; align-items:center; justify-content:center; font-size:12px; color: var(--fg-2); }
+  .s1 { box-shadow: var(--shadow-1); border:1px solid var(--border-1); }
+  .s2 { box-shadow: var(--shadow-2); }
+  .s3 { box-shadow: var(--shadow-3); }
+  .sh { box-shadow: var(--shadow-hover); transform: translateY(-2px); }
+  .meta { font-family: var(--font-mono); font-size: 10px; color: var(--fg-2); text-align: center; margin-top: 8px; }
+</style></head><body>
+<div class="card">
+  <div class="row">
+    <div><div class="b s1">resting</div><div class="meta">shadow-1</div></div>
+    <div><div class="b s2">floating</div><div class="meta">shadow-2</div></div>
+    <div><div class="b s3">modal</div><div class="meta">shadow-3</div></div>
+    <div><div class="b sh">hover lift</div><div class="meta">hover</div></div>
+  </div>
+</div></body></html>

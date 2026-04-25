@@ -1,0 +1,40 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="card.css">
+<style>
+  .section-title { font-family: var(--font-serif); font-size: 14px; font-weight: 600; color: var(--fg-1); letter-spacing: -0.01em; margin: 0 0 8px; display: flex; align-items: baseline; gap: 10px; }
+  .section-title .meta { font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--fg-2); font-weight: 400; }
+  .section + .section { margin-top: 18px; }
+  .grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; }
+  .sw { border-radius: 10px; aspect-ratio: 1.3/1; border: 1px solid var(--border-1); padding: 10px; display: flex; flex-direction: column; justify-content: space-between; }
+  .sw .name { font-size: 12px; font-weight: 600; }
+  .sw .hex { font-family: var(--font-mono); font-size: 10px; opacity: 0.75; }
+</style></head><body>
+<div class="card">
+
+  <div class="section">
+    <div class="section-title">Neutrals <span class="meta">Foundation</span></div>
+    <div class="grid">
+      <div class="sw" style="background:#F5F3F0;color:#2C2620;"><span class="name">Cream</span><span class="hex">#F5F3F0</span></div>
+      <div class="sw" style="background:#FFFFFF;color:#2C2620;border-color:#E3DFD9;"><span class="name">White</span><span class="hex">#FFFFFF</span></div>
+      <div class="sw" style="background:#EAE6E1;color:#2C2620;"><span class="name">Taupe</span><span class="hex">#EAE6E1</span></div>
+      <div class="sw" style="background:#D9D3CB;color:#2C2620;"><span class="name">Taupe deep</span><span class="hex">#D9D3CB</span></div>
+      <div class="sw" style="background:#8B8680;color:#FFF;"><span class="name">Warm gray</span><span class="hex">#8B8680</span></div>
+      <div class="sw" style="background:#2C2620;color:#F5F3F0;"><span class="name">Ink</span><span class="hex">#2C2620</span></div>
+      <div class="sw" style="background:#5A7B6D;color:#FFF;"><span class="name">Sage</span><span class="hex">#5A7B6D</span></div>
+      <div class="sw" style="background:#3F5A4F;color:#FFF;"><span class="name">Sage deep</span><span class="hex">#3F5A4F</span></div>
+      <div class="sw" style="background:#D9E3DD;color:#2C2620;"><span class="name">Sage soft</span><span class="hex">#D9E3DD</span></div>
+      <div class="sw" style="background:#E3DFD9;color:#2C2620;"><span class="name">Border</span><span class="hex">#E3DFD9</span></div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Accents <span class="meta">For highlights, chips, illustrative moments</span></div>
+    <div class="grid">
+      <div class="sw" style="background:#CBCADA;color:#2C2620;"><span class="name">Periwinkle</span><span class="hex">#CBCADA</span></div>
+      <div class="sw" style="background:#E6E5EE;color:#2C2620;"><span class="name">Periwinkle soft</span><span class="hex">#E6E5EE</span></div>
+      <div class="sw" style="background:#F2C9C4;color:#2C2620;"><span class="name">Blush</span><span class="hex">#F2C9C4</span></div>
+      <div class="sw" style="background:#F9E2DF;color:#2C2620;"><span class="name">Blush soft</span><span class="hex">#F9E2DF</span></div>
+      <div class="sw" style="background:#E8B86B;color:#2C2620;"><span class="name">Honey</span><span class="hex">#E8B86B</span></div>
+    </div>
+  </div>
+
+</div></body></html>

@@ -1,0 +1,66 @@
+[
+  {
+    "id": "sage",
+    "name": "Sage",
+    "description": "Original. Warm green, grounded.",
+    "primary": { "light": "#5A7B6D", "dark": "#7FA594" },
+    "deep":    { "light": "#3F5A4F", "dark": "#A3C2B4" },
+    "soft":    { "light": "#D9E3DD", "dark": "#2E3F37" }
+  },
+  {
+    "id": "blush",
+    "name": "Blush",
+    "description": "Pretty pink. Clean and cheerful.",
+    "primary": { "light": "#E89BB1", "dark": "#F2BACB" },
+    "deep":    { "light": "#C7718B", "dark": "#F8D5E0" },
+    "soft":    { "light": "#FBE1E9", "dark": "#3F2930" }
+  },
+  {
+    "id": "coral",
+    "name": "Coral",
+    "description": "Warm coral. Sunlit and soft.",
+    "primary": { "light": "#D67B6F", "dark": "#E89A8E" },
+    "deep":    { "light": "#B55D51", "dark": "#F2B3A6" },
+    "soft":    { "light": "#F4DBD5", "dark": "#3A2420" }
+  },
+  {
+    "id": "mulberry",
+    "name": "Mulberry",
+    "description": "Deep wine-berry. Rich and grounded.",
+    "primary": { "light": "#7D3F4D", "dark": "#B36F7E" },
+    "deep":    { "light": "#5B2935", "dark": "#C98898" },
+    "soft":    { "light": "#E8D4D7", "dark": "#2B1A1F" }
+  },
+  {
+    "id": "taupe",
+    "name": "Taupe",
+    "description": "Warm stone. Quiet neutral, subtle presence.",
+    "primary": { "light": "#9E9289", "dark": "#BDB2A8" },
+    "deep":    { "light": "#7B7269", "dark": "#D4CBC0" },
+    "soft":    { "light": "#E6E0D8", "dark": "#2F2B26" }
+  },
+  {
+    "id": "lavender",
+    "name": "Lavender",
+    "description": "Soft purple. Reflective and gentle.",
+    "primary": { "light": "#9C8AC0", "dark": "#C4B3DB" },
+    "deep":    { "light": "#7A659F", "dark": "#D8C9E6" },
+    "soft":    { "light": "#E6DEF0", "dark": "#2D2939" }
+  },
+  {
+    "id": "storm",
+    "name": "Storm",
+    "description": "Cool blue-gray. Focused and composed.",
+    "primary": { "light": "#6D8AA1", "dark": "#9BAFC2" },
+    "deep":    { "light": "#4E6D86", "dark": "#BECFDB" },
+    "soft":    { "light": "#D7DFE8", "dark": "#26323A" }
+  },
+  {
+    "id": "teal",
+    "name": "Teal",
+    "description": "Blue-green. Coastal and clear.",
+    "primary": { "light": "#3F7A7C", "dark": "#6BA6A8" },
+    "deep":    { "light": "#285353", "dark": "#92C2C4" },
+    "soft":    { "light": "#CEDEDF", "dark": "#1F2F30" }
+  }
+]

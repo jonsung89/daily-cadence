@@ -1,0 +1,142 @@
+<!doctype html><html><head><meta charset="utf-8">
+<link rel="stylesheet" href="card.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@800&display=swap" rel="stylesheet">
+<style>
+  body { font-family: var(--font-serif); }
+  .wrap { max-width: 1120px; margin: 0 auto; }
+
+  .hdr { font-family: var(--font-serif); font-size: 22px; font-weight: 600; color: var(--fg-1); margin-bottom: 4px; letter-spacing: -0.01em; text-align: center; }
+  .intro { font-family: var(--font-sans); font-size: 13px; color: var(--fg-2); line-height: 1.55; margin: 0 auto 18px; max-width: 62ch; text-align: center; }
+  .swatch-row { display: flex; align-items: center; justify-content: center; gap: 10px; font-family: var(--font-mono); font-size: 10px; color: var(--fg-2); letter-spacing: 0.08em; margin: 0 auto 30px; }
+  .sw { width: 14px; height: 14px; border-radius: 4px; border: 1px solid rgba(44,38,32,0.08); }
+
+  /* The centered tile system. The opening double quote sits in the upper half
+     of the em-box visually, so translate(-50%,-50%) is NOT visually centered.
+     We nudge DOWN by ~0.18em so the ink center aligns with the tile center. */
+  .tile {
+    background: #5A7B6D;
+    border-radius: 33%;
+    position: relative;
+    flex: 0 0 auto;
+    display: inline-block;
+  }
+  .tile.ink { background: #EAE6E1; }
+  .mark {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, calc(-50% + 0.18em));
+    font-family: 'Manrope', system-ui, sans-serif;
+    font-weight: 800;
+    line-height: 1;
+    color: #EAE6E1;
+  }
+  .tile.ink .mark { color: #2C2620; }
+
+  /* Hero showcase */
+  .hero-block {
+    background: var(--dc-cream);
+    border: 1px solid var(--border-1);
+    border-radius: 18px;
+    padding: 40px 32px 36px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 24px;
+    margin-bottom: 22px;
+  }
+  .hero-tile { width: 128px; height: 128px; }
+  .hero-tile .mark { font-size: 132px; }
+  .wordmark { font-family: var(--font-serif); font-weight: 500; font-size: 30px; letter-spacing: -0.01em; color: var(--fg-1); }
+
+  /* Scale + context row */
+  .row {
+    background: var(--dc-cream);
+    border: 1px solid var(--border-1);
+    border-radius: 14px;
+    padding: 28px 24px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 28px;
+    align-items: flex-end;
+    justify-content: center;
+  }
+  .size-cell { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+  .size-cell .px { font-family: var(--font-mono); font-size: 9px; color: var(--fg-2); letter-spacing: 0.12em; }
+  .ctx { background: var(--dc-ink); padding: 14px 18px; border-radius: 12px; display: flex; align-items: center; gap: 12px; }
+  .ctx .n { font-family: var(--font-serif); font-weight: 500; font-size: 17px; color: var(--dc-cream); white-space: nowrap; }
+
+  /* Alignment check: faint crosshairs so you can SEE it's centered */
+  .tile.debug::before, .tile.debug::after {
+    content: ''; position: absolute; background: rgba(255,255,255,0.35); pointer-events: none;
+  }
+  .tile.debug::before { left: 0; right: 0; top: 50%; height: 1px; }
+  .tile.debug::after { top: 0; bottom: 0; left: 50%; width: 1px; }
+
+  .note { text-align: center; font-family: var(--font-mono); font-size: 10px; color: var(--fg-2); letter-spacing: 0.1em; text-transform: uppercase; margin-top: 8px; }
+</style></head><body>
+<div class="wrap">
+<div class="card">
+  <div class="hdr">Daily Cadence — locked</div>
+  <p class="intro">Manrope 800 opening double quote, centered horizontally <em>and</em> vertically in a soft-radius sage tile (33%). The glyph sits in the upper half of its em-box by default, so it's nudged down ~0.18em to true-center the <em>ink</em> in the tile.</p>
+  <div class="swatch-row">
+    <span class="sw" style="background:#5A7B6D"></span> sage
+    <span class="sw" style="background:#EAE6E1"></span> pale taupe
+    <span class="sw" style="background:#2C2620"></span> ink
+    <span class="sw" style="background:#F5F3F0"></span> cream
+  </div>
+
+  <!-- Hero -->
+  <div class="hero-block">
+    <div class="tile hero-tile">
+      <span class="mark">&ldquo;</span>
+    </div>
+    <div class="wordmark">Daily Cadence</div>
+  </div>
+
+  <!-- Scale ladder -->
+  <div class="row">
+    <div class="size-cell">
+      <div class="tile" style="width:16px; height:16px;"><span class="mark" style="font-size:16px;">&ldquo;</span></div>
+      <span class="px">16 · favicon</span>
+    </div>
+    <div class="size-cell">
+      <div class="tile" style="width:24px; height:24px;"><span class="mark" style="font-size:25px;">&ldquo;</span></div>
+      <span class="px">24</span>
+    </div>
+    <div class="size-cell">
+      <div class="tile" style="width:32px; height:32px;"><span class="mark" style="font-size:33px;">&ldquo;</span></div>
+      <span class="px">32</span>
+    </div>
+    <div class="size-cell">
+      <div class="tile" style="width:48px; height:48px;"><span class="mark" style="font-size:50px;">&ldquo;</span></div>
+      <span class="px">48</span>
+    </div>
+    <div class="size-cell">
+      <div class="tile" style="width:72px; height:72px;"><span class="mark" style="font-size:74px;">&ldquo;</span></div>
+      <span class="px">72 · app icon</span>
+    </div>
+  </div>
+
+  <!-- In-context: ink + light -->
+  <div class="row" style="margin-top:18px;">
+    <div class="ctx">
+      <div class="tile ink" style="width:30px; height:30px;"><span class="mark" style="font-size:31px;">&ldquo;</span></div>
+      <span class="n">Daily Cadence</span>
+    </div>
+    <div class="ctx" style="background:#5A7B6D;">
+      <div class="tile ink" style="width:30px; height:30px;"><span class="mark" style="font-size:31px;">&ldquo;</span></div>
+      <span class="n" style="color:#F5F3F0;">Daily Cadence</span>
+    </div>
+    <div class="ctx" style="background:#F5F3F0; border:1px solid var(--border-1);">
+      <div class="tile" style="width:30px; height:30px;"><span class="mark" style="font-size:31px;">&ldquo;</span></div>
+      <span class="n" style="color:#2C2620;">Daily Cadence</span>
+    </div>
+  </div>
+
+  <p class="note">Horizontally + vertically centered — ink, not em-box</p>
+</div>
+</div>
+</body></html>

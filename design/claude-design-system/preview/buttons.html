@@ -1,0 +1,31 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="card.css">
+<style>
+  .row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+  button { font-family: var(--font-sans); font-size: 14px; font-weight: 500; padding: 10px 18px; border-radius: 10px; border: 1px solid transparent; cursor: pointer; transition: all 140ms cubic-bezier(0.2,0.8,0.2,1); }
+  .primary { background: var(--dc-sage); color: var(--fg-on-accent); }
+  .primary:hover { background: var(--dc-sage-deep); }
+  .secondary { background: var(--bg-2); color: var(--fg-1); border-color: var(--border-1); }
+  .secondary:hover { background: var(--dc-taupe); }
+  .ghost { background: transparent; color: var(--fg-1); }
+  .ghost:hover { background: var(--dc-taupe); }
+  .danger { background: transparent; color: var(--dc-workout); border-color: var(--dc-workout-soft); }
+  .danger:hover { background: var(--dc-workout-soft); }
+  .pill { border-radius: 999px; padding: 8px 14px; font-size: 13px; background: var(--bg-2); border: 1px solid var(--border-1); color: var(--fg-1); }
+  .pill.active { background: var(--dc-sage); color: var(--fg-on-accent); border-color: var(--dc-sage); }
+  .fab { width: 56px; height: 56px; border-radius: 999px; background: var(--dc-sage); color: var(--fg-on-accent); font-size: 24px; box-shadow: var(--shadow-2); display:inline-flex; align-items:center; justify-content:center; border:0; cursor:pointer; }
+</style></head><body>
+<div class="card">
+  <div class="row">
+    <button class="primary">Save note</button>
+    <button class="secondary">Cancel</button>
+    <button class="ghost">Skip for today</button>
+    <button class="danger">Delete</button>
+  </div>
+  <div class="row">
+    <button class="pill active">Day</button>
+    <button class="pill">Week</button>
+    <button class="pill">Month</button>
+    <button class="pill">Year</button>
+    <button class="fab" aria-label="add">+</button>
+  </div>
+</div></body></html>

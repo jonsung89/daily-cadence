@@ -1,4 +1,4 @@
-# Daily Cadence 🎵
+# DailyCadence 🎵
 
 A beautiful day logger inspired by Google Keep with built-in progress tracking.
 
@@ -18,9 +18,10 @@ Log your workouts, meals, sleep, mood, and activities throughout your day on a c
 
 ## Tech Stack
 
-- **iOS:** Swift + SwiftUI
-- **Backend:** Firebase (Firestore, Cloud Functions)
-- **Design System:** Custom (Anthropic Academy inspired)
+- **iOS:** Swift + SwiftUI (iOS 17+), SwiftData for local cache, Swift Charts for progress graphs
+- **Backend:** Supabase (Postgres + Auth) — called directly from iOS via the Supabase Swift SDK
+- **Auth:** Sign in with Apple + Google (via Supabase OAuth)
+- **Design System:** Custom (Anthropic Academy inspired) — see `design/`
 
 ## Getting Started
 

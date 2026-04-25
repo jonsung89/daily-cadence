@@ -1,48 +1,64 @@
-# Daily Cadence Architecture
+# DailyCadence Architecture
 
 ## Project Structure
+
+```
 daily-cadence/
 ├── apps/
 │   └── ios/                    # Swift + SwiftUI iOS app
-│       ├── DailyCadence/       # (Will be created by Claude Code)
-│       ├── DailyCadence.xcodeproj/
-│       └── ...
+│       └── DailyCadence/       # Xcode project (created in Xcode)
 ├── packages/
-│   └── backend/                # Firebase Cloud Functions + Firestore
-│       ├── functions/
-│       ├── models/
-│       └── ...
-├── design/                      # Design system & branding
-│   ├── Daily_Cadence_Design_Branding_Guide.md
-│   ├── Cadence_App_Name_Documentation.md
-│   └── Daily_Cadence_Marketing_Document.md
-├── docs/                        # Documentation
-│   ├── ARCHITECTURE.md          # (this file)
-│   └── PRODUCT_SPEC.md
+│   └── backend/                # Reserved for a future Node/Next.js service (not used in Phase 1)
+├── supabase/
+│   └── migrations/             # SQL schema migrations (created when schema work begins)
+├── design/                     # Design system & branding
+│   └── Daily_Cadence_Design_Branding_Guide.md
+├── docs/
+│   └── ARCHITECTURE.md         # this file
 └── README.md
+```
 
 ## Phase 1: iOS MVP
 
+**Scope**
 - Daily timeline view
-- Note creation/editing
-- Exercise tracking with progress
+- Note creation / editing with typed cards (Workout, Meal, Sleep, Mood, Activity)
+- Exercise tracking with Swift Charts progress visualization
 - Calendar view
 - Customizable dashboard
-- Firebase backend
+- Supabase auth + data sync
 
-## Phase 2: Android
+**iOS stack**
+- SwiftUI, Swift 5.9+
+- iOS 17.0 minimum deployment target
+- `@Observable` macro for view models
+- `NavigationStack` for navigation
+- SwiftData for offline / local cache
+- Swift Charts for progress graphs
+- `async`/`await` for all I/O
 
-- Port to Android (React Native or native)
-- Feature parity with iOS
+**Backend (Phase 1 = Supabase direct, no middle-tier)**
+- Supabase Postgres with Row-Level Security per user
+- Supabase Auth: Sign in with Apple (`AuthenticationServices`) + Google (via Supabase OAuth)
+- Supabase Swift SDK (`supabase-community/supabase-swift`) called directly from iOS
+- Schema maintained as SQL migrations in `supabase/migrations/`
 
-## Phase 3: Web Dashboard
+**Deployment**
+- iOS → TestFlight
+- DB / auth → Supabase cloud (free tier)
 
-- Analytics and progress viewing
-- Settings management
-- Export data
+## Phase 2+: backend service
 
-## Development
+When server-side logic is needed (scheduled jobs, aggregations, webhooks, integrations), add a **Next.js (App Router) service on Vercel** as the recommended path. Express remains acceptable. The `packages/backend/` folder is the home for this service when it's introduced.
 
-- iOS: Swift + SwiftUI
-- Backend: Firebase (Firestore, Cloud Functions, Auth)
-- Version Control: GitHub
+## Phase 3+: other surfaces
+
+- Android port (native or React Native — to be decided)
+- Web dashboard for analytics / settings (likely the same Next.js app as the backend)
+
+## Development tooling
+
+- Xcode 15+ on macOS
+- Swift Package Manager for iOS dependencies (Supabase Swift SDK)
+- Supabase CLI for local DB + migrations
+- GitHub for version control

@@ -1,0 +1,16 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="card.css">
+<style>
+  .row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+  .r { background: var(--bg-2); border: 1px solid var(--border-1); height: 72px; display: flex; align-items: center; justify-content: center; }
+  .r6 { border-radius: 6px; } .r10 { border-radius: 10px; } .r14 { border-radius: 14px; } .rp { border-radius: 999px; }
+  .meta { font-family: var(--font-mono); font-size: 10px; color: var(--fg-2); letter-spacing: 0.04em; text-align: center; margin-top: 6px; }
+  .tag { font-family: var(--font-sans); font-size: 12px; color: var(--fg-2); }
+</style></head><body>
+<div class="card">
+  <div class="row">
+    <div><div class="r r6"><span class="tag">chips · inputs</span></div><div class="meta">sm · 6px</div></div>
+    <div><div class="r r10"><span class="tag">cards · buttons</span></div><div class="meta">md · 10px · default</div></div>
+    <div><div class="r r14"><span class="tag">hero · sheets</span></div><div class="meta">lg · 14px</div></div>
+    <div><div class="r rp"><span class="tag">pills · FAB</span></div><div class="meta">pill · 999px</div></div>
+  </div>
+</div></body></html>

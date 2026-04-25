@@ -1,0 +1,136 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="card.css">
+<style>
+  .intro { font-family: var(--font-sans); font-size: 12px; color: var(--fg-2); line-height: 1.55; margin: 0 0 18px; max-width: 62ch; }
+  .intro em { font-style: italic; color: var(--fg-1); }
+
+  .row {
+    display: grid;
+    grid-template-columns: 56px 1.1fr 1.4fr 1.2fr;
+    align-items: stretch;
+    gap: 14px;
+    padding: 14px 0;
+    border-bottom: 1px solid var(--border-1);
+  }
+  .row:last-child { border-bottom: 0; }
+
+  .block {
+    border-radius: 12px;
+    aspect-ratio: 1 / 1;
+    display: flex;
+    align-items: flex-end;
+    padding: 8px;
+    color: #F5F3F0;
+    font-family: var(--font-mono);
+    font-size: 9px;
+    letter-spacing: 0.08em;
+  }
+
+  .meta { display: flex; flex-direction: column; justify-content: center; gap: 3px; }
+  .name { font-family: var(--font-serif); font-style: italic; font-weight: 600; font-size: 17px; color: var(--fg-1); letter-spacing: -0.01em; }
+  .use  { font-family: var(--font-sans); font-size: 12px; color: var(--fg-2); line-height: 1.4; }
+
+  .tokens { display: flex; flex-direction: column; justify-content: center; gap: 6px; font-family: var(--font-mono); font-size: 10px; color: var(--fg-2); }
+  .tokens .base { color: var(--fg-1); }
+  .tokens .soft-swatch { display: inline-block; width: 10px; height: 10px; border-radius: 3px; vertical-align: middle; margin-right: 6px; border: 1px solid rgba(44,38,32,0.08); }
+
+  .example {
+    display: flex; flex-direction: column; justify-content: center; gap: 6px;
+  }
+  .chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 4px 10px; border-radius: 999px;
+    font-family: var(--font-sans); font-size: 11px; font-weight: 500; color: var(--fg-1);
+    align-self: flex-start;
+  }
+  .chip .ddot { width: 7px; height: 7px; border-radius: 999px; }
+  .sample { font-family: var(--font-sans); font-size: 11px; color: var(--fg-2); }
+</style></head><body>
+<div class="card">
+  <p class="intro">Reworked to feel more like <em>natural pigments</em> than stock tag colors: dustier hues, higher ink content, less saturation. Named from materials and foods rather than ROYGBIV. Soft tints are proper chromatic tints of each base — not off-white — so chips feel like part of a family.</p>
+
+  <!-- CLAY — workouts -->
+  <div class="row">
+    <div class="block" style="background:#B05B3B;">workout</div>
+    <div class="meta">
+      <div class="name">Clay</div>
+      <div class="use">Workouts, strength, movement. A burnt-sienna — warmer and earthier than the standard alert red.</div>
+    </div>
+    <div class="tokens">
+      <div><span class="soft-swatch" style="background:#B05B3B;"></span><span class="base">#B05B3B</span> · Clay</div>
+      <div><span class="soft-swatch" style="background:#EED7CB;"></span>#EED7CB · Clay tint</div>
+    </div>
+    <div class="example">
+      <span class="chip" style="background:#EED7CB;"><span class="ddot" style="background:#B05B3B;"></span>35 min run</span>
+      <span class="sample" style="color:#8C4831;">Heart rate avg 142 bpm</span>
+    </div>
+  </div>
+
+  <!-- TURMERIC — meals -->
+  <div class="row">
+    <div class="block" style="background:#C9893A;">meal</div>
+    <div class="meta">
+      <div class="name">Turmeric</div>
+      <div class="use">Meals, nutrition, intake. Deeper than butter-gold — it holds up on cream without shouting.</div>
+    </div>
+    <div class="tokens">
+      <div><span class="soft-swatch" style="background:#C9893A;"></span><span class="base">#C9893A</span> · Turmeric</div>
+      <div><span class="soft-swatch" style="background:#F3E3C3;"></span>#F3E3C3 · Turmeric tint</div>
+    </div>
+    <div class="example">
+      <span class="chip" style="background:#F3E3C3;"><span class="ddot" style="background:#C9893A;"></span>Oatmeal, berries</span>
+      <span class="sample" style="color:#8A5F26;">420 kcal · 14g protein</span>
+    </div>
+  </div>
+
+  <!-- DUSK — sleep -->
+  <div class="row">
+    <div class="block" style="background:#3E4A64;">sleep</div>
+    <div class="meta">
+      <div class="name">Dusk</div>
+      <div class="use">Sleep, rest, winding down. A dusty near-navy — quieter and more nocturnal than cadet blue.</div>
+    </div>
+    <div class="tokens">
+      <div><span class="soft-swatch" style="background:#3E4A64;"></span><span class="base">#3E4A64</span> · Dusk</div>
+      <div><span class="soft-swatch" style="background:#D6DAE3;"></span>#D6DAE3 · Dusk tint</div>
+    </div>
+    <div class="example">
+      <span class="chip" style="background:#D6DAE3;"><span class="ddot" style="background:#3E4A64;"></span>7h 20m</span>
+      <span class="sample" style="color:#2E3750;">Asleep 11:42 · Awake 7:02</span>
+    </div>
+  </div>
+
+  <!-- PLUM — mood -->
+  <div class="row">
+    <div class="block" style="background:#8B6B85;">mood</div>
+    <div class="meta">
+      <div class="name">Plum</div>
+      <div class="use">Mood, feelings, reflection. Dusty mauve — adult and a little melancholic, not lavender candy.</div>
+    </div>
+    <div class="tokens">
+      <div><span class="soft-swatch" style="background:#8B6B85;"></span><span class="base">#8B6B85</span> · Plum</div>
+      <div><span class="soft-swatch" style="background:#E5D9E2;"></span>#E5D9E2 · Plum tint</div>
+    </div>
+    <div class="example">
+      <span class="chip" style="background:#E5D9E2;"><span class="ddot" style="background:#8B6B85;"></span>Focused</span>
+      <span class="sample" style="color:#6A4F66;">Steady energy · light anxious</span>
+    </div>
+  </div>
+
+  <!-- MOSS — activity -->
+  <div class="row">
+    <div class="block" style="background:#7B8B52;">activity</div>
+    <div class="meta">
+      <div class="name">Moss</div>
+      <div class="use">Activity, walks, daily movement. Olive-leaning — clearly distinct from sage without clashing with it.</div>
+    </div>
+    <div class="tokens">
+      <div><span class="soft-swatch" style="background:#7B8B52;"></span><span class="base">#7B8B52</span> · Moss</div>
+      <div><span class="soft-swatch" style="background:#E1E5D0;"></span>#E1E5D0 · Moss tint</div>
+    </div>
+    <div class="example">
+      <span class="chip" style="background:#E1E5D0;"><span class="ddot" style="background:#7B8B52;"></span>Walk, 2.3mi</span>
+      <span class="sample" style="color:#5B683D;">7,842 steps today</span>
+    </div>
+  </div>
+
+</div></body></html>

@@ -1,0 +1,97 @@
+[
+  {
+    "id": "neutral",
+    "name": "Neutral",
+    "description": "Taupes, warm grays, and grounded earth tones.",
+    "swatches": [
+      { "id": "neutral.linen",     "name": "Linen",     "light": "#D9CDB9", "dark": "#8A7E6A" },
+      { "id": "neutral.mushroom",  "name": "Mushroom",  "light": "#C5BBAD", "dark": "#7F756A" },
+      { "id": "neutral.sand",      "name": "Sand",      "light": "#C8AC83", "dark": "#8F7857" },
+      { "id": "neutral.taupe",     "name": "Taupe",     "light": "#B0A399", "dark": "#7B6F66" },
+      { "id": "neutral.stone",     "name": "Stone",     "light": "#A89992", "dark": "#7E726B" },
+      { "id": "neutral.dove",      "name": "Dove",      "light": "#B5B0A8", "dark": "#7E796F" },
+      { "id": "neutral.driftwood", "name": "Driftwood", "light": "#998E81", "dark": "#7C7164" },
+      { "id": "neutral.pebble",    "name": "Pebble",    "light": "#8E847E", "dark": "#A89E97" },
+      { "id": "neutral.slate",     "name": "Slate",     "light": "#6E6F71", "dark": "#9D9EA0" },
+      { "id": "neutral.charcoal",  "name": "Charcoal",  "light": "#4A4544", "dark": "#B5ADA8" },
+      { "id": "neutral.cocoa",     "name": "Cocoa",     "light": "#876652", "dark": "#A88770" },
+      { "id": "neutral.clay",      "name": "Clay",      "light": "#B05B3B", "dark": "#D47A58" }
+    ]
+  },
+  {
+    "id": "pastel",
+    "name": "Pastel",
+    "description": "Soft chromas with enough saturation to read at low opacity. Heavy on blush pinks.",
+    "swatches": [
+      { "id": "pastel.mint",       "name": "Mint",        "light": "#6FC598", "dark": "#3A8961" },
+      { "id": "pastel.aqua",       "name": "Aqua",        "light": "#7CCDC0", "dark": "#3F8C82" },
+      { "id": "pastel.sky",        "name": "Sky",         "light": "#6EB8DE", "dark": "#3F7BA0" },
+      { "id": "pastel.lavender",   "name": "Lavender",    "light": "#A88FD2", "dark": "#6D54A3" },
+      { "id": "pastel.lilac",      "name": "Lilac",       "light": "#BC8FCD", "dark": "#7F5694" },
+      { "id": "pastel.baby-pink",  "name": "Baby pink",   "light": "#F3C1D0", "dark": "#A47588" },
+      { "id": "pastel.blush",      "name": "Blush",       "light": "#ECA2B1", "dark": "#A96772" },
+      { "id": "pastel.rose",       "name": "Rose",        "light": "#ED8B96", "dark": "#A85763" },
+      { "id": "pastel.dusty-rose", "name": "Dusty rose",  "light": "#D89BA8", "dark": "#8F6571" },
+      { "id": "pastel.peach",      "name": "Peach",       "light": "#F0976B", "dark": "#A56340" },
+      { "id": "pastel.coral",      "name": "Coral",       "light": "#ED8E72", "dark": "#A35A41" },
+      { "id": "pastel.butter",     "name": "Butter",      "light": "#ECCB6A", "dark": "#9D8439" }
+    ]
+  },
+  {
+    "id": "bold",
+    "name": "Bold",
+    "description": "Saturated, confident — tempered by card opacity.",
+    "swatches": [
+      { "id": "bold.crimson",    "name": "Crimson",   "light": "#9E2840", "dark": "#C36480" },
+      { "id": "bold.rust",       "name": "Rust",      "light": "#C85A3F", "dark": "#D97556" },
+      { "id": "bold.brick",      "name": "Brick",     "light": "#A04A35", "dark": "#C7674F" },
+      { "id": "bold.burgundy",   "name": "Burgundy",  "light": "#7E2E3F", "dark": "#B05E70" },
+      { "id": "bold.marigold",   "name": "Marigold",  "light": "#E5A050", "dark": "#EFB876" },
+      { "id": "bold.mustard",    "name": "Mustard",   "light": "#D4A82D", "dark": "#E3BF52" },
+      { "id": "bold.forest",     "name": "Forest",    "light": "#2F6B4D", "dark": "#5D9B7C" },
+      { "id": "bold.emerald",    "name": "Emerald",   "light": "#2E7D5B", "dark": "#5FA683" },
+      { "id": "bold.teal",       "name": "Teal",      "light": "#246F73", "dark": "#5DA1A4" },
+      { "id": "bold.slate-blue", "name": "Slate blue","light": "#3F5470", "dark": "#768FAB" },
+      { "id": "bold.cobalt",     "name": "Cobalt",    "light": "#2F4079", "dark": "#6878AC" },
+      { "id": "bold.plum",       "name": "Plum",      "light": "#5E3A6B", "dark": "#9576A1" }
+    ]
+  },
+  {
+    "id": "bright",
+    "name": "Bright",
+    "description": "Energetic chroma — for celebratory moments.",
+    "swatches": [
+      { "id": "bright.watermelon", "name": "Watermelon", "light": "#E84772", "dark": "#F07B98" },
+      { "id": "bright.pink",       "name": "Hot pink",   "light": "#ED5A91", "dark": "#F58AB1" },
+      { "id": "bright.magenta",    "name": "Magenta",    "light": "#D04098", "dark": "#E078B5" },
+      { "id": "bright.coral",      "name": "Coral",      "light": "#F27261", "dark": "#F69585" },
+      { "id": "bright.orange",     "name": "Orange",     "light": "#F27D3D", "dark": "#F69A63" },
+      { "id": "bright.yellow",     "name": "Yellow",     "light": "#F5DD2D", "dark": "#F8E55F" },
+      { "id": "bright.golden",     "name": "Golden",     "light": "#F2C94C", "dark": "#F6D879" },
+      { "id": "bright.lime",       "name": "Lime",       "light": "#A0CC53", "dark": "#BFDA80" },
+      { "id": "bright.mint",       "name": "Mint",       "light": "#5BC498", "dark": "#84D4B1" },
+      { "id": "bright.turquoise",  "name": "Turquoise",  "light": "#38B8B8", "dark": "#67CECE" },
+      { "id": "bright.sky",        "name": "Sky",        "light": "#5DAFE0", "dark": "#80C2E8" },
+      { "id": "bright.violet",     "name": "Violet",     "light": "#9D4FE0", "dark": "#BB7FE8" }
+    ]
+  },
+  {
+    "id": "classic",
+    "name": "Classic",
+    "description": "Universal named primaries — tuned to the warm cream backdrop.",
+    "swatches": [
+      { "id": "classic.red",    "name": "Red",    "light": "#C73E3F", "dark": "#D86F70" },
+      { "id": "classic.orange", "name": "Orange", "light": "#DD8442", "dark": "#E5A26B" },
+      { "id": "classic.yellow", "name": "Yellow", "light": "#E8BD3E", "dark": "#EFD06B" },
+      { "id": "classic.green",  "name": "Green",  "light": "#4A8A57", "dark": "#7AAD83" },
+      { "id": "classic.teal",   "name": "Teal",   "light": "#4A8A8B", "dark": "#7AB0B0" },
+      { "id": "classic.blue",   "name": "Blue",   "light": "#4470A8", "dark": "#7693C2" },
+      { "id": "classic.indigo", "name": "Indigo", "light": "#4F4DA0", "dark": "#7F7DB6" },
+      { "id": "classic.purple", "name": "Purple", "light": "#7E5099", "dark": "#A584B5" },
+      { "id": "classic.pink",   "name": "Pink",   "light": "#C25B83", "dark": "#D38AA6" },
+      { "id": "classic.brown",  "name": "Brown",  "light": "#8C5E3F", "dark": "#AC8A6F" },
+      { "id": "classic.gray",   "name": "Gray",   "light": "#888080", "dark": "#A8A09F" },
+      { "id": "classic.black",  "name": "Black",  "light": "#2C2620", "dark": "#F5F3F0" }
+    ]
+  }
+]

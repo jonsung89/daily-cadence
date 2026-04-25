@@ -1,0 +1,26 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="card.css">
+<style>
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .tl { background: var(--bg-2); border: 1px solid var(--border-1); border-radius: 10px; padding: 14px 16px; position: relative; }
+  .tl::before { content: ""; position: absolute; left: 22px; top: 16px; bottom: 16px; width: 1px; background: var(--border-1); }
+  .item { display: grid; grid-template-columns: 16px 1fr; gap: 12px; padding: 8px 0; position: relative; }
+  .dot { width: 10px; height: 10px; border-radius: 999px; margin-top: 6px; z-index: 1; box-shadow: 0 0 0 4px var(--bg-2); }
+  .t { font-family: var(--font-mono); font-size: 10px; color: var(--fg-2); }
+  .b { font-size: 13px; color: var(--fg-1); font-weight: 500; }
+  .empty { background: var(--bg-2); border: 1px dashed var(--border-2); border-radius: 10px; padding: 24px; text-align: center; display: flex; flex-direction: column; gap: 6px; align-items: center; }
+  .empty h4 { font-family: var(--font-serif); font-weight: 600; font-size: 18px; margin: 0; }
+  .empty p { color: var(--fg-2); font-size: 13px; margin: 0; }
+</style></head><body>
+<div class="card">
+  <div class="row">
+    <div class="tl">
+      <div class="item"><span class="dot" style="background:var(--dc-sleep)"></span><div><div class="t">6:45 AM</div><div class="b">Slept 7h 20m</div></div></div>
+      <div class="item"><span class="dot" style="background:var(--dc-workout)"></span><div><div class="t">7:12 AM</div><div class="b">Easy run · 35 min</div></div></div>
+      <div class="item"><span class="dot" style="background:var(--dc-meal)"></span><div><div class="t">8:30 AM</div><div class="b">Oatmeal, berries</div></div></div>
+    </div>
+    <div class="empty">
+      <h4>Nothing yet</h4>
+      <p>Tap + to add the first note of your day.</p>
+    </div>
+  </div>
+</div></body></html>

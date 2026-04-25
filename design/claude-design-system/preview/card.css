@@ -1,0 +1,41 @@
+/* Card frame shared by all preview/*.html files */
+@import url("../colors_and_type.css?v=2");
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg-1);
+  color: var(--fg-1);
+  font-family: var(--font-sans);
+  font-size: 14px;
+}
+.card {
+  width: 100%;
+  min-height: 100%;
+  padding: 20px 24px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.row { display: flex; align-items: center; gap: 10px; }
+.row.wrap { flex-wrap: wrap; }
+.stack { display: flex; flex-direction: column; gap: 8px; }
+.muted { color: var(--fg-2); font-size: 12px; }
+.mono { font-family: var(--font-mono); font-size: 11px; color: var(--fg-2); }
+.swatch {
+  border-radius: 10px;
+  border: 1px solid var(--border-1);
+  aspect-ratio: 1/1;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: flex-end;
+  padding: 8px;
+}
+.swatch .label {
+  font-size: 10px;
+  font-weight: 600;
+  color: inherit;
+  letter-spacing: 0.02em;
+}

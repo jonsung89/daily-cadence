@@ -1,9 +1,24 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets — local config with API keys, etc.
+*.xcconfig.local
+Config.local.xcconfig
+.env
+.env.local
+
 # Xcode
 #
 # gitignore contributors: remember to update Global/Xcode.gitignore, Objective-C.gitignore & Swift.gitignore
 
 ## User settings
 xcuserdata/
+*.xcuserstate
+
+## Derived data
+DerivedData/
+build/
 
 ## Obj-C/Swift specific
 *.hmap

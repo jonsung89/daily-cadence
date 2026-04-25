@@ -1,0 +1,18 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="card.css">
+<style>
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .note { background: var(--bg-2); border: 1px solid var(--border-1); border-radius: 10px; padding: 14px 16px; box-shadow: var(--shadow-1); display: flex; flex-direction: column; gap: 6px; }
+  .top { display: flex; align-items: center; gap: 8px; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--fg-2); font-weight: 600; }
+  .dot { width: 8px; height: 8px; border-radius: 999px; }
+  .title { font-family: var(--font-sans); font-size: 15px; font-weight: 600; color: var(--fg-1); }
+  .time { font-family: var(--font-mono); font-size: 11px; color: var(--fg-2); }
+  .body { font-size: 13px; color: var(--fg-2); line-height: 1.5; }
+</style></head><body>
+<div class="card">
+  <div class="grid">
+    <div class="note"><div class="top"><span class="dot" style="background:var(--dc-workout);"></span>Workout<span style="margin-left:auto;" class="time">7:12 am</span></div><div class="title">Easy run · 35 min</div><div class="body">Felt strong. Legs a little tight early on.</div></div>
+    <div class="note"><div class="top"><span class="dot" style="background:var(--dc-meal);"></span>Meal<span style="margin-left:auto;" class="time">8:30 am</span></div><div class="title">Breakfast</div><div class="body">Oatmeal, blueberries, coffee.</div></div>
+    <div class="note"><div class="top"><span class="dot" style="background:var(--dc-sleep);"></span>Sleep<span style="margin-left:auto;" class="time">last night</span></div><div class="title">7h 20m · solid</div><div class="body">Woke up once at 3am.</div></div>
+    <div class="note"><div class="top"><span class="dot" style="background:var(--dc-mood);"></span>Mood<span style="margin-left:auto;" class="time">10:05 am</span></div><div class="title">Focused</div><div class="body">Clear head. Deep work morning.</div></div>
+  </div>
+</div></body></html>

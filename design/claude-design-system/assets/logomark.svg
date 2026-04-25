@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 56 56" fill="none">
+  <!--
+    Daily Cadence logomark — sage tile + oversized opening double quote.
+    Mirrors `preview/logo.html`. Replaces the stale sunrise-over-horizon
+    SVG that shipped in the v2 export (Claude Design export sync bug).
+
+    Glyph: Manrope 800 "\u201C" (opening left double quote), nudged down
+    0.18em so the ink optically centers in the tile (quote marks sit in
+    the upper half of their em-box by default).
+  -->
+  <defs>
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Manrope:wght@800&amp;display=swap');
+      .dc-quote {
+        font-family: 'Manrope', system-ui, sans-serif;
+        font-weight: 800;
+        font-size: 58px;
+        fill: #EAE6E1;
+      }
+    </style>
+  </defs>
+  <rect width="56" height="56" rx="18.48" fill="#5A7B6D"/>
+  <text
+    x="28"
+    y="28"
+    text-anchor="middle"
+    dominant-baseline="central"
+    dy="0.18em"
+    class="dc-quote">&#8220;</text>
+</svg>

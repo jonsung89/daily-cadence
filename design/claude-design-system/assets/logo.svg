@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 56" fill="none">
+  <!--
+    Daily Cadence full logo — logomark + wordmark. Mirrors the hero
+    treatment in `preview/logo.html`:
+      - 56px sage tile, 33% border-radius
+      - Manrope 800 opening double quote, optically centered (+0.18em nudge)
+      - Playfair Display 500 wordmark, -0.01em tracking
+    Wordmark text reads "DailyCadence" (one word, locked canonical form —
+    overrides the design system README's historical two-word prose).
+
+    Replaces the stale sunrise-over-horizon SVG that shipped in the v2
+    Claude Design export (export sync bug — HTML preview had the new
+    design but the SVG asset wasn't regenerated).
+  -->
+  <defs>
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Manrope:wght@800&amp;family=Playfair+Display:wght@500&amp;display=swap');
+      .dc-quote {
+        font-family: 'Manrope', system-ui, sans-serif;
+        font-weight: 800;
+        font-size: 58px;
+        fill: #EAE6E1;
+      }
+      .dc-wordmark {
+        font-family: 'Playfair Display', Georgia, serif;
+        font-weight: 500;
+        font-size: 30px;
+        fill: #2C2620;
+        letter-spacing: -0.01em;
+      }
+    </style>
+  </defs>
+  <rect width="56" height="56" rx="18.48" fill="#5A7B6D"/>
+  <text
+    x="28"
+    y="28"
+    text-anchor="middle"
+    dominant-baseline="central"
+    dy="0.18em"
+    class="dc-quote">&#8220;</text>
+  <text x="74" y="38" class="dc-wordmark">DailyCadence</text>
+</svg>
