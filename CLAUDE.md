@@ -21,6 +21,7 @@ DailyCadence is a SwiftUI iOS day-logger app inspired by Google Keep with built-
   - Mobile UI kit CSS: `ui_kits/mobile/mobile.css`
   - Voice + visual foundations: `README.md`
 - Architecture + progress: `docs/ARCHITECTURE.md`, `docs/PROGRESS.md`
+- **Feature spec (cross-platform parity reference)**: `docs/FEATURES.md` — must stay in sync with any user-visible change. PROGRESS = changelog narrative; FEATURES = current-behavior spec. Both update together.
 - Supabase project ref: `zmlxnujheofgtrkrogdq` (secrets in Jon's 1Password, never in chat)
 - Wireframe + product specs live in Jon's Downloads folder (see memory `project_paths.md`)
 
@@ -29,7 +30,7 @@ DailyCadence is a SwiftUI iOS day-logger app inspired by Google Keep with built-
 1. **Brand is `DailyCadence`** — one word, always, in UI/docs/labels/copy. The design system README's two-word prose ("Daily Cadence") is historical — don't mirror it in our code or docs.
 2. **Verify, never guess** — schema, column names, API endpoints, PS font names. `Grep`/`Read` the source before referencing. Write unit tests for non-trivial logic.
 3. **Design System zip is visual source of truth** — for any UI/UX token (color, type, spacing, shadow, radius, motion, voice). The wireframe fills gaps the design system doesn't cover (specific screen layouts).
-4. **Keep docs current** — `README.md`, `docs/ARCHITECTURE.md`, `docs/PROGRESS.md` stay in sync with the code. Update in the same change as stack/structure shifts.
+4. **Keep docs current** — `README.md`, `docs/ARCHITECTURE.md`, `docs/PROGRESS.md`, and **`docs/FEATURES.md`** stay in sync with the code. Update in the same change as stack/structure shifts. FEATURES.md specifically is the cross-platform parity reference — touch it any time user-visible behavior changes.
 5. **No Firebase.** Explicitly rejected.
 6. **Memory is active context** — entries in `~/.claude/projects/-Users-jonsung-Desktop-project-daily-cadence/memory/` capture Jon's preferences and project decisions. Re-read relevant ones before acting on topics they cover.
 7. **Only commit when asked.** Progress tracking lives in `docs/PROGRESS.md`, not in git log.
