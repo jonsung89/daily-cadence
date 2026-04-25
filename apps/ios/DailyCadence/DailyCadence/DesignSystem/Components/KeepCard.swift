@@ -37,24 +37,27 @@ struct KeepCard: View {
         .accessibilityElement(children: .combine)
     }
 
-    /// Resolves background based on the note's resolved style. Falls back to
-    /// the type's softColor when no background is set.
+    /// Resolves background based on the note's resolved style. Always layers
+    /// the chosen tint/image on top of a solid `bg-2` base so the card stays
+    /// opaque even when stacked under other cards (matches the design
+    /// system's "white surface on cream background" rule).
     @ViewBuilder
     private var backgroundLayer: some View {
         let style = note.resolvedBackgroundStyle
-        switch style {
-        case .none:
+        ZStack {
+            // Solid base — keeps the card opaque so layered cards in
+            // StackedBoardView don't see through to each other.
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(note.type.softColor.opacity(0.333))
-        case .color(let swatch):
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(swatch.color().opacity(0.333))
-        case .image(let data, let opacity):
-            ZStack {
-                // Default surface underneath so reduced opacity reads as
-                // "image over warm cream" not "image over the page bg."
+                .fill(Color.DS.bg2)
+
+            switch style {
+            case .none:
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(Color.DS.bg2)
+                    .fill(note.type.softColor.opacity(0.333))
+            case .color(let swatch):
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(swatch.color().opacity(0.333))
+            case .image(let data, let opacity):
                 if let uiImage = UIImage(data: data) {
                     Image(uiImage: uiImage)
                         .resizable()

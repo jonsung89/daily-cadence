@@ -14,6 +14,7 @@ import SwiftUI
 /// once the `notes` table + Swift SDK are wired (see `docs/PROGRESS.md`).
 struct TimelineScreen: View {
     @State private var viewMode: TimelineViewMode = .timeline
+    @State private var boardLayout: BoardLayoutMode = .free
     @State private var isEditorPresented = false
 
     /// Read-through to `TimelineStore.shared.notes`. Reading inside `body`
@@ -32,7 +33,14 @@ struct TimelineScreen: View {
 
                     segmentedToggle
                         .padding(.horizontal, 20)
-                        .padding(.bottom, 16)
+                        .padding(.bottom, viewMode == .board ? 12 : 16)
+
+                    if viewMode == .board {
+                        boardLayoutToggle
+                            .padding(.horizontal, 20)
+                            .padding(.bottom, 16)
+                            .transition(.opacity.combined(with: .move(edge: .top)))
+                    }
 
                     content
                         .padding(.horizontal, horizontalPadding(for: viewMode))
@@ -41,6 +49,7 @@ struct TimelineScreen: View {
             }
             .background(Color.DS.bg1)
             .toolbar(.hidden, for: .navigationBar)
+            .animation(.easeOut(duration: 0.18), value: viewMode)
         }
         .overlay(alignment: .bottomTrailing) {
             FAB { isEditorPresented = true }
@@ -88,7 +97,7 @@ struct TimelineScreen: View {
         Date.now.formatted(.dateTime.month(.wide).day())
     }
 
-    // MARK: - Segmented toggle
+    // MARK: - Segmented toggles
 
     private var segmentedToggle: some View {
         Segmented(
@@ -96,6 +105,18 @@ struct TimelineScreen: View {
                 SegmentedOption(id: mode, title: mode.title, systemImage: mode.systemImage)
             },
             selection: $viewMode
+        )
+    }
+
+    /// Sub-toggle shown only when `viewMode == .board`. Lets the user pick how
+    /// cards are organized: stacked by type, grouped into sections by type,
+    /// or free-form (current 2-col masonry).
+    private var boardLayoutToggle: some View {
+        Segmented(
+            options: BoardLayoutMode.allCases.map { mode in
+                SegmentedOption(id: mode, title: mode.title, systemImage: mode.systemImage)
+            },
+            selection: $boardLayout
         )
     }
 
@@ -110,10 +131,23 @@ struct TimelineScreen: View {
             case .timeline:
                 timelineView
             case .board:
-                KeepGrid(items: notes) { note in
-                    KeepCard(note: note)
-                }
+                boardContent
             }
+        }
+    }
+
+    /// Dispatches Board rendering based on `boardLayout`.
+    @ViewBuilder
+    private var boardContent: some View {
+        switch boardLayout {
+        case .free:
+            KeepGrid(items: notes) { note in
+                KeepCard(note: note)
+            }
+        case .grouped:
+            groupedView
+        case .stacked:
+            StackedBoardView(groups: groupedNotes)
         }
     }
 
@@ -121,6 +155,60 @@ struct TimelineScreen: View {
         switch mode {
         case .timeline: return 8    // timeline items carry their own left gutter
         case .board:    return 16   // cards sit directly against the outer padding
+        }
+    }
+
+    // MARK: - Grouped view
+
+    /// Cards organized into sections by `NoteType`. Sections appear in
+    /// `NoteType.allCases` order so the layout stays stable as notes are
+    /// added or removed (sections without any notes are filtered out).
+    private var groupedView: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            ForEach(groupedNotes, id: \.type) { group in
+                VStack(alignment: .leading, spacing: 10) {
+                    groupHeader(type: group.type, count: group.notes.count)
+                    LazyVGrid(
+                        columns: [
+                            GridItem(.flexible(), spacing: 8),
+                            GridItem(.flexible(), spacing: 8),
+                        ],
+                        spacing: 8
+                    ) {
+                        ForEach(group.notes) { note in
+                            KeepCard(note: note)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func groupHeader(type: NoteType, count: Int) -> some View {
+        HStack(spacing: 8) {
+            Circle()
+                .fill(type.color)
+                .frame(width: 8, height: 8)
+            Text(type.title)
+                .font(.DS.sans(size: 11, weight: .bold))
+                .tracking(0.88)  // 0.08em at 11pt
+                .textCase(.uppercase)
+                .foregroundStyle(type.color)
+            Text("\(count)")
+                .font(.DS.sans(size: 11, weight: .medium))
+                .foregroundStyle(Color.DS.fg2)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 4)
+    }
+
+    /// Notes grouped by `NoteType`, preserving the canonical type ordering.
+    /// Empty types are filtered so the layout doesn't render hollow headers.
+    private var groupedNotes: [(type: NoteType, notes: [MockNote])] {
+        let byType = Dictionary(grouping: notes, by: \.type)
+        return NoteType.allCases.compactMap { type in
+            guard let group = byType[type], !group.isEmpty else { return nil }
+            return (type, group)
         }
     }
 

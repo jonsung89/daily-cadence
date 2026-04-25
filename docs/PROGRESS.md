@@ -1,6 +1,6 @@
 # DailyCadence — Progress
 
-**Last updated:** 2026-04-24 (Phase B.2 — per-type semantic color overrides)
+**Last updated:** 2026-04-25 (Phase F.2 — Stacked Board polish: collapse pill, single-card no-op, matchedGeometry truncation fix)
 **Current phase:** Phase 1 MVP — iOS app for Jon + wife, TestFlight distribution
 
 This is the living state of the project. Update at the end of every session.
@@ -170,7 +170,41 @@ User can now repaint a note type globally — "make my Workout cobalt instead of
 
 **Caveat:** This phase overrides `NoteType.color` (the full pigment used for dots, icons, borders). `NoteType.softColor` — used as the KeepCard background tint and TypeChip's unselected icon-circle — still falls back to the design-system default. Visual mismatch is minor but visible on KeepCard fill tints; can be addressed in a polish round if needed.
 
-### Tests (76/76 passing — +6 this round)
+### Phase F.1 — Board layout sub-modes: Grouped + Free (added this round)
+
+The Today screen's Board view now has a 3-position sub-toggle (**Stack / Group / Free**) that appears below the Timeline | Board control whenever Board is selected. Inspired by macOS desktop stacks: organize your day's notes by type, or arrange freely.
+
+- `Features/Timeline/BoardLayoutMode.swift` — enum with `.stacked` / `.grouped` / `.free` cases + title + SF Symbol per case
+- `TimelineScreen` updated:
+  - New `boardLayout: BoardLayoutMode` state (default `.free` = current behavior)
+  - Sub-toggle Segmented control, only rendered when `viewMode == .board`, animated in/out via `.animation(.easeOut(0.18), value: viewMode)` + `.transition(.opacity.combined(with: .move(edge: .top)))`
+  - `boardContent` dispatches between `KeepGrid` (Free) and `groupedView` (Grouped + stub Stacked)
+  - `groupedView` renders cards in `LazyVGrid` sections, one section per `NoteType`, with type-colored dot + uppercase header + count. Empty types are filtered.
+- **Stacked is stubbed for F.1** — currently renders the Grouped layout. F.2 will replace with overlapping-cards visual + tap-to-expand animation using `matchedGeometryEffect`.
+- **Free mode persistence (drag-to-reorder)** lands in F.3 alongside a custom `position` field on `MockNote`.
+
+**End-to-end flow:** Today tab → tap **Board** → sub-toggle slides in → tap **Group** → cards re-organize into 5 sections by note type → tap **Free** → back to 2-col masonry.
+
+### Phase F.2 — Real Stacked Board mode (added this round)
+
+The `.stacked` branch of `boardContent` now renders an actual macOS-Stacks-inspired visual with smooth expand/collapse.
+
+- `Features/Timeline/StackedBoardView.swift` — top-level container that takes `[(type, notes)]` and lays out stacks in a **column-based 2-col masonry**, mirroring `KeepGrid`'s alternation rule (index 0 → left, 1 → right, 2 → left, …) so Stacked and Free place items in the same columns.
+  - Two independent `VStack` columns inside an `HStack`. Tapping a stack expands its cards **vertically inside the same column**, oldest at the top of the section and newest at the bottom. The other column is untouched, so cells never jump sideways or to the top of the screen.
+  - One stack open at a time — switching stacks collapses the current one as it expands the new one (`spring(response: 0.42, dampingFraction: 0.82)`).
+- `CollapsedStackCell`:
+  - *No header chrome* — the top card already carries the type's pigment dot + uppercase label, so a duplicate header on the stack would be redundant. The whole fan is the tap target.
+  - **Newest card sits at the bottom**, older layers peek *above* it (each `8pt` higher, `0.04` smaller, `0.16` more faded). Peeking-above keeps the stack readable even when the newest card is taller than older ones (peeking-below would disappear behind a tall top card and the stack would look like a single card).
+  - `+N` badge anchored to the bottom-right corner of the newest card if the group has more than 3 notes.
+- `ExpandedColumnSection`:
+  - Cards rendered in `group.notes` order (oldest → newest) stacked vertically; "Collapse ↑" pill anchored at the **bottom-right** below the newest card so the affordance is reachable without scrolling back to the top.
+- **Single-card stacks are non-interactive** — when a group has exactly one note, `CollapsedStackCell` skips the `Button` wrapper entirely. Tapping does nothing because there's nothing to expand to.
+- **`matchedGeometryEffect` gotcha (`properties: .position` + `.fixedSize`)** — every card carries `matchedGeometryEffect(id:in:properties: .position)` so it slides smoothly between its stack and expanded positions. The `.position` choice (instead of the default `.frame`) is **load-bearing**: `.frame` propagates the source's *size* to the destination, and the front-most card in the stack passes its scaled / ZStack-clamped frame to its expanded twin, truncating the text to a single line. We also pin `.fixedSize(horizontal: false, vertical: true)` on each card so the expanded copy uses its intrinsic height even if any residual frame info leaks through.
+- **`KeepCard` opacity fix** — the card background now layers tint/image on top of a solid `Color.DS.bg2` base. Stacked layers no longer see through to each other (previously the translucent type-tint compounded with each peeking layer producing a muddy look).
+
+**End-to-end flow:** Board → Stack → see a 2-col masonry of stacks (one per type) with the latest note on top of each → tap a stack → its cards unfurl vertically inside its own column; the top card morphs into the bottom of the unfurled list while older cards fade in above → tap the "Collapse" pill (or tap another stack) → it folds back into a single cell.
+
+### Tests (79/79 passing — +3 this round)
 - `ColorHexTests` (16) — hex initializer, every palette family in light + dark, invariant tokens, role flips
 - `FontLoaderTests` (5) — bundled font registration + variable-axis weight
 - `PaletteRepositoryTests` (4) — palette order, swatch count, known swatch resolution, hex round-trip
@@ -181,7 +215,8 @@ User can now repaint a note type globally — "make my Workout cobalt instead of
 - `TimelineStoreTests` (5) — initial seed match, empty start, append order, content variant round-trip, default seed matches `MockNotes.today`
 - `MockNoteBackgroundTests` (11) — nil/valid/stale swatch resolution, sample swatch from each of the 4 palettes, color round-trip through `TimelineStore`, image round-trip through store, opacity clamping (0...1), resolved style for color/image/stale id/nil
 - `TextStyleTests` (10) — empty detection, MockNote auto-collapses empty styles, valid/unknown font + color id resolution, nil/empty optional fallback to default color, partial style preservation, store round-trip
-- **`NoteTypeStyleStoreTests` (6)** — empty default state, persistence across instances, nil/empty-string clears override, stale id resolves to nil at read time, reset-all clears every override
+- `NoteTypeStyleStoreTests` (6) — empty default state, persistence across instances, nil/empty-string clears override, stale id resolves to nil at read time, reset-all clears every override
+- **`BoardLayoutModeTests` (3)** — declared case order (.stacked / .grouped / .free), every case has non-empty title + SF Symbol
 
 ### Tests (21/21 passing)
 - `ColorHexTests` (16) — hex initializer, every palette family in light + dark, invariant tokens, role flips
@@ -197,7 +232,7 @@ User can now repaint a note type globally — "make my Workout cobalt instead of
 
 ## 🚧 In flight
 
-Nothing active — Phase B.2 (per-type semantic color overrides) landed.
+Nothing active — Phase F.2 (Stacked Board mode with expand/collapse) landed.
 
 ---
 
