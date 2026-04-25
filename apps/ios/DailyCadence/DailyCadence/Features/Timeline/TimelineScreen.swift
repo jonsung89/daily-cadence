@@ -5,9 +5,9 @@ import SwiftUI
 /// Matches wireframe Screen 2 + the Timeline.jsx prototype in the design
 /// system's mobile UI kit:
 /// - Top bar: day-name caption + big serif date, settings icon on the right
-/// - Segmented view switcher (Timeline | Cards)
+/// - Segmented view switcher (Timeline | Board)
 /// - Timeline view: vertical rail of `NoteCard`s connected by a sage-dotted line
-/// - Cards view: 2-column Keep-style masonry of `KeepCard`s
+/// - Board view: 2-column Keep-style masonry of `KeepCard`s
 /// - FAB floating at bottom-right to open the note editor
 ///
 /// Currently backed by `MockNotes.today`. Swap to real Supabase-backed data
@@ -109,7 +109,7 @@ struct TimelineScreen: View {
             switch viewMode {
             case .timeline:
                 timelineView
-            case .cards:
+            case .board:
                 KeepGrid(items: notes) { note in
                     KeepCard(note: note)
                 }
@@ -120,7 +120,7 @@ struct TimelineScreen: View {
     private func horizontalPadding(for mode: TimelineViewMode) -> CGFloat {
         switch mode {
         case .timeline: return 8    // timeline items carry their own left gutter
-        case .cards:    return 16   // cards sit directly against the outer padding
+        case .board:    return 16   // cards sit directly against the outer padding
         }
     }
 

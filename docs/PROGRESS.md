@@ -52,7 +52,7 @@ This is the living state of the project. Update at the end of every session.
 - `Navigation/RootTab.swift` — 5-tab enum (today / calendar / progress / library / settings) with title + SF Symbol
 - `Navigation/RootView.swift` — swaps feature screen by selection, `TabBar` pinned via `safeAreaInset`
 - `Features/Timeline/MockNotes.swift` — 9-note sample day driven by a `Content` enum with 4 variants (`text` / `stat` / `list` / `quote`) + `timelineTitle`/`timelineMessage` degradation so both views render from one source
-- `Features/Timeline/TimelineViewMode.swift` — enum for Timeline | Cards selection
+- `Features/Timeline/TimelineViewMode.swift` — enum for Timeline | Board selection
 - `Features/Timeline/TimelineScreen.swift` — serif date header, Timeline|Cards segmented toggle, timeline rail OR Keep grid based on view mode, FAB overlay
 - `Features/Placeholders/PlaceholderScreen.swift` — shared "coming soon" layout
 - `Features/{Calendar,Dashboard,Library,Settings}/*.swift` — placeholders routing through `PlaceholderScreen`
