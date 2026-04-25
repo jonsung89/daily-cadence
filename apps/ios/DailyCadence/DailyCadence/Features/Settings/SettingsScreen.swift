@@ -11,6 +11,7 @@ struct SettingsScreen: View {
     var body: some View {
         NavigationStack {
             List {
+                todaySection
                 appearanceSection
                 aboutSection
             }
@@ -18,6 +19,28 @@ struct SettingsScreen: View {
             .scrollContentBackground(.hidden)
             .background(Color.DS.bg1)
             .navigationTitle("Settings")
+        }
+    }
+
+    // MARK: - Today
+
+    /// Behavioral preferences for the Today screen (Phase E.5).
+    private var todaySection: some View {
+        @Bindable var prefs = AppPreferencesStore.shared
+        return Section {
+            Picker(selection: $prefs.defaultTodayView) {
+                ForEach(TimelineViewMode.allCases) { mode in
+                    Label(mode.title, systemImage: mode.systemImage).tag(mode)
+                }
+            } label: {
+                Text("Default view")
+                    .foregroundStyle(Color.DS.ink)
+            }
+            .listRowBackground(Color.DS.bg2)
+        } header: {
+            Text("Today")
+        } footer: {
+            Text("Picks which view the Today tab opens in by default.")
         }
     }
 

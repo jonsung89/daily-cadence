@@ -3,8 +3,20 @@ import SwiftUI
 /// The type of a note — drives its semantic color, icon, and (eventually)
 /// type-specific form fields in the editor.
 ///
-/// Phase 1 ships the five default types defined in the product spec. Custom
-/// user-defined types are Phase 3+.
+/// Phase 1 ships the five default category types defined in the product
+/// spec, plus a sixth `.general` "no specific category" type added in
+/// Phase E.2.3 — the editor's default selection. Custom user-defined types
+/// are Phase 3+.
+///
+/// **Why `.general`.** Without a default neutral type, the editor had to
+/// pre-select one of the five category types (we chose `.mood`), which
+/// implicitly tagged every quickly-typed note as a Mood. `.general` lets
+/// users start typing without committing to a category and opt into one
+/// later. It uses warm-gray pigment + taupe soft color so neutral notes
+/// don't fight the colored ones on the timeline.
+///
+/// `.general` is declared **first** in `allCases` so pickers list it as the
+/// default option.
 ///
 /// The icon mapping uses SF Symbols as a Phase 1 placeholder. The design
 /// system ships a custom hand-drawn line icon set in
@@ -12,6 +24,7 @@ import SwiftUI
 /// glyphs are extracted into individual SVGs (see the design system README's
 /// "Iconography" section).
 enum NoteType: String, CaseIterable, Identifiable, Hashable, Codable {
+    case general
     case workout
     case meal
     case sleep
@@ -23,6 +36,7 @@ enum NoteType: String, CaseIterable, Identifiable, Hashable, Codable {
     /// Display title. Sentence case per the design system voice rules.
     var title: String {
         switch self {
+        case .general:  return "General"
         case .workout:  return "Workout"
         case .meal:     return "Meal"
         case .sleep:    return "Sleep"
@@ -47,6 +61,7 @@ enum NoteType: String, CaseIterable, Identifiable, Hashable, Codable {
     /// in the Settings reset preview.
     var defaultColor: Color {
         switch self {
+        case .general:  return .DS.warmGray
         case .workout:  return .DS.workout
         case .meal:     return .DS.meal
         case .sleep:    return .DS.sleep
@@ -58,6 +73,7 @@ enum NoteType: String, CaseIterable, Identifiable, Hashable, Codable {
     /// Muted companion for chip fills and timeline lanes.
     var softColor: Color {
         switch self {
+        case .general:  return .DS.taupe
         case .workout:  return .DS.workoutSoft
         case .meal:     return .DS.mealSoft
         case .sleep:    return .DS.sleepSoft
@@ -70,6 +86,7 @@ enum NoteType: String, CaseIterable, Identifiable, Hashable, Codable {
     /// line icons when extracted.
     var systemImage: String {
         switch self {
+        case .general:  return "note.text"
         case .workout:  return "dumbbell"
         case .meal:     return "fork.knife"
         case .sleep:    return "moon"

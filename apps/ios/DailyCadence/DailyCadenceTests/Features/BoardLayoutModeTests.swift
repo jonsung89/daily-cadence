@@ -8,8 +8,8 @@ struct BoardLayoutModeTests {
 
     @Test func declaredOrderIsStable() {
         let ids = BoardLayoutMode.allCases.map(\.id)
-        #expect(ids == [.stacked, .grouped, .free],
-                "Segmented control depends on this order — Stack / Group / Free, left to right")
+        #expect(ids == [.cards, .stacked, .grouped],
+                "Segmented control depends on this order — Cards / Stack / Group, left to right (Phase E.5.1; case .free renamed to .cards)")
     }
 
     @Test func everyCaseHasNonEmptyTitle() {

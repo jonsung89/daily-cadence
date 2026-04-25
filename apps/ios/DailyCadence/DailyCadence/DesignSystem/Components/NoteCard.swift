@@ -10,16 +10,19 @@ import SwiftUI
 /// - 6pt vertical gap between head / title / message
 /// - Level-1 shadow (resting card)
 ///
-/// The card is intentionally content-agnostic — callers compose a head (via
-/// `TypeBadge`), a title, and an optional message. Photo attachments and
-/// swipe actions live at the `TimelineItem` / list-row layer.
+/// **Two scaffolds (Phase E.4):**
+/// - **Text** — original layout: `TypeBadge` head + title + optional
+///   message. Padded inside the rounded `bg-2` surface.
+/// - **Media** (`isMediaNote == true`) — full-bleed: photo or video
+///   poster fills the card, no `TypeBadge` head, no inner padding. Caption
+///   sits in a gradient overlay at the bottom.
 ///
-/// > Note: The parameter is named `message` (not `body`) to avoid colliding
-/// > with SwiftUI's `View.body` requirement.
+/// Both scaffolds share the rounded clip + 1pt border + level-1 shadow,
+/// and both cap at `NoteCard.maxHeight`.
 struct NoteCard: View {
     let type: NoteType
     let title: String
-    let message: String?
+    let message: AttributedString?
     /// Optional timestamp shown in the head row. Pass `nil` if the surrounding
     /// container (e.g. `TimelineItem`) already shows the time.
     let time: String?
@@ -29,17 +32,26 @@ struct NoteCard: View {
     let background: NoteBackgroundStyle
     /// Optional font + color override for the title text. `nil` = card default.
     let titleStyle: TextStyle?
-    /// Optional font + color override for the message text. `nil` = card default.
-    let messageStyle: TextStyle?
+    /// Optional photo/video payload (Phase E.3). When non-nil, the card
+    /// renders with the full-bleed media scaffold (no `TypeBadge` head,
+    /// caption in a bottom gradient).
+    let media: MediaPayload?
+
+    /// Maximum rendered height for any timeline card. Tall portrait media
+    /// or long messages are clipped to this. Slightly higher than `KeepCard`
+    /// since the timeline is single-column and cards can afford more height.
+    static let maxHeight: CGFloat = 520
+
+    @State private var isMediaViewerPresented = false
 
     init(
         type: NoteType,
         title: String,
-        message: String? = nil,
+        message: AttributedString? = nil,
         time: String? = nil,
         background: NoteBackgroundStyle = .none,
         titleStyle: TextStyle? = nil,
-        messageStyle: TextStyle? = nil
+        media: MediaPayload? = nil
     ) {
         self.type = type
         self.title = title
@@ -47,26 +59,23 @@ struct NoteCard: View {
         self.time = time
         self.background = background
         self.titleStyle = titleStyle
-        self.messageStyle = messageStyle
+        self.media = media
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            TypeBadge(type: type, time: time)
-            Text(title)
-                .font(titleStyle.resolvedFont(defaultFontId: "inter", size: 16, weight: .semibold))
-                .foregroundStyle(titleStyle.resolvedColor(default: Color.DS.ink))
-                .frame(maxWidth: .infinity, alignment: .leading)
-            if let message, !message.isEmpty {
-                Text(message)
-                    .font(messageStyle.resolvedFont(defaultFontId: "inter", size: 14, weight: .regular))
-                    .foregroundStyle(messageStyle.resolvedColor(default: Color.DS.fg2))
-                    .lineSpacing(14 * 0.5)  // line-height 1.5 ≈ 7pt extra line spacing
-                    .frame(maxWidth: .infinity, alignment: .leading)
+        Group {
+            if let media {
+                mediaScaffold(media)
+            } else {
+                textScaffold
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 14)
+        // See `KeepCard` for the rationale — `fixedSize(vertical: true)`
+        // collapses cards to their intrinsic height before the maxHeight
+        // cap kicks in, preventing the parent layout from inflating
+        // short cards.
+        .fixedSize(horizontal: false, vertical: true)
+        .frame(maxHeight: Self.maxHeight)
         .background(
             // Default surface — always present so tinted overlays preserve
             // contrast against the cream/ink page background underneath.
@@ -80,6 +89,97 @@ struct NoteCard: View {
         )
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .dsShadow(.level1)
+        .fullScreenCover(isPresented: $isMediaViewerPresented) {
+            if let media {
+                MediaViewerScreen(media: media)
+            }
+        }
+    }
+
+    // MARK: - Text scaffold
+
+    private var textScaffold: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            TypeBadge(type: type, time: time)
+            Text(title)
+                .font(titleStyle.resolvedFont(defaultFontId: "inter", size: 16, weight: .semibold))
+                .foregroundStyle(titleStyle.resolvedColor(default: Color.DS.ink))
+                .frame(maxWidth: .infinity, alignment: .leading)
+            if let message, !message.characters.isEmpty {
+                Text(message)
+                    .font(.DS.sans(size: 14, weight: .regular))
+                    .foregroundStyle(Color.DS.fg2)
+                    .lineSpacing(14 * 0.5)  // line-height 1.5 ≈ 7pt extra line spacing
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+    }
+
+    // MARK: - Media scaffold (full-bleed media + caption-below)
+
+    /// **Phase E.4.1 layout.** Image at top fills the column at native
+    /// aspect ratio (no letterbox, `aspectRatio: .fill`); caption — when
+    /// present — sits on the `bg-2` surface beneath the image, padded.
+    private func mediaScaffold(_ media: MediaPayload) -> some View {
+        VStack(spacing: 0) {
+            mediaImageRow(media)
+            if let caption = media.caption, !caption.isEmpty {
+                Text(caption)
+                    .font(.DS.sans(size: 13, weight: .regular))
+                    .foregroundStyle(Color.DS.ink)
+                    .lineSpacing(13 * 0.4)
+                    .lineLimit(5)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 12)
+                    .background(Color.DS.bg2)
+            }
+        }
+    }
+
+    /// Same explicit `GeometryReader`-based sizing as `KeepCard.mediaImageRow`
+    /// — see the comment there for the rationale. Phase E.4.2 fixed a bug
+    /// where the asset rendered narrower than the timeline column.
+    private func mediaImageRow(_ media: MediaPayload) -> some View {
+        GeometryReader { geo in
+            let width = geo.size.width
+            let height = width / media.aspectRatio
+            ZStack {
+                Color.DS.bg2
+                if let poster = mediaPosterImage(media) {
+                    Image(uiImage: poster)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: width, height: height)
+                        .clipped()
+                }
+                if media.kind == .video {
+                    ZStack {
+                        Circle()
+                            .fill(.ultraThinMaterial)
+                            .frame(width: 48, height: 48)
+                        Image(systemName: "play.fill")
+                            .font(.system(size: 20, weight: .semibold))
+                            .foregroundStyle(Color.DS.ink)
+                            .offset(x: 1.5)
+                    }
+                }
+            }
+            .frame(width: width, height: height)
+        }
+        .aspectRatio(media.aspectRatio, contentMode: .fit)
+        .frame(maxWidth: .infinity)
+        .contentShape(Rectangle())
+        .onTapGesture { isMediaViewerPresented = true }
+        .accessibilityLabel(media.kind == .video ? "Play video" : "Open photo")
+        .accessibilityAddTraits(.isButton)
+    }
+
+    private func mediaPosterImage(_ media: MediaPayload) -> UIImage? {
+        if let poster = media.posterData, let img = UIImage(data: poster) { return img }
+        return UIImage(data: media.data)
     }
 
     @ViewBuilder
@@ -109,7 +209,7 @@ struct NoteCard: View {
         NoteCard(
             type: .workout,
             title: "Leg day — felt strong",
-            message: "PR attempt on squats today. Bumped from 215 to 225 for 4×6.",
+            message: AttributedString("PR attempt on squats today. Bumped from 215 to 225 for 4×6."),
             time: "7:32 AM"
         )
         NoteCard(
@@ -120,7 +220,7 @@ struct NoteCard: View {
         NoteCard(
             type: .sleep,
             title: "7h 18m",
-            message: "Slept through the night. Woke up refreshed.",
+            message: AttributedString("Slept through the night. Woke up refreshed."),
             time: "6:45 AM"
         )
         NoteCard(
@@ -138,13 +238,13 @@ struct NoteCard: View {
         NoteCard(
             type: .workout,
             title: "Leg day — felt strong",
-            message: "PR attempt on squats today. Bumped from 215 to 225 for 4×6.",
+            message: AttributedString("PR attempt on squats today. Bumped from 215 to 225 for 4×6."),
             time: "7:32 AM"
         )
         NoteCard(
             type: .activity,
             title: "4.2 mile walk",
-            message: "Morning loop around the neighborhood.",
+            message: AttributedString("Morning loop around the neighborhood."),
             time: "6:20 AM"
         )
     }

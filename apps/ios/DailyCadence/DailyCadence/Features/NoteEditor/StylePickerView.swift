@@ -1,13 +1,37 @@
 import SwiftUI
 
+// MARK: - Deprecation note (Phase E.1.1)
+//
+// `StylePickerView` was the original Phase E.1 styling UI: a fullscreen
+// sheet with a Title section and a Message section, each pushing detail
+// screens for Font and Color. It worked but cost three navigation levels
+// for one taste decision — the user had to leave the editor canvas every
+// time they wanted to try a different look.
+//
+// Phase E.1.1 replaced this entrypoint with `StyleToolbar` (see
+// `StyleToolbar.swift`) — an Instagram-Story-inspired inline tray pinned
+// above the keyboard, with horizontal-scrolling font chips + color dots
+// that target whichever text field is currently focused. Live preview is
+// the editor canvas itself; no modal navigation.
+//
+// We're keeping this file around because:
+// - `TextColorPickerScreen` is still used by Settings → Note Types →
+//   <Type> for picking type-color overrides (Phase B.2).
+// - `FontPickerScreen` and the `StylePickerView` shell may be reused if
+//   we ever surface an "Advanced styling" sheet (e.g. for power users
+//   who want a full list view rather than the chips).
+//
+// The `StylePickerView` struct itself is not referenced anywhere as of
+// E.1.1 — feel free to delete it once we're confident the toolbar covers
+// every needed flow. `FontPickerScreen` and `TextColorPickerScreen` are
+// still load-bearing, so keep those.
+
+/// **(Deprecated as a presented sheet — see Phase E.1.1 note above.)**
+///
 /// Sheet for picking the per-field font + color of a note's text.
 ///
 /// Two sections: **Title** and **Message**, each with a Font picker and a
 /// Color picker row. Tapping a row pushes a detail screen with the list.
-///
-/// Phase E.1 ships per-field styling — one font and one color for the title,
-/// another for the message. True rich text (mixed runs within one paragraph)
-/// is deferred to Phase E.2.
 struct StylePickerView: View {
     @Binding var titleStyle: TextStyle?
     @Binding var messageStyle: TextStyle?

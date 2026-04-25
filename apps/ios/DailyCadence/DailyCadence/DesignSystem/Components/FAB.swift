@@ -17,6 +17,12 @@ import SwiftUI
 /// Anchor at 16pt from bottom-right of the screen, 104pt up to clear the
 /// 88pt tab bar + 16pt breathing room (anchoring is the caller's job — this
 /// view is just the button).
+///
+/// **Phase E.4 — `FABStyle`.** Pulled the visual into `FABStyle`/`fabAppearance`
+/// so callers like `TimelineScreen` can use the same look as a SwiftUI
+/// `Menu` label without instantiating `FAB { … }` (which has its own
+/// `Button` and would conflict with `Menu`'s tap handling). The struct
+/// `FAB` itself still wraps a button for non-menu use cases.
 struct FAB: View {
     let systemImage: String
     let accessibilityLabel: String
@@ -34,17 +40,28 @@ struct FAB: View {
 
     var body: some View {
         Button(action: action) {
-            Image(systemName: systemImage)
-                .font(.system(size: 24, weight: .semibold))
-                .foregroundStyle(Color.white)
-                .frame(width: 56, height: 56)
-                .background(
-                    Circle().fill(Color.DS.sage)
-                )
-                .dsShadow(.level2)
+            FABAppearance(systemImage: systemImage)
         }
         .buttonStyle(.plain)
         .accessibilityLabel(accessibilityLabel)
+    }
+}
+
+/// The pure visual of a FAB, with no built-in tap handling. Use this as
+/// the `label` for a SwiftUI `Menu` so the menu owns the gesture and the
+/// look stays consistent with the regular tap-action `FAB`.
+struct FABAppearance: View {
+    var systemImage: String = "plus"
+
+    var body: some View {
+        Image(systemName: systemImage)
+            .font(.system(size: 24, weight: .semibold))
+            .foregroundStyle(Color.white)
+            .frame(width: 56, height: 56)
+            .background(
+                Circle().fill(Color.DS.sage)
+            )
+            .dsShadow(.level2)
     }
 }
 

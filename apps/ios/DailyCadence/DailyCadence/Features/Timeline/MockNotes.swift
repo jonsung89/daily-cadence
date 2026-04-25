@@ -7,6 +7,13 @@ import Foundation
 /// timeline collapses every variant to title + optional message via
 /// `timelineTitle` / `timelineMessage`, while the card view uses the variant
 /// directly.
+///
+/// **Phase E.2 — rich-text message.** The `.text` variant's `message` is an
+/// `AttributedString?`. Plain text wraps trivially (`AttributedString("hi")`);
+/// the editor mutates per-character runs (font + foreground color) when the
+/// user taps chips in the inline `StyleToolbar`. Title is still a `String`
+/// — titles read better with uniform styling, and keeping it plain limits
+/// the scope of the model migration.
 struct MockNote: Identifiable, Hashable {
     let id = UUID()
     let time: String
@@ -17,20 +24,28 @@ struct MockNote: Identifiable, Hashable {
     let background: Background?
     /// Optional styling override for the note's title text (font + color).
     /// `nil` = use the card's default title styling. See `TextStyle`.
+    ///
+    /// > Title-only — message styling moved to per-character `AttributedString`
+    /// > runs in Phase E.2. Mixed runs within a single message can no longer
+    /// > be expressed as a single `TextStyle`.
     let titleStyle: TextStyle?
-    /// Optional styling override for the note's message/body text.
-    /// `nil` = use the card's default message styling.
-    let messageStyle: TextStyle?
 
     /// Typed content variants. Mirrors the `kind` field in the design
     /// system's `Timeline.jsx` keepItems (`title` / `body` / `stat` / `list`
     /// / `quote`). In production these will be driven by per-type editor
     /// fields on the real `Note` model.
     enum Content: Hashable {
-        case text(title: String, message: String? = nil)
+        /// Title (plain `String`) + optional rich-text message
+        /// (`AttributedString?`). Phase E.2 made the message attributed so
+        /// the editor can vary font + color per character run.
+        case text(title: String, message: AttributedString? = nil)
         case stat(title: String, value: String, sub: String? = nil)
         case list(title: String, items: [String])
         case quote(text: String)
+        /// Photo or video attachment (Phase E.3). The media fills the card
+        /// at its native aspect ratio (clamped); the optional caption shows
+        /// below the media and stands in for `timelineMessage`.
+        case media(MediaPayload)
     }
 
     /// Per-note background customization.
@@ -69,8 +84,7 @@ struct MockNote: Identifiable, Hashable {
         type: NoteType,
         content: Content,
         background: Background? = nil,
-        titleStyle: TextStyle? = nil,
-        messageStyle: TextStyle? = nil
+        titleStyle: TextStyle? = nil
     ) {
         self.time = time
         self.type = type
@@ -79,7 +93,6 @@ struct MockNote: Identifiable, Hashable {
         // Collapse "TextStyle with no overrides" to nil so empty styling
         // doesn't leak into persistence later.
         self.titleStyle = (titleStyle?.isEmpty ?? true) ? nil : titleStyle
-        self.messageStyle = (messageStyle?.isEmpty ?? true) ? nil : messageStyle
     }
 
     // MARK: - Background resolution
@@ -126,22 +139,67 @@ struct MockNote: Identifiable, Hashable {
         case .stat(let title, _, _):  return title
         case .list(let title, _):     return title
         case .quote(let text):        return "\u{201C}\(text)\u{201D}"
+        case .media(let media):       return media.caption ?? (media.kind == .video ? "Video" : "Photo")
         }
     }
 
-    var timelineMessage: String? {
+    /// Secondary line for the timeline view. Returns `AttributedString?` so
+    /// rich-text messages keep their per-run styling when collapsed onto the
+    /// timeline; the synthesized lines for stat/list variants wrap plain
+    /// strings (no attributes), which `Text(_: AttributedString)` renders the
+    /// same as a normal `Text(_: String)`.
+    var timelineMessage: AttributedString? {
         switch content {
         case .text(_, let message):
             return message
         case .stat(_, let value, let sub):
-            if let sub { return "\(value) · \(sub)" }
-            return value
+            if let sub { return AttributedString("\(value) · \(sub)") }
+            return AttributedString(value)
         case .list(_, let items):
-            return items.joined(separator: " · ")
+            return AttributedString(items.joined(separator: " · "))
         case .quote:
+            return nil
+        case .media:
+            // Media notes don't synthesize a secondary line on the timeline
+            // — `timelineTitle` already carries the caption (or
+            // "Photo"/"Video"), and the actual media renders inside the card.
             return nil
         }
     }
+
+    /// Convenience accessor for the media payload, when this note is one.
+    var mediaPayload: MediaPayload? {
+        if case .media(let m) = content { return m }
+        return nil
+    }
+
+    /// High-level note kind — distinct from `NoteType` (which is the
+    /// semantic *category*: workout / meal / mood / etc.). `Kind` answers
+    /// "what scaffold should render this card?" — text scaffolding (head +
+    /// title + content) vs full-bleed media (asset fills the card).
+    ///
+    /// Phase E.3 → E.4: introduced when we made photo/video notes render
+    /// without the type-chip head, since media cards already carry their
+    /// own visual identity (the photo/video itself) and the head label
+    /// added clutter without adding info.
+    enum Kind: String, Hashable {
+        case text
+        case photo
+        case video
+    }
+
+    var kind: Kind {
+        switch content {
+        case .media(let m):
+            return m.kind == .video ? .video : .photo
+        default:
+            return .text
+        }
+    }
+
+    /// True when the card scaffold should be the bleed-to-edge media
+    /// layout (no type-chip head, no padding around the asset).
+    var isMediaNote: Bool { kind != .text }
 }
 
 enum MockNotes {
@@ -159,7 +217,7 @@ enum MockNotes {
             type: .workout,
             content: .text(
                 title: "Easy run · 35 min",
-                message: "Felt strong. Legs tight early on. Sunrise over the reservoir, cool air."
+                message: AttributedString("Felt strong. Legs tight early on. Sunrise over the reservoir, cool air.")
             )
         ),
         MockNote(
@@ -177,12 +235,12 @@ enum MockNotes {
         MockNote(
             time: "12:40 PM",
             type: .meal,
-            content: .text(title: "Lunch", message: "Grain bowl, salmon, greens, tahini.")
+            content: .text(title: "Lunch", message: AttributedString("Grain bowl, salmon, greens, tahini."))
         ),
         MockNote(
             time: "3:15 PM",
             type: .activity,
-            content: .text(title: "Walk · 2.3 mi", message: "Park loop with a podcast.")
+            content: .text(title: "Walk · 2.3 mi", message: AttributedString("Park loop with a podcast."))
         ),
         MockNote(
             time: "6:20 PM",
@@ -193,12 +251,12 @@ enum MockNotes {
         MockNote(
             time: "9:30 PM",
             type: .mood,
-            content: .text(title: "Wound down easy", message: "Read a few chapters. Early bedtime.")
+            content: .text(title: "Wound down easy", message: AttributedString("Read a few chapters. Early bedtime."))
         ),
         MockNote(
             time: "10:02 PM",
             type: .sleep,
-            content: .text(title: "Lights out", message: "Planning 7h again.")
+            content: .text(title: "Lights out", message: AttributedString("Planning 7h again."))
         ),
     ]
 }

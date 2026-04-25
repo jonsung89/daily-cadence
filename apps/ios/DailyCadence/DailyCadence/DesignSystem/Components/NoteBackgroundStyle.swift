@@ -9,7 +9,8 @@ import Foundation
 ///
 /// Cases:
 /// - `.none` — fall back to the card's default surface (white in `NoteCard`,
-///   type-tinted softColor in `KeepCard`)
+///   type-pigment-tinted at 0.333 in `KeepCard` — same formula a user-picked
+///   swatch uses, so the default reads as "the tag's color")
 /// - `.color(Swatch)` — fill with the swatch at 0.333 opacity over the
 ///   default surface (Phase D.1 behavior)
 /// - `.image(data:opacity:)` — render the photo bytes scaled-to-fill the

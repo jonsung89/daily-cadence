@@ -8,7 +8,7 @@ DailyCadence is a SwiftUI iOS day-logger app inspired by Google Keep with built-
 
 ## Stack (see `docs/ARCHITECTURE.md` for detail)
 
-- **iOS:** SwiftUI, iOS 17+, SwiftData for local cache, Swift Charts, `@Observable`, `NavigationStack`
+- **iOS:** SwiftUI, iOS 26+, SwiftData for local cache, Swift Charts, `@Observable`, `NavigationStack`. iOS 26 floor unlocks the native `TextEditor(text: $attributedString, selection: $selection)` + `AttributedString.transformAttributes(in:)` APIs used by the rich-text note body (Phase E.2).
 - **Backend:** Supabase direct from iOS — **no Express/Node middle-tier in Phase 1**. Future server work (when needed): Next.js on Vercel.
 - **Auth:** Sign in with Apple (`AuthenticationServices`) + Google (via Supabase OAuth). Email auth is disabled.
 - **Testing:** Swift Testing (`@Test`, `#expect`) for unit tests; XCTest for UI tests. Run unit tests only via `-only-testing:DailyCadenceTests` (UI tests are slow).

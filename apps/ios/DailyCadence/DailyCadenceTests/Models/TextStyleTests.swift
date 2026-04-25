@@ -21,11 +21,9 @@ struct TextStyleTests {
             time: "9:00 AM",
             type: .mood,
             content: .text(title: "x"),
-            titleStyle: TextStyle(),  // empty
-            messageStyle: TextStyle(fontId: nil, colorId: nil)  // also empty
+            titleStyle: TextStyle()  // empty
         )
         #expect(note.titleStyle == nil)
-        #expect(note.messageStyle == nil)
     }
 
     @Test func mockNotePreservesNonEmptyStyle() {
@@ -33,13 +31,10 @@ struct TextStyleTests {
             time: "9:00 AM",
             type: .mood,
             content: .text(title: "x"),
-            titleStyle: TextStyle(fontId: "playfair", colorId: "bold.cobalt"),
-            messageStyle: TextStyle(colorId: "pastel.mint")  // partial
+            titleStyle: TextStyle(fontId: "playfair", colorId: "bold.cobalt")
         )
         #expect(note.titleStyle?.fontId == "playfair")
         #expect(note.titleStyle?.colorId == "bold.cobalt")
-        #expect(note.messageStyle?.fontId == nil)
-        #expect(note.messageStyle?.colorId == "pastel.mint")
     }
 
     // MARK: - Resolution against repositories

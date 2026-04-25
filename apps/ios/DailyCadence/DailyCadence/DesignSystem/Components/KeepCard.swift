@@ -3,21 +3,66 @@ import SwiftUI
 /// A Google Keep-style card — varied content heights, type-tinted background,
 /// pigment-colored head label.
 ///
-/// Matches `.keep` in `mobile.css` plus the inline styles in
-/// `design/claude-design-system/ui_kits/mobile/Timeline.jsx`:
-/// - Background: note type's soft color at `0x55` alpha (≈ 0.333 opacity)
-/// - Border: note type's pigment color at `0x33` alpha (≈ 0.2 opacity)
-/// - 10pt radius, 10pt top/bottom × 12pt left/right padding, 4pt vertical gap
-/// - Head: 7pt pigment-colored dot + 9pt uppercase 700-weight pigment label,
-///   0.08em tracking
-/// - Five content variants (`.text` / `.stat` / `.list` / `.quote` — plus
-///   `.text` with no message acting as the `.title`-only kind)
+/// **Two scaffolds based on `note.kind`:**
+///
+/// - **Text scaffold** (`.text`) — the original Keep card: `bg-2` surface
+///   with the type's pigment at 0.333 opacity, 1pt border at 0.2 opacity,
+///   pigment-colored type-chip head, then the content variant
+///   (text/stat/list/quote). Padded inside the card border.
+///
+/// - **Media scaffold** (`.photo` / `.video`) — full-bleed: the photo or
+///   video fills the entire card with **no type chip, no padding, no
+///   border**. The card's identity *is* the asset. Caption (when present)
+///   sits at the bottom in a subtle gradient overlay so it's readable
+///   regardless of the underlying image. Tapping anywhere on the media
+///   surface opens `MediaViewerScreen`.
+///
+/// **Phase E.3 → E.4** introduced this split. Before E.4 a media note
+/// rendered with the same text scaffold (head + media area inset) which
+/// added unnecessary chrome and felt foreign on a photo card.
+///
+/// **Max height (`KeepCard.maxHeight`)** still applies to both scaffolds
+/// so a single card can't dominate the 2-col masonry.
 ///
 /// Drag-to-reorder (the `.keep.drag` CSS class) is deferred to a later pass.
 struct KeepCard: View {
     let note: MockNote
 
+    /// Maximum rendered height for any card in the Board grid. Tuned so a
+    /// long-message text card or a tall portrait photo doesn't push the
+    /// neighboring column off-screen.
+    static let maxHeight: CGFloat = 480
+
+    @State private var isMediaViewerPresented = false
+
     var body: some View {
+        Group {
+            if note.isMediaNote, let media = note.mediaPayload {
+                mediaScaffold(media)
+            } else {
+                textScaffold
+            }
+        }
+        // Phase E.4.4 — `fixedSize(vertical: true)` forces the card to
+        // its INTRINSIC height even when the parent VStack column has
+        // spare vertical space to give. Without this, `.frame(maxHeight:)`
+        // alone reports a flexible-up-to-480 preferred size, and SwiftUI's
+        // VStack happily inflates short cards to fill the column —
+        // producing the "lots of empty space inside the card" bug.
+        .fixedSize(horizontal: false, vertical: true)
+        .frame(maxHeight: Self.maxHeight)
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .accessibilityElement(children: .combine)
+        .fullScreenCover(isPresented: $isMediaViewerPresented) {
+            if let media = note.mediaPayload {
+                MediaViewerScreen(media: media)
+            }
+        }
+    }
+
+    // MARK: - Text scaffold (original Keep card)
+
+    private var textScaffold: some View {
         VStack(alignment: .leading, spacing: 4) {
             head
             contentView
@@ -25,7 +70,7 @@ struct KeepCard: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(backgroundLayer)
+        .background(textBackgroundLayer)
         .overlay(
             // Border keeps the type's pigment so the data legend reads even
             // when the user picks a custom background that doesn't match
@@ -33,8 +78,6 @@ struct KeepCard: View {
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .stroke(note.type.color.opacity(0.2), lineWidth: 1)
         )
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .accessibilityElement(children: .combine)
     }
 
     /// Resolves background based on the note's resolved style. Always layers
@@ -42,7 +85,7 @@ struct KeepCard: View {
     /// opaque even when stacked under other cards (matches the design
     /// system's "white surface on cream background" rule).
     @ViewBuilder
-    private var backgroundLayer: some View {
+    private var textBackgroundLayer: some View {
         let style = note.resolvedBackgroundStyle
         ZStack {
             // Solid base — keeps the card opaque so layered cards in
@@ -52,8 +95,11 @@ struct KeepCard: View {
 
             switch style {
             case .none:
+                // Default tint matches the type's pigment color at the same
+                // 0.333 opacity used for user-picked swatches — so a fresh
+                // note "with a tag" already reads as that tag's color.
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(note.type.softColor.opacity(0.333))
+                    .fill(note.type.color.opacity(0.333))
             case .color(let swatch):
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .fill(swatch.color().opacity(0.333))
@@ -94,22 +140,27 @@ struct KeepCard: View {
             listContent(title: title, items: items)
         case .quote(let text):
             quoteContent(text: text)
+        case .media:
+            // Should not reach here — body's `Group { … }` routes media
+            // notes to `mediaScaffold`. Render nothing as a defensive
+            // fallback so a future refactor that lands here doesn't crash.
+            EmptyView()
         }
     }
 
     // MARK: - Variants
 
-    private func textContent(title: String, message: String?) -> some View {
+    private func textContent(title: String, message: AttributedString?) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title)
                 .font(note.titleStyle.resolvedFont(defaultFontId: "inter", size: 14, weight: .semibold))
                 .foregroundStyle(note.titleStyle.resolvedColor(default: Color.DS.ink))
                 .lineSpacing(14 * 0.3)
                 .frame(maxWidth: .infinity, alignment: .leading)
-            if let message, !message.isEmpty {
+            if let message, !message.characters.isEmpty {
                 Text(message)
-                    .font(note.messageStyle.resolvedFont(defaultFontId: "inter", size: 12, weight: .regular))
-                    .foregroundStyle(note.messageStyle.resolvedColor(default: Color.DS.fg2))
+                    .font(.DS.sans(size: 12, weight: .regular))
+                    .foregroundStyle(Color.DS.fg2)
                     .lineSpacing(12 * 0.5)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -163,6 +214,87 @@ struct KeepCard: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.vertical, 4)
     }
+
+    // MARK: - Media scaffold (full-bleed media + caption-below)
+
+    /// **Phase E.4.1 layout.** Two stacked rows inside the rounded card:
+    ///
+    /// 1. The asset (image / video poster) fills the column edge-to-edge
+    ///    at its native aspect ratio — `aspectRatio(media.aspectRatio,
+    ///    contentMode: .fill)` so the image *covers* the cell without
+    ///    letterbox, which addresses the "image isn't filling the cell"
+    ///    feedback from earlier rounds.
+    /// 2. Optional caption text sits **below** the image (not overlayed
+    ///    on it) on the card's `bg-2` surface, padded.
+    ///
+    /// Tapping the image opens `MediaViewerScreen`. The caption row isn't
+    /// tappable on its own — it shares the card's outer accessibility
+    /// element instead.
+    private func mediaScaffold(_ media: MediaPayload) -> some View {
+        VStack(spacing: 0) {
+            mediaImageRow(media)
+            if let caption = media.caption, !caption.isEmpty {
+                Text(caption)
+                    .font(.DS.sans(size: 12, weight: .regular))
+                    .foregroundStyle(Color.DS.ink)
+                    .lineSpacing(12 * 0.4)
+                    .lineLimit(4)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .background(Color.DS.bg2)
+            }
+        }
+    }
+
+    /// Renders the asset filling the column at exactly `column_width ×
+    /// (column_width / aspectRatio)`. Uses `GeometryReader` to read the
+    /// column width and force the image to that explicit size — avoids
+    /// the prior bug where `.aspectRatio(.fit)` + `.frame(maxWidth: .infinity)`
+    /// could leave whitespace on either side of the asset when the parent
+    /// also imposed a `maxHeight` bound (Phase E.4.2).
+    private func mediaImageRow(_ media: MediaPayload) -> some View {
+        GeometryReader { geo in
+            let width = geo.size.width
+            let height = width / media.aspectRatio
+            ZStack {
+                Color.DS.bg2
+                if let posterImage = mediaPosterImage(media) {
+                    Image(uiImage: posterImage)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: width, height: height)
+                        .clipped()
+                }
+                if media.kind == .video {
+                    ZStack {
+                        Circle()
+                            .fill(.ultraThinMaterial)
+                            .frame(width: 44, height: 44)
+                        Image(systemName: "play.fill")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(Color.DS.ink)
+                            .offset(x: 1.5)  // optical center for the play glyph
+                    }
+                }
+            }
+            .frame(width: width, height: height)
+        }
+        .aspectRatio(media.aspectRatio, contentMode: .fit)
+        .frame(maxWidth: .infinity)
+        .contentShape(Rectangle())
+        .onTapGesture { isMediaViewerPresented = true }
+        .accessibilityLabel(media.kind == .video ? "Play video" : "Open photo")
+        .accessibilityAddTraits(.isButton)
+    }
+
+    /// Returns the displayable poster image for a media payload — the
+    /// `posterData` if present (videos), otherwise the asset itself
+    /// decoded as a `UIImage` (images).
+    private func mediaPosterImage(_ media: MediaPayload) -> UIImage? {
+        if let poster = media.posterData, let img = UIImage(data: poster) { return img }
+        return UIImage(data: media.data)
+    }
 }
 
 // MARK: - Previews
@@ -178,7 +310,7 @@ struct KeepCard: View {
                 time: "7:32 AM", type: .workout,
                 content: .text(
                     title: "Easy run · 35 min",
-                    message: "Felt strong. Legs tight early on."
+                    message: AttributedString("Felt strong. Legs tight early on.")
                 )
             ))
             KeepCard(note: MockNote(

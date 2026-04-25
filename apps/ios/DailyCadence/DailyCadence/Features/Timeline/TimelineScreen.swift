@@ -1,4 +1,6 @@
 import SwiftUI
+import PhotosUI
+import UniformTypeIdentifiers
 
 /// The Daily Timeline — primary surface of DailyCadence.
 ///
@@ -13,9 +15,15 @@ import SwiftUI
 /// Currently backed by `MockNotes.today`. Swap to real Supabase-backed data
 /// once the `notes` table + Swift SDK are wired (see `docs/PROGRESS.md`).
 struct TimelineScreen: View {
-    @State private var viewMode: TimelineViewMode = .timeline
-    @State private var boardLayout: BoardLayoutMode = .free
+    @State private var viewMode: TimelineViewMode = AppPreferencesStore.shared.defaultTodayView
+    @State private var boardLayout: BoardLayoutMode = .cards
     @State private var isEditorPresented = false
+
+    /// Drives the photo/video editor flow when the user picks
+    /// "Photo or video" from the FAB menu (Phase E.3).
+    @State private var isMediaPickerPresented = false
+    @State private var mediaPickerItem: PhotosPickerItem?
+    @State private var isMediaEditorPresented = false
 
     /// Read-through to `TimelineStore.shared.notes`. Reading inside `body`
     /// registers this view as an observer of the @Observable store, so any
@@ -38,26 +46,78 @@ struct TimelineScreen: View {
                     if viewMode == .board {
                         boardLayoutToggle
                             .padding(.horizontal, 20)
-                            .padding(.bottom, 16)
+                            .padding(.bottom, cardsOrderBarVisible ? 8 : 16)
+                            .transition(.opacity.combined(with: .move(edge: .top)))
+                    }
+
+                    if cardsOrderBarVisible {
+                        resetOrderRow
+                            .padding(.horizontal, 20)
+                            .padding(.bottom, 12)
                             .transition(.opacity.combined(with: .move(edge: .top)))
                     }
 
                     content
                         .padding(.horizontal, horizontalPadding(for: viewMode))
                 }
-                .padding(.bottom, 100)  // breathing room so FAB doesn't cover the last item
             }
+            // Phase E.5.3 — iOS 17+ `.contentMargins(.bottom, _:, for: .scrollContent)`
+            // reserves a bottom buffer in the scrollable content area so
+            // the persistent FAB never overlaps the last card. 120pt
+            // covers the FAB's 56pt frame + 16pt bottom padding + ~48pt
+            // breathing room for the shadow. This is the iOS-native
+            // pattern (Apple Mail, Reminders, Google Keep iOS all keep
+            // the FAB persistent and rely on content insets); the
+            // hide-on-scroll trick is more Material Design than UIKit.
+            .contentMargins(.bottom, 120, for: .scrollContent)
             .background(Color.DS.bg1)
             .toolbar(.hidden, for: .navigationBar)
             .animation(.easeOut(duration: 0.18), value: viewMode)
         }
         .overlay(alignment: .bottomTrailing) {
-            FAB { isEditorPresented = true }
-                .padding(.trailing, 20)
-                .padding(.bottom, 16)
+            // Menu attached directly to the FAB — popup anchors to the
+            // button itself rather than sliding up from the screen
+            // bottom (the prior `.confirmationDialog` placement felt
+            // disconnected from a bottom-right FAB). On iOS 26 the Menu
+            // gets the standard glass-styled popover.
+            //
+            // FAB stays persistent; the ScrollView's `.contentMargins`
+            // reserves a 120pt bottom buffer so the last card never
+            // ends up underneath the button.
+            Menu {
+                Button {
+                    isEditorPresented = true
+                } label: {
+                    Label("Text Note", systemImage: "note.text")
+                }
+                Button {
+                    isMediaPickerPresented = true
+                } label: {
+                    Label("Photo or Video", systemImage: "photo.on.rectangle")
+                }
+            } label: {
+                FABAppearance()
+            }
+            .accessibilityLabel("Add a note")
+            .padding(.trailing, 20)
+            .padding(.bottom, 16)
+        }
+        .photosPicker(
+            isPresented: $isMediaPickerPresented,
+            selection: $mediaPickerItem,
+            matching: .any(of: [.images, .videos]),
+            photoLibrary: .shared()
+        )
+        .onChange(of: mediaPickerItem) { _, newItem in
+            // PhotosPicker dismisses on selection — open the media editor
+            // sheet so the user can add a caption + type before saving.
+            if newItem != nil { isMediaEditorPresented = true }
         }
         .sheet(isPresented: $isEditorPresented) {
             NoteEditorScreen()
+        }
+        .sheet(isPresented: $isMediaEditorPresented, onDismiss: { mediaPickerItem = nil }) {
+            MediaNoteEditorScreen(initialItem: mediaPickerItem)
         }
     }
 
@@ -101,11 +161,21 @@ struct TimelineScreen: View {
 
     private var segmentedToggle: some View {
         Segmented(
-            options: TimelineViewMode.allCases.map { mode in
+            options: orderedViewModes.map { mode in
                 SegmentedOption(id: mode, title: mode.title, systemImage: mode.systemImage)
             },
             selection: $viewMode
         )
+    }
+
+    /// Order the Timeline / Board segments so the user's chosen default
+    /// sits in the first (leftmost) slot — Phase E.5.4. The non-default
+    /// view follows. Reading `AppPreferencesStore.shared.defaultTodayView`
+    /// inside `body` registers the screen as an observer, so flipping
+    /// the default in Settings re-orders the toggle live.
+    private var orderedViewModes: [TimelineViewMode] {
+        let defaultMode = AppPreferencesStore.shared.defaultTodayView
+        return [defaultMode] + TimelineViewMode.allCases.filter { $0 != defaultMode }
     }
 
     /// Sub-toggle shown only when `viewMode == .board`. Lets the user pick how
@@ -140,10 +210,8 @@ struct TimelineScreen: View {
     @ViewBuilder
     private var boardContent: some View {
         switch boardLayout {
-        case .free:
-            KeepGrid(items: notes) { note in
-                KeepCard(note: note)
-            }
+        case .cards:
+            cardsBoardGrid
         case .grouped:
             groupedView
         case .stacked:
@@ -151,10 +219,101 @@ struct TimelineScreen: View {
         }
     }
 
+    /// Free-layout 2-col masonry with drag-to-reorder.
+    ///
+    /// We use `.onDrag(_:preview:)` (rather than the newer `.draggable`)
+    /// because its data closure runs **at drag start** — that's the hook
+    /// for publishing the dragging id to `DragSessionStore.shared`
+    /// synchronously. `.draggable` only takes an `@autoclosure` payload
+    /// expression, which can't carry side effects in a way that runs
+    /// once when the drag begins.
+    ///
+    /// `.onDrop(of:delegate:)` + `NoteReorderDropDelegate` returns
+    /// `DropProposal(.move)` from `dropUpdated` (no green "+" badge) and
+    /// performs the live reorder from `dropEntered`. `performDrop` is a
+    /// fallback for cases `dropEntered` missed.
+    ///
+    /// `.contentShape(.dragPreview, RoundedRectangle(...))` clips the
+    /// long-press lift preview to the card's rounded corners.
+    private var cardsBoardGrid: some View {
+        let orderedNotes = CardsViewOrderStore.shared.sorted(notes)
+        return KeepGrid(items: orderedNotes) { note in
+            KeepCard(note: note)
+                .contentShape(
+                    .dragPreview,
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                )
+                .onDrag {
+                    // Runs once at drag start — publish the dragging id
+                    // so `NoteReorderDropDelegate.dropEntered` can read
+                    // it synchronously without an async
+                    // `NSItemProvider.loadObject(...)` race that iOS
+                    // often defers until drop time.
+                    DragSessionStore.shared.draggingNoteId = note.id
+                    return NSItemProvider(object: note.id.uuidString as NSString)
+                } preview: {
+                    KeepCard(note: note)
+                        .frame(maxWidth: 180)
+                        .opacity(0.85)
+                        .contentShape(
+                            .dragPreview,
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        )
+                }
+                .onDrop(
+                    of: [.text],
+                    delegate: NoteReorderDropDelegate(
+                        targetNote: note,
+                        allNotes: notes
+                    )
+                )
+        }
+    }
+
+    /// Visible whenever the user is on the Free Board layout AND has
+    /// reordered at least once. Empty state hides the reset.
+    private var cardsOrderBarVisible: Bool {
+        viewMode == .board
+            && boardLayout == .cards
+            && CardsViewOrderStore.shared.hasCustomOrder
+    }
+
+    /// "Reset to chronological" pill — restores the default oldest-→-newest
+    /// order from `TimelineStore`.
+    private var resetOrderRow: some View {
+        HStack {
+            Spacer()
+            Button {
+                withAnimation(.easeOut(duration: 0.2)) {
+                    CardsViewOrderStore.shared.reset()
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "arrow.counterclockwise")
+                        .font(.system(size: 11, weight: .semibold))
+                    Text("Reset order")
+                        .font(.DS.sans(size: 12, weight: .semibold))
+                }
+                .foregroundStyle(Color.DS.fg2)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(
+                    Capsule(style: .continuous).fill(Color.DS.bg2)
+                )
+                .overlay(
+                    Capsule(style: .continuous)
+                        .strokeBorder(Color.DS.border1, lineWidth: 0.5)
+                )
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Reset Free order to chronological")
+        }
+    }
+
     private func horizontalPadding(for mode: TimelineViewMode) -> CGFloat {
         switch mode {
         case .timeline: return 8    // timeline items carry their own left gutter
-        case .board:    return 16   // cards sit directly against the outer padding
+        case .board:    return 12   // matches `KeepGrid.spacing` for uniform rhythm
         }
     }
 
@@ -226,7 +385,7 @@ struct TimelineScreen: View {
                         message: note.timelineMessage,
                         background: note.resolvedBackgroundStyle,
                         titleStyle: note.titleStyle,
-                        messageStyle: note.messageStyle
+                        media: note.mediaPayload
                     )
                 }
             }

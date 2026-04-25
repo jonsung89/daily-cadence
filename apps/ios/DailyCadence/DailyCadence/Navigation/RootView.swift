@@ -33,13 +33,29 @@ struct RootView: View {
         }
     }
 
+    /// Tab items for the bottom bar. The `.today` slot's label + icon
+    /// mirror the user's chosen default view (Timeline or Board) from
+    /// `AppPreferencesStore.shared.defaultTodayView` — Phase E.5.2 — so
+    /// the tab communicates what they'll see when they tap it. Reading
+    /// the preference inside `body` registers RootView as an observer,
+    /// so changing the default in Settings updates the tab live.
     private var tabItems: [TabBarItem<RootTab>] {
-        RootTab.allCases.map { tab in
-            TabBarItem(
-                id: tab,
-                title: tab.title,
-                systemImage: tab.systemImage
-            )
+        let defaultView = AppPreferencesStore.shared.defaultTodayView
+        return RootTab.allCases.map { tab in
+            switch tab {
+            case .today:
+                return TabBarItem(
+                    id: tab,
+                    title: defaultView.title,
+                    systemImage: defaultView.systemImage
+                )
+            default:
+                return TabBarItem(
+                    id: tab,
+                    title: tab.title,
+                    systemImage: tab.systemImage
+                )
+            }
         }
     }
 }

@@ -2,16 +2,12 @@ import SwiftUI
 
 /// A 2-column masonry grid for Google Keep-style cards.
 ///
-/// Matches `.keep-grid` / `.keep-col` in `mobile.css`:
-/// - Two equal-width columns, 8pt gap between and within columns
-/// - Items alternate between columns (idx 0 → left, idx 1 → right, idx 2 → left, …)
-///   which yields a naturally staggered masonry layout because card heights
-///   vary by content kind
-///
-/// Alternation is deliberately simpler than a true shortest-column packer —
-/// it keeps insertion order legible (new items go where you expect) and
-/// matches the design system's JSX prototype, which pre-assigns items to
-/// columns by eye.
+/// Backed by `MasonryLayout` (Phase E.4.5) — a custom `Layout` that
+/// shortest-column-first-packs each subview at its **intrinsic** height
+/// for the proposed column width. Replaces the prior HStack-of-VStacks
+/// approach, which was vulnerable to SwiftUI's flex-sizing inflating
+/// short cards when the parent column had spare height (the
+/// "card-with-whitespace" bug).
 struct KeepGrid<Item: Identifiable, Content: View>: View {
     let items: [Item]
     let spacing: CGFloat
@@ -19,7 +15,7 @@ struct KeepGrid<Item: Identifiable, Content: View>: View {
 
     init(
         items: [Item],
-        spacing: CGFloat = 8,
+        spacing: CGFloat = 12,
         @ViewBuilder content: @escaping (Item) -> Content
     ) {
         self.items = items
@@ -28,27 +24,11 @@ struct KeepGrid<Item: Identifiable, Content: View>: View {
     }
 
     var body: some View {
-        HStack(alignment: .top, spacing: spacing) {
-            column(indices: leftIndices)
-            column(indices: rightIndices)
-        }
-    }
-
-    private func column(indices: [Int]) -> some View {
-        VStack(spacing: spacing) {
-            ForEach(indices, id: \.self) { idx in
-                content(items[idx])
+        MasonryLayout(columns: 2, spacing: spacing) {
+            ForEach(items) { item in
+                content(item)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .top)
-    }
-
-    private var leftIndices: [Int] {
-        items.indices.filter { $0.isMultiple(of: 2) }
-    }
-
-    private var rightIndices: [Int] {
-        items.indices.filter { !$0.isMultiple(of: 2) }
     }
 }
 
@@ -59,7 +39,7 @@ struct KeepGrid<Item: Identifiable, Content: View>: View {
         KeepGrid(items: MockNotes.today) { note in
             KeepCard(note: note)
         }
-        .padding(16)
+        .padding(12)
     }
     .background(Color.DS.bg1)
 }
@@ -69,7 +49,7 @@ struct KeepGrid<Item: Identifiable, Content: View>: View {
         KeepGrid(items: MockNotes.today) { note in
             KeepCard(note: note)
         }
-        .padding(16)
+        .padding(12)
     }
     .background(Color.DS.bg1)
     .preferredColorScheme(.dark)

@@ -1,3 +1,5 @@
+import Foundation
+import SwiftUI
 import Testing
 @testable import DailyCadence
 
@@ -52,5 +54,30 @@ struct TimelineStoreTests {
         let store = TimelineStore()
         #expect(store.notes.count == MockNotes.today.count,
                 "Default seed must match MockNotes.today so the simulator launch shows the curated sample day")
+    }
+
+    @Test func attributedMessagePreservesPerRunAttributes() {
+        // Phase E.2 — message is AttributedString. A note's per-run font +
+        // foreground color must round-trip through the store unchanged so
+        // rich-text edits aren't silently flattened on save.
+        var attributed = AttributedString("Hello world")
+        // Style "world" with Playfair + cobalt-ish color.
+        if let worldStart = attributed.range(of: "world") {
+            attributed[worldStart].font = .custom("PlayfairDisplay-Regular", size: 16)
+            attributed[worldStart].foregroundColor = .red
+        }
+        let store = TimelineStore(initialNotes: [])
+        store.add(MockNote(
+            time: "9:00 AM",
+            type: .mood,
+            content: .text(title: "Rich", message: attributed)
+        ))
+
+        guard case let .text(_, recovered)? = store.notes.first?.content else {
+            Issue.record("Expected stored content to be .text")
+            return
+        }
+        #expect(recovered == attributed,
+                "Per-run AttributedString attributes must survive the store add/read round-trip")
     }
 }

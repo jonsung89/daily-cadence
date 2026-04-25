@@ -30,7 +30,7 @@ daily-cadence/
 
 **iOS stack**
 - SwiftUI, Swift 5.9+
-- iOS 17.0 minimum deployment target
+- iOS 26.0 minimum deployment target (raised from 17.6 in Phase E.2 — needed for the native `TextEditor(text: $attributedString, selection: $selection)` API and `AttributedString.transformAttributes(in: &selection)` used by rich-text note bodies)
 - `@Observable` macro for view models
 - `NavigationStack` for navigation
 - SwiftData for offline / local cache
