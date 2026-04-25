@@ -112,8 +112,14 @@ Three sub-layouts in a segmented control below the main toggle. **Cards is the d
 - Card max height capped at 480pt.
 - **Drag-to-reorder:** long-press any card → drag anywhere → drop.
   - Live reflow during drag — surrounding cards shift in real time as you pass over them (`DropDelegate.dropEntered` + cached drag id in `DragSessionStore`).
+  - **Source card fades to ~0.35 opacity** while it's being dragged so the lift is visually obvious and the floating preview doesn't compete with a duplicate-rendered original.
+  - **Live drop target outline** — whichever card the finger is currently over gets a 2pt sage-tinted border so the user has a clear "this is where it'll land" cue. Tracked via `DragSessionStore.currentDropTargetId`, set on `dropEntered`, cleared on `dropExited` / `performDrop`.
+  - **Cascade guard.** As cards reflow under the finger, `dropEntered` can fire for the same target multiple times in quick succession. `DragSessionStore.lastMoveTargetId` tracks the most-recently-moved-to target and skips redundant moves until a *different* target is hovered.
   - Drag-lift preview is rounded to match the card's 10pt corner radius (via `.contentShape(.dragPreview, _:)`).
   - Drop operation is **`.move`** (no green "+" copy badge).
+  - **Known limitations** (tracked in [docs/TODO_CUSTOM_DRAG_REORDER.md](TODO_CUSTOM_DRAG_REORDER.md) for replacement with a custom `DragGesture`):
+    - Dropping precisely on the source card itself doesn't always reach our delegate (iOS filters the source as a drop target). The next drag's start clears any stale state via `DragSessionStore.endSession()`.
+    - No "release on empty space → cancel + revert" semantics. The live reflow always commits.
 - **Reset order:** when the user has any custom ordering, a small `↺ Reset order` pill appears at the top-right of the Board area. Tap → animated revert to chronological order.
 - New notes added after a manual reorder always land at the **end** of the custom order (never injected into the middle of a hand-curated layout).
 

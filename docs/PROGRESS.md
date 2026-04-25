@@ -1,6 +1,6 @@
 # DailyCadence — Progress
 
-**Last updated:** 2026-04-25 (Phase E.5.4 — segmented toggle leads with the user's chosen default)
+**Last updated:** 2026-04-25 (Phase E.5.6 — drag cascade guard + stale-session reset; custom-gesture refactor TODO)
 **Current phase:** Phase 1 MVP — iOS app for Jon + wife, TestFlight distribution
 
 This is the living state of the project. Update at the end of every session.
@@ -754,6 +754,45 @@ User flagged that picking Board as the default made the bottom-tab icon flip but
 
 **End-to-end:** Settings → Today → **Default view** → Board → close Settings → in-screen toggle now reads **Board | Timeline** left-to-right (matching the bottom tab's Board label).
 
+### Phase E.5.5 — Drag visual feedback (added this round)
+
+User reported the Cards-layout drag-to-reorder feels inconsistent — works, but hard to tell when. Two visual additions to clarify what's happening, without changing the underlying gesture mechanics:
+
+**1. Source card fades to ~0.35 opacity while dragging.** Immediately confirms the long-press registered, and removes the visual confusion of a "ghost" source card being rendered in the same column as the floating drag preview during live reflow.
+
+**2. Live drop target outline.** Whichever card the finger is over gets a 2pt sage-tinted border (uses the user's primary theme color). Set via `DragSessionStore.currentDropTargetId` on `dropEntered`, cleared on `dropExited`. Tells the user *exactly* where the drop will land before they release.
+
+Implementation:
+- `DragSessionStore` extended with `currentDropTargetId: UUID?` plus an `endSession()` helper that clears both ids.
+- `NoteReorderDropDelegate.dropEntered` sets `currentDropTargetId = targetNote.id` (in addition to triggering the move).
+- `NoteReorderDropDelegate.dropExited` clears `currentDropTargetId` if this card was the active target. **Doesn't** clear `draggingNoteId` — drag is still active and likely about to enter another card's zone.
+- `NoteReorderDropDelegate.performDrop` calls `DragSessionStore.shared.endSession()`.
+- `cardsBoardGrid` reads both ids inside `body` (so the cards re-render when state changes via `@Observable`), applies `.opacity(isSourceOfDrag ? 0.35 : 1)` and a conditional sage `RoundedRectangle.strokeBorder(_, lineWidth: 2)` overlay. Both transitions ride a 0.18s `.easeOut`.
+
+**FEATURES.md updated** with the new visual contract.
+
+**Tests:** 95/95 still passing — visual feedback only, no model changes.
+
+**End-to-end:** Long-press a card → it fades to half-opacity, lifted preview floats with finger → as you pass over other cards, each one in turn outlines in sage → release → fade clears, outline clears, card lands in the highlighted slot.
+
+### Phase E.5.6 — Cascade guard + stale-session reset (added this round)
+
+User saw two issues with drag-to-reorder when dropping precisely on a target card: (1) the dropped card sometimes "went back" to its previous position, and (2) the source's faded state persisted after release. Both come from structural limits of SwiftUI's `.onDrag` / `.onDrop` system.
+
+**1. `dropEntered` cascade guard.** During live reflow, cards animate to new positions. The user's stationary finger ends up over different cards as the layout shifts, each firing another `dropEntered` and another move — the dragged card "bounces" through positions before the user releases.
+
+`DragSessionStore.lastMoveTargetId` now records which target we most recently committed a move *toward*. `NoteReorderDropDelegate.dropEntered` skips when re-firing on the same target id, so cascades within one hover don't re-shuffle. Crossing into a new target id resets the guard so legit hover-over-new-card moves still apply.
+
+**2. Stale-session reset at drag start.** When the user drops *precisely on* the source's drop zone, iOS filters the source out — no `performDrop` fires, our cleanup never runs, the source stays at 35% opacity until "something" clears it. We now call `DragSessionStore.shared.endSession()` at the top of every `.onDrag` closure so the *next* drag self-heals the prior one's stale state.
+
+**Documented limitations.** Both fixes are mitigations on top of the iOS-native drag system, not full solutions. The proper fix is a custom `DragGesture` reorder (no `.onDrag` / `.onDrop` involved). Spec'd in [docs/TODO_CUSTOM_DRAG_REORDER.md](TODO_CUSTOM_DRAG_REORDER.md) — picks up in a future session.
+
+`docs/FEATURES.md` updated with the cascade guard description and the limitations callout.
+
+**Tests:** 95/95 still passing.
+
+**End-to-end:** Long-press a card → drag onto another card → release → moves cleanly without bouncing through intermediate positions. If the move was glitchy and source stayed faded, starting another drag resets state immediately.
+
 ### Tests (79/79 passing — +3 this round)
 - `ColorHexTests` (16) — hex initializer, every palette family in light + dark, invariant tokens, role flips
 - `FontLoaderTests` (5) — bundled font registration + variable-axis weight
@@ -782,7 +821,7 @@ User flagged that picking Board as the default made the bottom-tab icon flip but
 
 ## 🚧 In flight
 
-Nothing active — Phase E.5.3 (scroll-aware FAB) landed. Open follow-ups: pinch-to-zoom in the crop tool, inline text formatting (bold/italic/underline/strikethrough), auto-bullet + checkboxes in text notes, inline attachments in text notes.
+Nothing active — Phase E.5.6 (cascade guard + stale-session reset) landed. **Queued for a future session:** custom `DragGesture` reorder — see [docs/TODO_CUSTOM_DRAG_REORDER.md](TODO_CUSTOM_DRAG_REORDER.md). Other open follow-ups: pinch-to-zoom in the crop tool, inline text formatting (bold/italic/underline/strikethrough), auto-bullet + checkboxes in text notes, inline attachments in text notes.
 
 ---
 

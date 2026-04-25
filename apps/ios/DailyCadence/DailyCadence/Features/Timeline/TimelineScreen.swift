@@ -237,18 +237,50 @@ struct TimelineScreen: View {
     /// long-press lift preview to the card's rounded corners.
     private var cardsBoardGrid: some View {
         let orderedNotes = CardsViewOrderStore.shared.sorted(notes)
+        // Read these from the store inside the body so the views below
+        // re-render automatically when the drag session changes (the
+        // store is `@Observable`).
+        let draggingId = DragSessionStore.shared.draggingNoteId
+        let dropTargetId = DragSessionStore.shared.currentDropTargetId
         return KeepGrid(items: orderedNotes) { note in
+            let isSourceOfDrag = draggingId == note.id
+            let isLiveDropTarget = dropTargetId == note.id && !isSourceOfDrag
             KeepCard(note: note)
+                // Fade the source card while it's being dragged so the
+                // user sees the drag "lifted" and the live-reflow's
+                // shifting cards aren't competing visually with a
+                // double-rendered original.
+                .opacity(isSourceOfDrag ? 0.35 : 1)
+                // Subtle highlight on whichever card the finger is
+                // currently over — explicit "this is where it'll land"
+                // cue. Uses the user's primary theme color so it picks
+                // up the active palette.
+                .overlay {
+                    if isLiveDropTarget {
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .strokeBorder(Color.DS.sage, lineWidth: 2)
+                            .transition(.opacity)
+                    }
+                }
+                .animation(.easeOut(duration: 0.18), value: isSourceOfDrag)
+                .animation(.easeOut(duration: 0.18), value: isLiveDropTarget)
                 .contentShape(
                     .dragPreview,
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
                 )
                 .onDrag {
-                    // Runs once at drag start — publish the dragging id
-                    // so `NoteReorderDropDelegate.dropEntered` can read
-                    // it synchronously without an async
-                    // `NSItemProvider.loadObject(...)` race that iOS
-                    // often defers until drop time.
+                    // Runs once at drag start. Two responsibilities:
+                    //   1. Clear any leftover state from a previous drag
+                    //      that ended without a `performDrop` callback —
+                    //      iOS filters the source view as a drop target,
+                    //      so dropping precisely on yourself never
+                    //      reaches our delegate, leaving the source's
+                    //      fade lingering until the next drag.
+                    //   2. Publish the new dragging id so
+                    //      `NoteReorderDropDelegate.dropEntered` reads
+                    //      it synchronously (no async
+                    //      `NSItemProvider.loadObject` round-trip).
+                    DragSessionStore.shared.endSession()
                     DragSessionStore.shared.draggingNoteId = note.id
                     return NSItemProvider(object: note.id.uuidString as NSString)
                 } preview: {

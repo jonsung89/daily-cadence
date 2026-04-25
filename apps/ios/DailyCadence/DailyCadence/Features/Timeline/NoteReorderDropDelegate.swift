@@ -31,11 +31,29 @@ struct NoteReorderDropDelegate: DropDelegate {
         DropProposal(operation: .move)
     }
 
-    /// Live reflow during drag.
+    /// Live reflow during drag. Also publishes this card as the current
+    /// drop target so it can render a "live drop" outline.
     func dropEntered(info: DropInfo) {
+        DragSessionStore.shared.currentDropTargetId = targetNote.id
         guard let draggingId = DragSessionStore.shared.draggingNoteId,
               draggingId != targetNote.id else { return }
+        // Cascade guard: as cards animate during live reflow, the user's
+        // stationary finger crosses between drop zones and triggers
+        // multiple `dropEntered`s in quick succession. Skip if we've
+        // already moved relative to this exact target — re-firing the
+        // move would just bounce the card around.
+        if DragSessionStore.shared.lastMoveTargetId == targetNote.id { return }
+        DragSessionStore.shared.lastMoveTargetId = targetNote.id
         Self.move(droppedId: draggingId, before: targetNote.id, in: allNotes)
+    }
+
+    /// Hover ended — clear the highlight if we were the active target.
+    /// Don't touch `draggingNoteId`; the drag is still active and
+    /// likely about to enter another card's zone.
+    func dropExited(info: DropInfo) {
+        if DragSessionStore.shared.currentDropTargetId == targetNote.id {
+            DragSessionStore.shared.currentDropTargetId = nil
+        }
     }
 
     /// Drop release — clears the session, and as a fallback re-applies
@@ -46,7 +64,7 @@ struct NoteReorderDropDelegate: DropDelegate {
            draggingId != targetNote.id {
             Self.move(droppedId: draggingId, before: targetNote.id, in: allNotes)
         }
-        DragSessionStore.shared.draggingNoteId = nil
+        DragSessionStore.shared.endSession()
         return true
     }
 
