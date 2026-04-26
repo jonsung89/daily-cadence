@@ -284,17 +284,38 @@ struct TimelineScreen: View {
         } else {
             switch viewMode {
             case .timeline:
-                timelineView
+                timelineContent
             case .board:
                 boardContent
             }
         }
     }
 
-    /// Dispatches Board rendering based on `boardLayout`. Phase E.5.15
-    /// inserts the Pinned section at the top of every sub-mode (when any
-    /// note is pinned); the sub-mode-specific layout below it sees only
-    /// the unpinned subset, so a pinned note never appears twice.
+    /// Timeline view + Pinned section above it.
+    ///
+    /// Unlike Board (where pinned notes are *removed* from the sub-mode
+    /// content below to avoid duplicates), Timeline deliberately shows
+    /// pinned notes in **both** places: surfaced at the top for quick
+    /// access, AND retained in their natural chronological slot in the
+    /// rail. The chronological rail is the timeline's whole point —
+    /// ripping a note out of its time slot would distort the day's
+    /// shape — so the Pinned section here is a lightweight quick-access
+    /// shelf, not a re-categorization.
+    @ViewBuilder
+    private var timelineContent: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            if !pinnedNotes.isEmpty {
+                pinnedSection
+            }
+            timelineView
+        }
+    }
+
+    /// Dispatches Board rendering based on `boardLayout`. The Pinned
+    /// section sits at the top when any note is pinned; the sub-mode-
+    /// specific layout below it sees only the unpinned subset, so a
+    /// pinned note appears exactly once on Board (unlike Timeline,
+    /// where it deliberately appears in both the shelf and the rail).
     @ViewBuilder
     private var boardContent: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -315,16 +336,26 @@ struct TimelineScreen: View {
         }
     }
 
-    /// The "Pinned" section rendered at the top of each Board sub-mode
-    /// when any note is pinned (Phase E.5.15).
+    /// The "Pinned" section rendered at the top of every view (Phase
+    /// E.5.15 introduced it on Board; later expanded to Timeline so the
+    /// affordance is consistent across the whole Today screen).
     ///
-    /// **Layout-per-mode.** For Cards and Stack the pinned cards render
-    /// in a 2-col masonry — pinned notes are the user's "important now"
-    /// list, and a flat masonry surfaces them clearly without the per-
-    /// type stacking abstraction (you want pinned items immediately
-    /// readable, not collapsed into a pile). For Group the pinned cards
-    /// render in a horizontal scroll rail to match Group's all-rails
-    /// visual rhythm.
+    /// **Layout-per-mode.** For Timeline / Cards / Stack the pinned
+    /// cards render in a 2-col masonry — pinned notes are the user's
+    /// "important now" list, and a flat masonry surfaces them clearly
+    /// without the per-type stacking abstraction (you want pinned items
+    /// immediately readable, not collapsed into a pile). For Group the
+    /// pinned cards render in a horizontal scroll rail to match Group's
+    /// all-rails visual rhythm.
+    ///
+    /// **Duplication semantics differ by mode.** Board sub-modes
+    /// (Cards / Stack / Group) feed `unpinnedNotes` into their content
+    /// below the section, so a pinned note appears *once* — in the
+    /// shelf only. Timeline feeds the full chronological list into the
+    /// rail below, so a pinned note appears *twice* — in the shelf AND
+    /// in its natural time slot. Pulling pinned items out of the rail
+    /// would distort the day's chronological shape, which is the
+    /// timeline's whole point.
     ///
     /// **Drag-to-reorder is intentionally not wired** for the pinned
     /// section in Phase 1 — pinned items keep chronological order. To
@@ -350,7 +381,12 @@ struct TimelineScreen: View {
             }
             .padding(.horizontal, 4)
 
-            if boardLayout == .grouped {
+            // Rail variant only on Board / Group — Timeline always uses
+            // masonry. Without the `viewMode == .board` guard, switching
+            // from Board+Group to Timeline would leak the rail layout
+            // onto the Timeline pinned shelf because `boardLayout` state
+            // persists across mode toggles.
+            if viewMode == .board && boardLayout == .grouped {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(alignment: .top, spacing: 10) {
                         ForEach(pinnedNotes) { note in

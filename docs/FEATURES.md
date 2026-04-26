@@ -92,8 +92,21 @@ The day's notes, viewable as a Timeline rail or a Board grid.
 - Active segment: filled `bg2`, warm-ink shadow. Inactive: `taupe` track.
 - Initial value: `AppPreferencesStore.shared.defaultTodayView` (default `.timeline`).
 
+### Pinned section (shared by Timeline + Board)
+
+A **Pinned section** appears at the top of every Today view whenever any note is pinned. Section header is uppercase "PINNED" with a honey-yellow `pin.fill` glyph and a count. Layout per mode:
+- **Timeline / Cards / Stack** — pinned cards render in a flat 2-col masonry. Drag-to-reorder is intentionally disabled in the pinned section (matches Apple Notes — pinned items keep chronological order; unpin + re-pin to rearrange).
+- **Group** — pinned cards render in a horizontal scroll rail above the per-type rails, matching Group's all-rails visual rhythm.
+
+**Duplication differs by mode** — a deliberate design choice:
+- **Board** sub-modes (Cards / Stack / Group) feed `unpinnedNotes` into their content below the section, so a pinned note appears **once** (in the shelf only).
+- **Timeline** feeds the full chronological list into the rail below, so a pinned note appears **twice** (shelf + natural time slot). Yanking pinned items out of the rail would distort the day's chronological shape, which is the timeline's whole point — the shelf is a quick-access shortcut, not a re-categorization.
+
+Pinning is toggled either by **tapping the pin glyph** in the card's top-right corner (`pin` outline → `pin.fill` honey, idempotent), or via the card's **`.contextMenu`** (Pin / Unpin entry). Both surfaces flow through the same `PinStore.togglePin(_:)` call. The honey-yellow color is invariant across the design system (only token that doesn't light/dark-flip), giving the pinned state a stable universal cue regardless of theme or card tint.
+
 ### Timeline view
 
+- Optional **Pinned section** (see above) sits above the rail when any note is pinned.
 - Vertical rail of `NoteCard`s connected by a sage-dotted line.
 - Each row: time column on left + dot/rail + card on right.
 - `lineStyle` per row: `belowDotOnly` for the first row, `aboveDotOnly` for the last, `full` for middle, `dotOnly` if there's only one note.
@@ -102,11 +115,7 @@ The day's notes, viewable as a Timeline rail or a Board grid.
 
 ### Board view
 
-All three sub-layouts share a **Pinned section** rendered at the top whenever any note is pinned (Phase E.5.15). Section header is uppercase "PINNED" with a honey-yellow `pin.fill` glyph and a count. Layout per sub-mode:
-- **Cards / Stack** — pinned cards render in a flat 2-col masonry above the sub-mode's content. Drag-to-reorder is intentionally disabled in the pinned section (matches Apple Notes — pinned items keep chronological order; unpin + re-pin to rearrange).
-- **Group** — pinned cards render in a horizontal scroll rail above the per-type rails, matching Group's all-rails visual rhythm.
-
-Pinning is toggled either by **tapping the pin glyph** in the card's top-right corner (`pin` outline → `pin.fill` honey, idempotent), or via the card's **`.contextMenu`** (Pin / Unpin entry). Both surfaces flow through the same `PinStore.togglePin(_:)` call. The honey-yellow color is invariant across the design system (only token that doesn't light/dark-flip), giving the pinned state a stable universal cue regardless of theme or card tint.
+All three sub-layouts share the same **Pinned section** at the top (see "Pinned section" above). Below the shelf, each sub-mode renders the unpinned subset.
 
 Three sub-layouts, picked from a **top-right toolbar Menu** that only appears when Board is selected (Phase E.5.13 — Apple Files / Photos pattern). The Menu's icon reflects the active sub-mode (`square.grid.2x2` for Cards, `square.stack.3d.up` for Stack, `rectangle.grid.2x2.fill` for Group) so the user has a glance-level cue of which layout is current; opening the Menu shows all three options with a checkmark on the active one. **Cards is the default and listed first**:
 
@@ -490,7 +499,7 @@ All `@Observable` singletons. None hit Supabase yet — Phase F follow-up.
 | `AppPreferencesStore` | UserDefaults | persistent | Behavioral defaults (e.g., `defaultTodayView`). |
 | `NoteDraftStore` | in-memory | session | Recovers in-progress text-note edits across accidental sheet dismiss. |
 | `CardsViewOrderStore` | in-memory | session | Custom note ordering for the Cards Board layout. |
-| `PinStore` | in-memory | session | Set of pinned note ids (Phase E.5.15). Drives the "Pinned" section at the top of every Board sub-mode + the visible pin glyph on each card. |
+| `PinStore` | in-memory | session | Set of pinned note ids (Phase E.5.15). Drives the "Pinned" section at the top of Timeline + every Board sub-mode, plus the visible pin glyph on each card. |
 
 Repository services (read-only) for JSON-backed catalogs:
 

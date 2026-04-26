@@ -1361,6 +1361,18 @@ This stays much smaller than the original Phase E.4.6 implementation: no separat
 - `Features/MediaCrop/PhotoCropView.swift` — pinch + pan, handle inset, OSLog, autoreleasepool. Net ~+50 / −30 lines.
 - `Services/MediaImporter.swift` — OSLog instrumentation in import path.
 
+### Pinned section now lives on Timeline too (added this round)
+
+The "Pinned" shelf was Board-only since Phase E.5.15. Extending it to Timeline gives the user one consistent affordance across both view modes.
+
+**Duplication semantics differ by mode** — a deliberate design choice:
+- **Board** sub-modes feed `unpinnedNotes` to their content, so a pinned note appears once (in the shelf only).
+- **Timeline** feeds the full chronological list to the rail, so a pinned note appears twice (shelf + natural time slot). Pulling pinned items out of the chronological rail would distort the day's timeline shape, which is the whole point of Timeline mode — the shelf is a quick-access shortcut, not a re-categorization.
+
+**Files (~30 lines):**
+- `Features/Timeline/TimelineScreen.swift` — new `timelineContent` view that wraps the timeline rail with an optional `pinnedSection` above it; `content` switch dispatches to it for `.timeline`. Tightened the pinned-section's rail/masonry condition from `boardLayout == .grouped` to `viewMode == .board && boardLayout == .grouped` so a stale `boardLayout = .grouped` from a previous session can't leak the rail layout onto Timeline. Doc comments on `pinnedSection` + `boardContent` updated to reflect cross-mode use.
+- `docs/FEATURES.md` — refactored: new shared "Pinned section" subsection, Timeline view block references it, Board view block thins down (no longer the home of the pinned-section docs).
+
 ### Tests (79/79 passing — +3 this round)
 - `ColorHexTests` (16) — hex initializer, every palette family in light + dark, invariant tokens, role flips
 - `FontLoaderTests` (5) — bundled font registration + variable-axis weight
@@ -1389,7 +1401,7 @@ This stays much smaller than the original Phase E.4.6 implementation: no separat
 
 ## 🚧 In flight
 
-Nothing active — Phase E.5.18a (inline-media editor polish) landed. Open follow-ups: per-block focused TextEditors (mid-paragraph image insertion — currently the model supports it but UI ships intro/attachments/outro three-zone layout), drag-to-reorder blocks, inline text formatting (bold/italic/underline/strikethrough), auto-bullet + checkboxes in text notes, auto-scroll the cards grid when dragging near a viewport edge, optional Pinned section on Timeline view, discoverability hint for the long-press → context menu, **persistence work (Supabase schema + auth + Apple Developer enrollment)**.
+Nothing active — Phase E.5.18a (inline-media editor polish) landed. Open follow-ups: per-block focused TextEditors (mid-paragraph image insertion — currently the model supports it but UI ships intro/attachments/outro three-zone layout), drag-to-reorder blocks, inline text formatting (bold/italic/underline/strikethrough), auto-bullet + checkboxes in text notes, auto-scroll the cards grid when dragging near a viewport edge, discoverability hint for the long-press → context menu, **persistence work (Supabase schema + auth + Apple Developer enrollment)**.
 
 ---
 
