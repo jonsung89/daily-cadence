@@ -1,6 +1,6 @@
 # DailyCadence — Progress
 
-**Last updated:** 2026-04-25 (Phase E.5.6 — drag cascade guard + stale-session reset; custom-gesture refactor TODO)
+**Last updated:** 2026-04-25 (Phase E.5.17 — delete confirmation swapped from bottom action sheet to centered alert, matching Apple's pattern for irreversible single-item destruction)
 **Current phase:** Phase 1 MVP — iOS app for Jon + wife, TestFlight distribution
 
 This is the living state of the project. Update at the end of every session.
@@ -793,6 +793,243 @@ User saw two issues with drag-to-reorder when dropping precisely on a target car
 
 **End-to-end:** Long-press a card → drag onto another card → release → moves cleanly without bouncing through intermediate positions. If the move was glitchy and source stayed faded, starting another drag resets state immediately.
 
+### Phase E.5.7 — Custom `DragGesture` reorder (added this round)
+
+The Cards-layout reorder is rewritten on a single `LongPressGesture(0.4).sequenced(before: DragGesture(coordinateSpace: .named(...)))` chain owned by `cardsBoardGrid` — replacing the prior `.onDrag` / `.onDrop` / `NoteReorderDropDelegate` plumbing and the patches layered on it through E.5.6. We now own hit-testing, lifecycle, and the floating preview, which cleanly resolves the three structural limits called out in [docs/TODO_CUSTOM_DRAG_REORDER.md](TODO_CUSTOM_DRAG_REORDER.md).
+
+**Why this was overdue.** The iOS drag-and-drop system gave us no `onEnded` when the drop landed outside any registered target, fired `dropEntered` cascades as cards reflowed under a stationary finger, and offered no cancel-on-empty semantics. E.5.6's `lastMoveTargetId` and `endSession()` patches mitigated 2/3 of those, but the in-flight session could still leak past a single drag (source-fade-stuck) and dropping on empty always committed.
+
+**Architecture**
+- `Services/DragSessionStore.swift` — rewritten around a `DragSession` struct (source `noteId`, `currentLocation`, `grabOffset`, `preDragOrder` snapshot, `lastTargetId`) plus a `cardFrames: [UUID: CGRect]` hit-test table. New methods: `beginSession(...)`, `updateLocation(_:in:)`, `endDrag(finalLocation:in:)`. Old `draggingNoteId` / `currentDropTargetId` are kept as computed projections so the source-fade and drop-target outline visuals (E.5.5) work unchanged. Medium haptic on drag-start, light haptic on commit.
+- `Services/CardsViewOrderStore.swift` — added `restore(_:)` so the gesture can revert to the snapshot when the user releases over empty space.
+- `Features/Timeline/CardFramePreferenceKey.swift` — new `PreferenceKey` mapping `[UUID: CGRect]`. Each card publishes its frame in the grid's named coord space via a `GeometryReader` background.
+- `Features/Timeline/TimelineScreen.swift`'s `cardsBoardGrid` — `.gesture(reorderGesture(...))` per card; `.coordinateSpace(name: cardsGridCoordinateSpace)` on the grid; `.onPreferenceChange(CardFramePreferenceKey.self)` syncs frames into `DragSessionStore.cardFrames`; `.overlay` renders a duplicate `KeepCard` at the finger position offset by the grab point so the card stays "in hand" instead of jumping to be centered on the finger.
+- `Features/Timeline/NoteReorderDropDelegate.swift` — **deleted**. No longer referenced.
+
+**Gesture mechanics.** `.updating($dragGestureBuffer)` is used (not `.onChanged`) because `SequenceGesture<LongPressGesture, DragGesture>.Value` isn't `Equatable`. The `@GestureState` buffer is an unused `Bool` — all real state lives in `DragSessionStore`; side-effects from the closure are how the store stays in sync. First `.second(true, drag?)` callback initializes the session (captures grab offset + pre-drag order snapshot); subsequent callbacks call `updateLocation`. `onEnded` extracts the final location from the value and calls `endDrag`.
+
+**End-of-drag classification**
+| Path | Final state | Haptic |
+| --- | --- | --- |
+| Released over a card | Commit current (live-reflowed) order | Light |
+| Released over empty space | Restore pre-drag snapshot via `CardsViewOrderStore.restore(_:)` | None |
+
+**Tests (98/98, +3 this round)**
+- `restoreReplacesCustomOrderWithSnapshot` — explicit revert path: pre-existing custom order, mid-drag move, restore returns to pre-drag.
+- `restoreEmptySnapshotEqualsReset` — guards that a drag-cancel from a no-prior-custom-order state correctly clears `customOrder` instead of locking in the mid-drag move.
+- `dragCommitOnTargetMovesExactlyOnce` — re-firing the same `move(...)` is idempotent (mirrors the gesture's `target.id != session.lastTargetId` cascade guard at the store layer).
+
+**Acceptance criteria from the TODO** — all satisfied:
+- ✅ Dropping precisely on a card commits, no fade-stuck state (we always call `endDrag` from `onEnded`).
+- ✅ Dropping on empty space reverts (`restore(snapshot)`).
+- ✅ No `dropEntered` cascade — moves only fire on different `lastTargetId`, and the gesture system doesn't fire spurious enter callbacks at all.
+- ✅ Existing `CardsViewOrderStoreTests` still pass.
+- ✅ +2 new tests (we landed +3) covering the revert and commit-once semantics.
+- ✅ `docs/FEATURES.md` updated to drop the limitations caveats.
+
+**Tradeoff carried.** We lose iOS's auto-rendered drag-lift preview; we render our own duplicate card via the grid's `.overlay`. The custom preview is `.scaleEffect(1.03)` with a soft `.shadow(...)` so the lifted feel is preserved (and arguably nicer — we now own the spring on release). Net code change is roughly neutral after deleting `NoteReorderDropDelegate.swift` and the `.onDrag` boilerplate.
+
+**End-to-end:** Long-press a card → haptic → card fades, floating preview appears at the finger → drag → cards reflow live as the finger crosses into different targets → release on a card → light haptic, lands in the highlighted slot. Release on empty space → snaps back to the pre-drag order. Same drag again, no stale state.
+
+### Phase E.5.8 — Lift confirmation on long-press (added this round)
+
+User feedback on Phase E.5.7: the long-press → drag transition wasn't visually obvious — the medium haptic fired, but the card didn't change until the drag actually moved, so it was easy to be unsure whether you'd held long enough. Adds a dedicated **lifted** state distinct from active dragging.
+
+**The new three-state visual contract for the source card**
+| State | Trigger | Look |
+| --- | --- | --- |
+| At rest | Default | Opacity 1, scale 1, no shadow |
+| **Lifted** | Long press completes (~0.4s), drag hasn't moved yet | Opacity 1, **scale 1.04**, soft shadow (black @ 0.18 / r12 / y6), `zIndex(1)`, medium haptic |
+| Dragging | First drag delta after the lift | Opacity 0.35, scale 1, no shadow (floating preview takes over) |
+
+Animations: `.spring(response: 0.28, dampingFraction: 0.7)` on `isLifted` (pop feel); `.easeOut(0.18)` on `isSourceOfDrag` (smooth fade hand-off to the floating preview).
+
+**`DragSessionStore` changes**
+- Added `liftedNoteId: UUID?` — the card whose long press has completed but whose drag hasn't started moving.
+- New `liftSource(noteId:)` method — idempotent across repeat calls, fires the medium-impact haptic.
+- `beginSession(...)` no longer fires the haptic (lift owns it now); it clears `liftedNoteId` as it transitions into the active drag.
+- `endDrag(...)` clears `liftedNoteId` at the top — covers the long-press-then-release-without-moving case where there's no active session to clear.
+- `cancelSession()` also clears `liftedNoteId`.
+
+**Gesture wiring (`TimelineScreen.reorderGesture`)**
+- The single `case .second(true, let drag?)` branch was split into a switch:
+  - `.first(true)` → `liftSource(noteId:)`
+  - `.second(true, nil)` → `liftSource(noteId:)` (idempotent — fires when the gesture transitions before the drag updates)
+  - `.second(true, let drag?)` → existing init-or-update logic
+- `cardsBoardGrid` reads `liftedId` and applies the lifted visual when it matches the card's id (and the card isn't already the active drag source).
+
+**Tests:** 98/98 still passing. No new tests this round — the lift state is pure UI plumbing on top of the gesture's value stream; the underlying reorder semantics covered by `CardsViewOrderStoreTests` are unchanged.
+
+**End-to-end:** Long-press a card → at ~0.4s the card pops up (scale + shadow) with a medium haptic — clear "drag mode active" cue. Drag → card fades, floating preview takes over. Release → light haptic if dropped on a card, snap back to pre-drag if dropped on empty.
+
+### Phase E.5.9 — Double-tap-to-collapse on expanded Stack (added this round)
+
+Quick shortcut on top of the existing "Collapse ↑" pill. In Stack-mode, when a stack is expanded, double-tapping anywhere in the section collapses it.
+
+**Implementation** — `Features/Timeline/StackedBoardView.swift`'s `ExpandedColumnSection`:
+- `.contentShape(Rectangle())` on the section's outer `VStack` so the gaps between cards become part of the tappable surface (without it, only the cards themselves would catch taps).
+- `.onTapGesture(count: 2) { onCollapse() }` calls the same closure the pill uses, so the toggle animation (`spring(response: 0.42, dampingFraction: 0.82)`) is shared.
+
+**Compatibility note.** The expanded section can contain media cards (`KeepCard` for a `.media` note), which carry their own single-tap → fullscreen viewer. Double-tap on the parent introduces a small (~250ms) "is it a double?" disambiguation delay on those single taps — standard iOS behavior (Apple Photos uses the same pattern). Acceptable; the shortcut is worth more than the lost millis.
+
+**Tests:** 98/98 still passing. No new tests — pure UI gesture, no model state.
+
+**End-to-end:** Stack mode → tap a stack → cards unfurl → double-tap any card or gap → stack collapses.
+
+### Phase E.5.10 — Media as a first-class `NoteType` (added this round)
+
+Bare photo / video notes now auto-tag as `NoteType.media` instead of `.general`. Resolves the long-standing awkwardness in the Group / Stack layouts where photos got stuffed into the "General" catch-all alongside genuine generic text notes — a media note is *inherently* media, not a category.
+
+**Design framing.** Conceptually we now distinguish two flows:
+- **Bare media logging** ("here's a photo") → `MediaNoteEditorScreen`, no type picker, auto-tags `.media`.
+- **Semantic context with media** ("here's my workout, with a photo of it") → text note with an attached image. The canonical pattern, but it depends on inline-attachments-in-text-notes which is a deferred follow-up. Until then, captioned media notes carry their context via the optional caption field.
+
+Forcing the user to pick a type for a bare photo was friction without value. Removing it sharpens the data model: `NoteType` is now strictly about **what kind of thing this note records**, with a clean Media bucket carved out.
+
+**Changes**
+- `Models/NoteType.swift` — new `.media` case (declared last in `allCases` so existing pickers' visual order is preserved). Pigment `Color.DS.periwinkle`, soft `Color.DS.periwinkleSoft` (unused tokens that read as a soft media-y violet, no conflict with the warm-toned existing types). Icon `photo.on.rectangle` (matches the FAB menu's "Photo or Video" affordance for visual continuity).
+- New `NoteType.textEditorPickable` static accessor — returns `allCases` minus `.media`. The text-note editor's type picker uses this so a text note can't accidentally be tagged Media. Group / Stack views, Settings → Note Types, and the per-type style store all keep using `allCases`, so Media participates in color overrides and section rendering normally.
+- `Features/NoteEditor/NoteEditorScreen.swift` — type-picker `ForEach(NoteType.allCases)` swapped for `ForEach(NoteType.textEditorPickable)`.
+- `Features/NoteEditor/MediaNoteEditorScreen.swift` — the hardcoded `type: .general` on save flipped to `type: .media`. The screen never had a type-picker UI (Phase E.4.1 removed it); this just lands the auto-tagging at the data layer to match.
+- `Features/Settings/NoteTypePickerScreen.swift` — doc comment refreshed; functionally unchanged since it iterates `allCases` (Media row appears for free).
+
+**Tests:** 98/98 still passing. `NoteTypeStyleStoreTests` iterates `NoteType.allCases` so Media is covered for default-state, persistence, stale-id, and reset-all assertions automatically. No new tests this round — the behavior is "media notes save as type `.media` instead of `.general`," which is a one-line constant change in the editor's `save()` and a new enum case; both pieces are exercised end-to-end by the existing build + the editor's SwiftUI Preview.
+
+**End-to-end:** FAB → "Photo or Video" → pick a photo → caption + Save → photo appears in Today, tagged Media (periwinkle dot in card chrome). Switch to Board → Group → new "Media" section appears with the photo. Switch to Stack → photo lives in its own Media stack alongside Workout / Meal / etc. stacks.
+
+### Phase E.5.11 — Horizontal scroll rails for Group view (added this round)
+
+The Group Board sub-mode used to render each `NoteType` section as a 2-col vertical `LazyVGrid` — a busy type pushed every other type far down the screen. Switched each section to a horizontal scroll rail (Apple Music / App Store pattern) so all sections are visible at a glance and deep types just swipe within the rail.
+
+- Each section's body is now a `ScrollView(.horizontal)` of `KeepCard`s.
+- Cards size to ~55% of the viewport via iOS 17's `.containerRelativeFrame(.horizontal, alignment: .leading) { width, _ in width * 0.55 }`. Two fully visible + a peek of the third — clear "more to swipe" affordance, adapts to phone size.
+- `.scrollTargetLayout()` + `.scrollTargetBehavior(.viewAligned)` snap flicks to card boundaries.
+- Card heights stay intrinsic (capped at the existing `KeepCard.maxHeight`); section height = tallest card.
+
+Carves out a meaningfully different role from Stack ("compact glance per type") and Cards ("free 2-col masonry"): Group is now "all types visible, swipe each row to browse deep types."
+
+### Phase E.5.12 — Drag scroll/lift regression fix (added this round)
+
+Jon reported on test build: after creating a new note, touching any card on Cards Board immediately entered drag mode and the page wouldn't scroll. Root cause was a **stale gesture state across the editor sheet's lifecycle** combined with `.gesture()`'s exclusive touch claim conflicting with the parent ScrollView's pan recognizer.
+
+**Four fixes, layered:**
+
+1. **`.simultaneousGesture` instead of `.gesture`** on the per-card reorder gesture. With `.gesture`, our `LongPressGesture.sequenced(before: DragGesture(minimumDistance: 0))` exclusively claimed the touch, blocking the ScrollView's pan recognizer. `.simultaneousGesture` lets both track in parallel; `LongPressGesture`'s built-in `maximumDistance` (~10pt) still fails it cleanly when the user starts a scroll, so we don't accidentally lift on every swipe.
+2. **`.scrollDisabled(isCardReorderActive)`** on the outer ScrollView, gated on `liftedNoteId != nil || activeSession != nil`. Once a card is actually lifted or being dragged, the page freezes so it doesn't skid under the gesture. Auto-releases when `endDrag` clears both ids.
+3. **`onDismiss: { DragSessionStore.shared.cancelSession() }`** on both the text-note and media-note editor sheets. Sheet presentations interrupt the touch sequence in ways that left our `LongPressGesture`'s internal state half-completed; the next touch on return was being misinterpreted as the tail of a still-tracked long-press, instantly re-firing the lift. Resetting on dismiss is a clean baseline.
+4. **Removed the parallel `.first(true)` lift trigger** from the gesture switch. We were calling `liftSource` on both `.first(true)` and `.second(true, nil)` — the latter is the more reliable post-success transition (the explicit "long press done, drag pre-start" callback). Dropping the redundant `.first(true)` branch eliminates a path where SwiftUI was firing it before the duration was actually met (notably right after sheet dismissal).
+
+**Tests:** 98/98 still passing. The bug was state-management in the gesture's lifecycle hooks, not in the underlying reorder semantics, so existing `CardsViewOrderStoreTests` cover the right thing without modification.
+
+**End-to-end retest:** add a text or media note → return to Today → touch a card briefly → page scrolls normally. Long-press a card → at ~0.4s, lift visual + haptic fire. Drag → reorder. Drop → commit / revert.
+
+### Phase E.5.13 — Toolbar Menu for Board sub-mode (added this round)
+
+The Cards / Stack / Group sub-picker used to live in a second segmented row that appeared below the Timeline | Board toggle whenever Board was active — about 50pt of vertical chrome, only there to host a setting users mostly set once. Moved it to a top-right toolbar `Menu` (Apple Files / Photos pattern), which is the established iOS idiom for "primary view discriminator + view variants."
+
+- New `boardSubModeMenu` view in `TimelineScreen.swift` — `Menu` containing a `Picker(selection: $boardLayout)` over `BoardLayoutMode.allCases`. Picker-inside-Menu auto-renders checkmarks for the active option, so we get the native "current selection has a checkmark" affordance for free.
+- The Menu's icon mirrors the active sub-mode (`square.grid.2x2` / `square.stack.3d.up` / `rectangle.grid.2x2.fill`) so the user has a glance-level cue of which layout is current without opening the Menu.
+- Menu only renders when `viewMode == .board` (Timeline has no sub-modes). Mounts/unmounts with an `.opacity.combined(with: .scale(scale: 0.85))` transition so it pops in/out cleanly when toggling primary views.
+- The inline `boardLayoutToggle` row was deleted, along with its segmented control + the conditional padding adjacent to it. The remaining `segmentedToggle` (Timeline | Board) now uses one consistent bottom padding (12pt when the Cards-order reset pill follows; 16pt otherwise).
+- Added `.animation(.easeOut(duration: 0.18), value: boardLayout)` next to the existing `viewMode` animation so picking a new sub-mode from the Menu reflows the content with the same easing as the primary toggle.
+- `BoardLayoutMode.swift`'s doc comment refreshed to describe the new Menu-based picker; the segmented-control historical note remains for context.
+
+**Trade-off accepted.** Switching sub-modes is now 2 taps (open Menu → tap option) instead of 1. Cards/Stack/Group is a setting users set occasionally rather than every visit, so the saved chrome wins. If we ever decide rapid sub-mode switching is a hot path, we can add a long-press-on-Board affordance for direct cycling.
+
+**Tests:** 98/98 still passing. No new tests this round — the change is pure UI plumbing with no model-layer state.
+
+**End-to-end:** Today → Board → top-right header gains a small grid icon → tap → Menu pops with Cards / Stack / Group rows (checkmark on active) → tap one → content reflows to the new layout. Switch back to Timeline → the icon disappears.
+
+### Phase E.5.14 — Type-indicator polish on cards (added this round)
+
+The dot + label that identifies a note's `NoteType` was visually a footnote rather than a header — a 7-8pt dot and a 9-10pt label (grey on Timeline cards) made the user read the title first and the tag second. Bumped sizing on both card surfaces and unified the color treatment so the tag reads as the visual anchor.
+
+**KeepCard (Board view) `head`:**
+- Dot 7pt → 9pt
+- Label 9pt → 11pt (still bold, still `type.color`)
+- Spacing 6pt → 7pt
+- Bottom padding 2pt → 4pt (more separation before the title row)
+
+**TypeBadge (Timeline `NoteCard`):**
+- Dot 8pt → 10pt
+- Label 10pt → 11pt
+- **Label color flipped from `Color.DS.fg2` (grey) → `type.color`** — biggest perceptual change. Brings Timeline into parity with KeepCard's already-colored treatment so a Workout note reads as "WORKOUT" before the eye even lands on the title.
+- Spacing 8pt → 10pt to match the larger dot.
+- Time still in `fg2` mono — it's secondary info that doesn't need the colored treatment.
+
+**Why this restraint.** A pill / capsule treatment (Apple Mail thread label style) would also work and was considered, but adding solid backgrounds on every card would clash with the existing per-type color tint we apply to `KeepCard` (the cards are already lightly tinted by `type.color` at 0.333 opacity). A bigger colored dot + label uses contrast and size for emphasis without doubling up on background fills.
+
+**Tests:** 98/98 still passing. No new tests this round — pure visual sizing + color, no model state.
+
+**End-to-end:** Today → either Timeline or Board → tag is now the strongest readable element on each card after the title; type identity registers at a glance, especially in Board view at masonry density.
+
+### Phase E.5.15 — Pin + Delete on cards (added this round)
+
+Two per-card actions land together: **pinning** (promote a note to a Pinned section at the top of every Board sub-mode) and **deleting** (with a confirmation dialog). Modeled on Google Keep + Apple Notes: a visible glyph for the high-frequency action (pin) plus a `.contextMenu` (long-press) for the lower-frequency / dangerous one (delete).
+
+**Why both surfaces.** Pin is one tap from anywhere, often, and deserves a dedicated affordance. Delete is destructive — burying it inside a long-press menu is exactly right (Apple uses this pattern in Notes, Mail, Photos). Both routes flow through the same store methods, so the surface is consistent under the hood.
+
+**Why a visible pin glyph (not swipe-to-pin).** Swipe is a *list* pattern (Apple Mail, Notes list view). For card UIs Apple uses always-visible icons (Notes gallery, Google Keep) or context menus (Photos library). Swipe-on-masonry would also conflict with Group view's horizontal-scroll rails. The visible glyph wins on consistency across all three sub-modes and zero gesture conflicts.
+
+**Gesture coexistence.** Cards in the Cards Board layout still long-press for drag-to-reorder. The `.contextMenu` long-press and our `LongPressGesture(0.4).sequenced(before: DragGesture)` reorder gesture *naturally arbitrate*: hold + immediately move → drag (the movement disambiguates), hold + stay still past ~0.5s → context menu opens. Same Apple Photos pattern. No custom timing code needed; SwiftUI's built-in arbitration handles it.
+
+**Model + store changes**
+- `Services/PinStore.swift` — new `@Observable` singleton holding a `Set<UUID>` of pinned note ids. Methods: `isPinned(_:)`, `pin(_:)`, `unpin(_:)`, `togglePin(_:)`, `forget(_:)` (called on delete to clear ghost references). In-memory only for Phase 1; Supabase persistence is a Phase F follow-up.
+- `Services/TimelineStore.swift` — added `delete(noteId:)`. Removes the note + calls `PinStore.shared.forget(_:)` so a deleted note never leaves a "still pinned" ghost id behind.
+- `MockNote` is intentionally NOT mutated — pin state is a separate concern (single-column boolean in the future schema), kept off the value type so the model stays a snapshot.
+
+**UI changes**
+- `DesignSystem/Components/PinButton.swift` — new component. 13pt SF Symbol (`pin` outline / `pin.fill` in honey-yellow) inside a 32pt hit area. Outline is rotated -30° when unpinned for a subtle visual differentiator beyond color.
+- `KeepCard.swift` + `NoteCard.swift` — both gain a top-trailing `PinButton` overlay (gated on `showsActions` / `noteId != nil`) plus a `.contextMenu { Pin/Unpin · Delete }`. Media cards layer a thin `.ultraThinMaterial` backdrop circle behind the glyph so it stays readable over any photo. Both cards expose an `onRequestDelete` callback so deletion is a screen-level concern (the screen owns the confirmation dialog).
+- `TimelineScreen.swift` — adds `pendingDeleteId: UUID?` state + a `.confirmationDialog("Delete this note?" / "This can't be undone.")` with destructive **Delete** + cancel **Keep**. The screen's `requestDelete(_:)` closure is threaded into every card call site (cardsBoardGrid, groupedView, StackedBoardView, timelineView).
+- `StackedBoardView` extended to forward `onRequestDelete` to its `CollapsedStackCell` + `ExpandedColumnSection` children, which thread it down to each `KeepCard`.
+
+**Pinned section rendering**
+- New `pinnedSection` view in `TimelineScreen` mounted at the top of `boardContent` whenever `!pinnedNotes.isEmpty`.
+- Header: uppercase **PINNED** + honey `pin.fill` + count.
+- Layout per sub-mode:
+  - **Cards / Stack** → 2-col flat masonry of pinned cards (Stack mode's per-type stacks live below; pinned items are pulled out and shown plainly so they're immediately readable).
+  - **Group** → horizontal scroll rail matching the per-type rails' visual rhythm (Phase E.5.11 pattern).
+- The sub-mode layouts (`cardsBoardGrid`, `groupedNotes`, etc.) now operate on `unpinnedNotes` so a pinned note never appears twice.
+- **Drag-to-reorder is intentionally not wired for the pinned section.** Pinned items keep chronological order; the user unpins + re-pins to rearrange. Matches Apple Notes' pinned-section behavior.
+
+**Tests (106/106, +8 this round)**
+- `PinStoreTests` (6) — default empty, toggle flips, idempotent pin/unpin, forget removes id, multiple pins coexist.
+- `CardsViewOrderStoreTests` gained 2 new tests covering `TimelineStore.delete(_:)` — removal of the note + no-op on unknown ids.
+
+**End-to-end:** Tap the pin glyph on any card → glyph fills honey-yellow → card moves into the Pinned section at top of the current Board sub-mode (Cards/Stack as a 2-col masonry, Group as a horizontal rail). Long-press a card → context menu pops with Pin/Unpin + Delete → tap Delete → "Delete this note? · This can't be undone." dialog → confirm → card animates out, gone. Long-press + drag still reorders unpinned cards in Cards layout — gestures arbitrate cleanly.
+
+### Phase E.5.16 — Pin glyph as status indicator only (added this round)
+
+E.5.15 shipped the pin glyph on every card (both pinned and unpinned). Visually busy — every unpinned card carried an outline pin icon as permanent chrome. Modern card UIs treat the pin as a **state indicator, not a button**: Apple Notes, Apple Mail's flag column, iMessage pinned-conversation header all hide the glyph on un-flagged items and show only the filled state on flagged ones.
+
+**The change:**
+- `KeepCard.swift` + `NoteCard.swift` — the pin overlay now mounts only when `isPinned` is true. Unpinned cards have zero pin chrome.
+- Tapping the visible (pinned) glyph still unpins.
+- Pinning an unpinned card now goes through the **`.contextMenu` Pin entry** (long-press → Pin). The context menu was already wired in E.5.15; this just makes it the canonical entry point for pinning.
+- `.transition(.scale.combined(with: .opacity))` on the overlay so the glyph pops in/out smoothly when pinning state flips, rather than appearing instantly.
+
+**Trade-off (acknowledged).** New users won't see "pin is a feature" by glancing at unpinned cards — discoverability moves to the long-press menu. For Phase 1 (Jon + wife on TestFlight), a one-line hand-off covers it; for broader release we'll add a one-shot empty-state hint or a tooltip on first launch.
+
+**Tests:** 106/106 still passing — pure visual conditional, no model changes.
+
+**End-to-end:** All cards land on the Today screen with no permanent pin chrome. Long-press a card → Pin → glyph appears in the corner with a scale/opacity pop, card moves to the Pinned section. Tap the glyph on a pinned card → glyph disappears, card returns to its sub-mode position.
+
+### Phase E.5.17 — Delete confirmation: alert instead of action sheet (added this round)
+
+E.5.15's delete confirmation used `.confirmationDialog`, which on iPhone slides up as a bottom action sheet. Action sheets are Apple's pattern for **multi-option pickers** (Mail's "Trash / Archive / Move to..."), not for binary destructive confirmations on single items. For irreversible per-item destruction Apple consistently uses the **centered `.alert`**:
+
+- Apple Notes — "Delete Note?" → alert
+- Apple Photos — "Delete Photo?" → alert
+- Apple Calendar — "Delete Event?" → alert
+- Apple Reminders — "Delete Reminder?" → alert
+
+The alert pattern is more "in your face" by design, which is exactly the right vibe for an irreversible delete. Action sheets feel routine.
+
+**Change:** one modifier swap on `TimelineScreen.swift` — `.confirmationDialog(...)` → `.alert(...)`. Same call shape (`isPresented` + `presenting:` + button closure + message closure), so the diff is essentially the modifier name and the comment. Buttons unchanged: destructive **Delete** + cancel **Keep**.
+
+**Tests:** 106/106 still passing.
+
 ### Tests (79/79 passing — +3 this round)
 - `ColorHexTests` (16) — hex initializer, every palette family in light + dark, invariant tokens, role flips
 - `FontLoaderTests` (5) — bundled font registration + variable-axis weight
@@ -821,7 +1058,7 @@ User saw two issues with drag-to-reorder when dropping precisely on a target car
 
 ## 🚧 In flight
 
-Nothing active — Phase E.5.6 (cascade guard + stale-session reset) landed. **Queued for a future session:** custom `DragGesture` reorder — see [docs/TODO_CUSTOM_DRAG_REORDER.md](TODO_CUSTOM_DRAG_REORDER.md). Other open follow-ups: pinch-to-zoom in the crop tool, inline text formatting (bold/italic/underline/strikethrough), auto-bullet + checkboxes in text notes, inline attachments in text notes.
+Nothing active — Phase E.5.17 (delete confirmation moved to alert) landed. Open follow-ups: **inline attachments in text notes** (load-bearing for "semantic context with media" — see Phase E.5.10), pinch-to-zoom in the crop tool, inline text formatting (bold/italic/underline/strikethrough), auto-bullet + checkboxes in text notes, auto-scroll the cards grid when dragging near a viewport edge, optional Pinned section on Timeline view (pinned currently still renders chronologically there), discoverability hint for the long-press → context menu (relevant once Phase 1 expands beyond Jon + wife).
 
 ---
 

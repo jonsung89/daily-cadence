@@ -102,7 +102,13 @@ The day's notes, viewable as a Timeline rail or a Board grid.
 
 ### Board view
 
-Three sub-layouts in a segmented control below the main toggle. **Cards is the default and sits first**:
+All three sub-layouts share a **Pinned section** rendered at the top whenever any note is pinned (Phase E.5.15). Section header is uppercase "PINNED" with a honey-yellow `pin.fill` glyph and a count. Layout per sub-mode:
+- **Cards / Stack** — pinned cards render in a flat 2-col masonry above the sub-mode's content. Drag-to-reorder is intentionally disabled in the pinned section (matches Apple Notes — pinned items keep chronological order; unpin + re-pin to rearrange).
+- **Group** — pinned cards render in a horizontal scroll rail above the per-type rails, matching Group's all-rails visual rhythm.
+
+Pinning is toggled either by **tapping the pin glyph** in the card's top-right corner (`pin` outline → `pin.fill` honey, idempotent), or via the card's **`.contextMenu`** (Pin / Unpin entry). Both surfaces flow through the same `PinStore.togglePin(_:)` call. The honey-yellow color is invariant across the design system (only token that doesn't light/dark-flip), giving the pinned state a stable universal cue regardless of theme or card tint.
+
+Three sub-layouts, picked from a **top-right toolbar Menu** that only appears when Board is selected (Phase E.5.13 — Apple Files / Photos pattern). The Menu's icon reflects the active sub-mode (`square.grid.2x2` for Cards, `square.stack.3d.up` for Stack, `rectangle.grid.2x2.fill` for Group) so the user has a glance-level cue of which layout is current; opening the Menu shows all three options with a checkmark on the active one. **Cards is the default and listed first**:
 
 #### Cards (default)
 
@@ -110,16 +116,14 @@ Three sub-layouts in a segmented control below the main toggle. **Cards is the d
 - 12pt gap between cards (column gap = row gap), 12pt outer horizontal padding.
 - Each card uses its **intrinsic** height — short cards don't inflate to fill column space.
 - Card max height capped at 480pt.
-- **Drag-to-reorder:** long-press any card → drag anywhere → drop.
-  - Live reflow during drag — surrounding cards shift in real time as you pass over them (`DropDelegate.dropEntered` + cached drag id in `DragSessionStore`).
-  - **Source card fades to ~0.35 opacity** while it's being dragged so the lift is visually obvious and the floating preview doesn't compete with a duplicate-rendered original.
-  - **Live drop target outline** — whichever card the finger is currently over gets a 2pt sage-tinted border so the user has a clear "this is where it'll land" cue. Tracked via `DragSessionStore.currentDropTargetId`, set on `dropEntered`, cleared on `dropExited` / `performDrop`.
-  - **Cascade guard.** As cards reflow under the finger, `dropEntered` can fire for the same target multiple times in quick succession. `DragSessionStore.lastMoveTargetId` tracks the most-recently-moved-to target and skips redundant moves until a *different* target is hovered.
-  - Drag-lift preview is rounded to match the card's 10pt corner radius (via `.contentShape(.dragPreview, _:)`).
-  - Drop operation is **`.move`** (no green "+" copy badge).
-  - **Known limitations** (tracked in [docs/TODO_CUSTOM_DRAG_REORDER.md](TODO_CUSTOM_DRAG_REORDER.md) for replacement with a custom `DragGesture`):
-    - Dropping precisely on the source card itself doesn't always reach our delegate (iOS filters the source as a drop target). The next drag's start clears any stale state via `DragSessionStore.endSession()`.
-    - No "release on empty space → cancel + revert" semantics. The live reflow always commits.
+- **Drag-to-reorder:** long-press (~0.4s) any card → drag anywhere → release.
+  - Drag uses a custom `LongPressGesture.sequenced(before: DragGesture)` chain owned by the cards grid (Phase E.5.7) — *not* iOS's `.onDrag`/`.onDrop` system.
+  - **Lift confirmation** (Phase E.5.8) — the moment the long press completes (before the user moves), the card scales to 1.04, gains a soft shadow (black @ 0.18, radius 12, y 6), and gets a `zIndex(1)` so it sits above its neighbors. A medium-impact haptic fires at the same moment. Tells the user "you held long enough, now drag" — independent of any finger movement. The lifted state animates in via `.spring(response: 0.28, dampingFraction: 0.7)` and clears the moment the drag actually moves (handed off to the floating preview) or on release.
+  - **Live reflow during drag** — surrounding cards shift in real time as the finger crosses into a different card's frame. Hit-testing is against per-card frames published into a named coordinate space via `CardFramePreferenceKey`; reorder is driven by `DragSessionStore.updateLocation(_:in:)`.
+  - **Source card fades to ~0.35 opacity** while it's being dragged so the lift is visually obvious. A duplicate `KeepCard` is rendered in the grid's `.overlay` at the finger position, offset by the user's grab point so the card stays "in hand."
+  - **Live drop target outline** — whichever card the finger is currently over gets a 2pt sage-tinted border so the user has a clear "this is where it'll land" cue. Tracked via `DragSessionStore.currentDropTargetId` (a projection of `activeSession.lastTargetId`).
+  - **Drop on empty space cancels.** Releasing the finger outside any card frame restores the order captured at drag start (`CardsViewOrderStore.restore(_:)`); releasing over a card commits the live-reflowed order and fires a light-impact haptic.
+  - **No `dropEntered` cascade.** Reorder only fires when the finger crosses into a *different* target than the most-recent `lastTargetId`, so a stationary finger over a single target won't re-shuffle as the layout reflows.
 - **Reset order:** when the user has any custom ordering, a small `↺ Reset order` pill appears at the top-right of the Board area. Tap → animated revert to chronological order.
 - New notes added after a manual reorder always land at the **end** of the custom order (never injected into the middle of a hand-curated layout).
 
@@ -132,12 +136,31 @@ Three sub-layouts in a segmented control below the main toggle. **Cards is the d
 - Only one stack open at a time; switching collapses the previous.
 - Single-card "stacks" are non-interactive (the card is the whole content).
 - Expanded view has a "Collapse ↑" pill anchored bottom-right below the newest card.
+- **Double-tap anywhere in the expanded section collapses it** (Phase E.5.9) — quick shortcut alongside the pill. Works on cards and on the gaps between them; single taps on inner views (e.g., a media card opening the fullscreen viewer) still pass through.
 
 #### Group
 
-- `LazyVGrid` sections, one per `NoteType`, each with type-colored dot + uppercase header + count.
+- One section per `NoteType`, with a type-colored dot + uppercase header + count.
+- Each section is a **horizontal scroll rail** (Phase E.5.11) — Apple Music / App Store rail pattern. Cards are uniform-width (~55% of the viewport via iOS 17's `.containerRelativeFrame(.horizontal)`) so two fit per screen with a peek of the third (visual affordance for "more to swipe"). `.scrollTargetBehavior(.viewAligned)` snaps flicks to card boundaries.
+- Card heights stay intrinsic per card (capped at `KeepCard.maxHeight`); section height = tallest card in the rail.
 - Empty types are filtered (no hollow headers).
-- Within each section, cards in a 2-col grid (no masonry).
+
+### Per-card actions (Pin / Delete)
+
+**Owns:** `DesignSystem/Components/PinButton.swift`, the pin overlay + `.contextMenu` on `KeepCard.swift` and `NoteCard.swift`, and the `.confirmationDialog` on `TimelineScreen.swift`
+
+Every card surfaces actions through two parallel paths (Phase E.5.15 — modeled on Google Keep + Apple Notes):
+
+- **Pin glyph as status indicator** (Phase E.5.16 refinement) — appears in the top-right corner of a card **only when that card is pinned** (Apple Notes / Mail flag / iMessage pinned-conversation pattern). Tapping the visible glyph unpins. Unpinned cards show no glyph at all, keeping the surface visually quiet for the common case. Glyph is honey-yellow `pin.fill`; on media cards a thin `.ultraThinMaterial` backdrop circle sits behind it for readability.
+- **`.contextMenu` (long-press anywhere on the card)** is the path to **pin** an unpinned card (Pin entry) and to access **Delete**. Unpin is also available here in addition to the glyph tap.
+
+**Drag-to-reorder coexists with the context menu** via natural gesture arbitration — `LongPressGesture(0.4).sequenced(before: DragGesture)` for our drag and SwiftUI's built-in `.contextMenu` long-press recognizer fork on what the user does next:
+- Hold + start moving → drag's lift + reorder, no menu.
+- Hold + stay still past ~0.5s → context menu appears, drag never engages.
+
+This is the Apple Photos / Files pattern.
+
+**Delete confirmation.** Selecting Delete arms `pendingDeleteId` on `TimelineScreen`, which presents an `.alert("Delete this note?" / "This can't be undone.")` (centered modal — Apple's pattern for irreversible single-item destruction; see Notes / Photos / Calendar / Reminders). Buttons: destructive **Delete** + cancel **Keep**. Confirmation animates the row out via `withAnimation(.easeOut(0.2))` while `TimelineStore.delete(noteId:)` removes the note (and `PinStore.forget(_:)` clears any ghost pin reference). Cancel just clears `pendingDeleteId` and dismisses.
 
 ### FAB (floating action button)
 
@@ -168,7 +191,7 @@ Sheet presented from the FAB menu's **Text Note** option.
 
 ### Type picker (top of editor)
 
-- Default state on a fresh open: **expanded** showing all 6 `NoteType` chips. On a resumed-draft open: **collapsed** to the chosen chip.
+- Default state on a fresh open: **expanded** showing all `NoteType.textEditorPickable` chips (6: General + the five categories — `.media` is excluded since text notes aren't media). On a resumed-draft open: **collapsed** to the chosen chip.
 - Tapping a chip selects it and collapses the row to just that chip.
 - Tapping the collapsed chip re-expands the full row.
 - Tapping any chip in expanded mode (including the currently-selected one) collapses.
@@ -246,7 +269,7 @@ The dedicated "Background" row was removed when the toolbar got a `🖼` icon (P
 
 **Owns:** `Features/NoteEditor/MediaNoteEditorScreen.swift`, `Services/MediaImporter.swift`
 
-Sheet presented from the FAB menu's **Photo or Video** path. Single-purpose — no rich-text apparatus. Always saves with `NoteType.general`.
+Sheet presented from the FAB menu's **Photo or Video** path. Single-purpose — no rich-text apparatus, no type picker. Always saves with `NoteType.media` (Phase E.5.10), so all bare media notes auto-collect into the Media section in Group / Stack views.
 
 ### Layout
 
@@ -328,7 +351,7 @@ Full-screen viewer presented via `.fullScreenCover` when a media card is tapped.
 ### Appearance
 
 - **Primary color** — `NavigationLink` to `PrimaryColorPickerScreen`. Row preview: trio of dots + theme name. Live-updates when changed.
-- **Note Types** — `NavigationLink` to `NoteTypePickerScreen`. Row preview: 6 overlapping circles colored by current per-type colors + summary string ("Default" / "1 customized" / "N customized").
+- **Note Types** — `NavigationLink` to `NoteTypePickerScreen`. Row preview: 7 overlapping circles colored by current per-type colors + summary string ("Default" / "1 customized" / "N customized").
   - Detail screen lists all 6 types; tap any to push a `TextColorPickerScreen` to pick from any palette swatch or "Default."
   - "Reset all" action on the parent screen.
 
@@ -350,7 +373,7 @@ Full-screen viewer presented via `.fullScreenCover` when a media card is tapped.
 - Surface: `bg1` (cream / warm near-black), `bg2` (white / dark surface), `border1` / `border2`.
 - Text: `ink` (warm dark / warm off-white), `fg2` (warm gray).
 - Accents: `sage` / `sageDeep` / `sageSoft` (primary theme — computed through `ThemeStore`).
-- 6 note-type pairs: `workout`/`workoutSoft`, `meal`/`mealSoft`, `sleep`/`sleepSoft`, `mood`/`moodSoft`, `activity`/`activitySoft`, plus `general` using `warmGray`/`taupe`.
+- 7 note-type pairs: `workout`/`workoutSoft`, `meal`/`mealSoft`, `sleep`/`sleepSoft`, `mood`/`moodSoft`, `activity`/`activitySoft`, plus `general` using `warmGray`/`taupe`, plus `media` using `periwinkle`/`periwinkleSoft`.
 - Brand neutrals: `cream`, `taupe`, `taupeDeep`, `warmGray`.
 - Companion brights: `periwinkle`, `blush`, `honey`.
 
@@ -374,9 +397,10 @@ Full-screen viewer presented via `.fullScreenCover` when a media card is tapped.
 | `KeepGrid.swift` + `MasonryLayout.swift` | 2-column masonry — custom `Layout` (shortest-column-first, 12pt gap). Replaces HStack-of-VStacks for tight column packing. |
 | `NoteCard.swift` | Single-column card on the Timeline. Same dual scaffold (text vs full-bleed media). Max height 520pt. Level-1 shadow. |
 | `NoteBackgroundStyle.swift` | UI-layer background enum (`.none / .color / .image`) — the cards' input. |
-| `Segmented.swift` | Reusable pill segmented control (Timeline/Board, Cards/Stack/Group, etc.). |
+| `Segmented.swift` | Reusable pill segmented control (Timeline/Board, primary view picker). The Cards/Stack/Group sub-picker moved into a toolbar Menu in Phase E.5.13. |
 | `TabBar.swift` | Custom 5-column bottom navigation. |
-| `TypeBadge.swift` | Dot + uppercase type label + optional time. |
+| `TypeBadge.swift` | 10pt colored dot + 11pt uppercase type label (rendered in `type.color`) + optional time in mono `fg2`. Phase E.5.14 bump from 8pt/10pt-grey for stronger type signal on Timeline cards. |
+| `PinButton.swift` | 13pt `pin` / `pin.fill` SF Symbol in honey-yellow with 32pt hit area. (Phase E.5.15 introduced; E.5.16 made it a status indicator — only shown on pinned cards. Tapping the visible glyph unpins.) The unpinned-state visual is retained for any future read-only contexts. |
 | `TypeChip.swift` | Note-type picker chip (icon + label, ink-filled when selected). |
 | `TimelineItem.swift` | Time column + sage-dotted rail + trailing card slot for the Timeline view. |
 
@@ -407,8 +431,9 @@ Full-screen viewer presented via `.fullScreenCover` when a media card is tapped.
 
 ### NoteType
 
-- Six cases: `general` (default, neutral), `workout`, `meal`, `sleep`, `mood`, `activity`.
+- Seven cases: `general` (text-note default, neutral), `workout`, `meal`, `sleep`, `mood`, `activity`, `media` (auto-assigned to bare photo/video notes; Phase E.5.10).
 - Each has a title, default pigment + soft color, and a SF Symbol placeholder. Color/icon overrides via `NoteTypeStyleStore` flow into all card visuals.
+- `NoteType.textEditorPickable` returns `allCases` minus `.media` — used by the text-note editor's type picker so a text note can't accidentally be tagged Media. Settings → Note Types and Group / Stack views still use `allCases`, so Media participates in color overrides and section rendering like any other type.
 
 ### MediaPayload
 
@@ -439,7 +464,8 @@ All `@Observable` singletons. None hit Supabase yet — Phase F follow-up.
 | `AppPreferencesStore` | UserDefaults | persistent | Behavioral defaults (e.g., `defaultTodayView`). |
 | `NoteDraftStore` | in-memory | session | Recovers in-progress text-note edits across accidental sheet dismiss. |
 | `CardsViewOrderStore` | in-memory | session | Custom note ordering for the Cards Board layout. |
-| `DragSessionStore` | in-memory | per-drag | Caches the dragged note's id during a Cards-layout reorder so `dropEntered` can react synchronously. |
+| `PinStore` | in-memory | session | Set of pinned note ids (Phase E.5.15). Drives the "Pinned" section at the top of every Board sub-mode + the visible pin glyph on each card. |
+| `DragSessionStore` | in-memory | per-drag | Owns the active Cards-layout reorder session — finger location, source id, pre-drag snapshot for revert, and per-card frame map for hit-testing (Phase E.5.7). |
 
 Repository services (read-only) for JSON-backed catalogs:
 

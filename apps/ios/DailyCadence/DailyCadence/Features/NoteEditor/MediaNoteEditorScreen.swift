@@ -1,12 +1,19 @@
 import SwiftUI
 import PhotosUI
 
-/// Editor flow for a photo or video note (Phase E.3 → E.4.1).
+/// Editor flow for a photo or video note (Phase E.3 → E.4.1 → E.5.10).
 ///
-/// **Phase E.4.1** dropped the type picker (media notes default to
-/// `.general` and don't read as a category) and added a crop step for
-/// photos via `PhotoCropView`. Videos still skip the crop step — adding
-/// timeline-trim UX is a separate, larger feature.
+/// **Phase E.4.1** dropped the type picker UI. **Phase E.5.10** finished
+/// the job: every saved media note is now auto-tagged `NoteType.media`
+/// (was `.general`), so Group / Stack views collect them into their own
+/// "Media" section instead of dropping them into the neutral catch-all.
+/// If the user wants semantic context with a photo (e.g., "great
+/// workout" + image), the canonical pattern is a text note with an
+/// attached image — once inline-attachments-in-text-notes ships
+/// (deferred follow-up).
+///
+/// `PhotoCropView` provides the photo crop step. Videos still skip
+/// cropping; timeline-trim UX is a separate, larger feature.
 ///
 /// Differs from `NoteEditorScreen` by being single-purpose: the user has
 /// already committed to "this is a media note," so we skip the whole
@@ -308,7 +315,7 @@ struct MediaNoteEditorScreen: View {
         )
         let note = MockNote(
             time: Date.now.formatted(.dateTime.hour(.defaultDigits(amPM: .abbreviated)).minute()),
-            type: .general,  // Phase E.4.1 — media notes don't carry a category
+            type: .media,  // Phase E.5.10 — media notes auto-tag as Media
             content: .media(finalPayload)
         )
         TimelineStore.shared.add(note)

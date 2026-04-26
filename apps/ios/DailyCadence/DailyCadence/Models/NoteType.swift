@@ -4,9 +4,9 @@ import SwiftUI
 /// type-specific form fields in the editor.
 ///
 /// Phase 1 ships the five default category types defined in the product
-/// spec, plus a sixth `.general` "no specific category" type added in
-/// Phase E.2.3 — the editor's default selection. Custom user-defined types
-/// are Phase 3+.
+/// spec, plus `.general` (neutral default for text notes; Phase E.2.3) and
+/// `.media` (auto-assigned to bare photo/video notes; Phase E.5.10).
+/// Custom user-defined types are Phase 3+.
 ///
 /// **Why `.general`.** Without a default neutral type, the editor had to
 /// pre-select one of the five category types (we chose `.mood`), which
@@ -15,8 +15,19 @@ import SwiftUI
 /// later. It uses warm-gray pigment + taupe soft color so neutral notes
 /// don't fight the colored ones on the timeline.
 ///
-/// `.general` is declared **first** in `allCases` so pickers list it as the
-/// default option.
+/// **Why `.media`.** Bare photo/video notes don't carry a meaningful
+/// category — the asset *is* the substance. Forcing the user to pick a
+/// type just to log a photo was friction. `.media` auto-tags every
+/// `MediaNoteEditorScreen` save so Group/Stack views naturally collect
+/// them in their own section. If the user wants semantic context with a
+/// photo (e.g., "great workout" + photo), the canonical pattern is a text
+/// note with an attached image — once inline-attachments-in-text-notes
+/// ships (deferred follow-up).
+///
+/// `.general` is declared **first** in `allCases` so pickers list it as
+/// the default option; `.media` is declared **last** so the type-picker
+/// row in `NoteEditorScreen` keeps its existing visual order for the five
+/// category types.
 ///
 /// The icon mapping uses SF Symbols as a Phase 1 placeholder. The design
 /// system ships a custom hand-drawn line icon set in
@@ -30,8 +41,19 @@ enum NoteType: String, CaseIterable, Identifiable, Hashable, Codable {
     case sleep
     case mood
     case activity
+    case media
 
     var id: String { rawValue }
+
+    /// Cases the user can pick as the *type* of a text note. Excludes
+    /// `.media`, which is auto-assigned by `MediaNoteEditorScreen` and
+    /// would be misleading on a text note (a text note isn't media).
+    /// Group / Stack views, Settings → Note Types, and other surfaces
+    /// that iterate `allCases` continue to show `.media` like any
+    /// other category.
+    static var textEditorPickable: [NoteType] {
+        allCases.filter { $0 != .media }
+    }
 
     /// Display title. Sentence case per the design system voice rules.
     var title: String {
@@ -42,6 +64,7 @@ enum NoteType: String, CaseIterable, Identifiable, Hashable, Codable {
         case .sleep:    return "Sleep"
         case .mood:     return "Mood"
         case .activity: return "Activity"
+        case .media:    return "Media"
         }
     }
 
@@ -67,6 +90,7 @@ enum NoteType: String, CaseIterable, Identifiable, Hashable, Codable {
         case .sleep:    return .DS.sleep
         case .mood:     return .DS.mood
         case .activity: return .DS.activity
+        case .media:    return .DS.periwinkle
         }
     }
 
@@ -79,6 +103,7 @@ enum NoteType: String, CaseIterable, Identifiable, Hashable, Codable {
         case .sleep:    return .DS.sleepSoft
         case .mood:     return .DS.moodSoft
         case .activity: return .DS.activitySoft
+        case .media:    return .DS.periwinkleSoft
         }
     }
 
@@ -92,6 +117,7 @@ enum NoteType: String, CaseIterable, Identifiable, Hashable, Codable {
         case .sleep:    return "moon"
         case .mood:     return "heart"
         case .activity: return "figure.walk"
+        case .media:    return "photo.on.rectangle"
         }
     }
 }

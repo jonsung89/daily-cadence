@@ -88,4 +88,16 @@ final class CardsViewOrderStore {
     func reset() {
         customOrder = []
     }
+
+    /// Sets `customOrder` to a previously-captured snapshot. Used by
+    /// the Cards-layout drag gesture (Phase E.5.7) to revert to the
+    /// pre-drag order when the user releases over empty space — i.e.
+    /// "cancel the in-flight reorder."
+    ///
+    /// Passing an empty array is equivalent to `reset()`, which is what
+    /// happens naturally when the user reverts a drag that started
+    /// before any custom ordering was set.
+    func restore(_ order: [UUID]) {
+        customOrder = order
+    }
 }

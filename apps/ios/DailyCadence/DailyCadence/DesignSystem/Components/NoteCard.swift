@@ -36,6 +36,14 @@ struct NoteCard: View {
     /// renders with the full-bleed media scaffold (no `TypeBadge` head,
     /// caption in a bottom gradient).
     let media: MediaPayload?
+    /// Optional note id (Phase E.5.15). When provided, the card renders
+    /// the pin overlay + `.contextMenu` (Pin / Delete). Previews and
+    /// other synthetic callers omit this and get a static card.
+    let noteId: UUID?
+    /// Optional Delete callback fired from the `.contextMenu`. The
+    /// parent screen owns the confirmation dialog; this is just the
+    /// "user asked to delete" notification.
+    let onRequestDelete: ((UUID) -> Void)?
 
     /// Maximum rendered height for any timeline card. Tall portrait media
     /// or long messages are clipped to this. Slightly higher than `KeepCard`
@@ -51,7 +59,9 @@ struct NoteCard: View {
         time: String? = nil,
         background: NoteBackgroundStyle = .none,
         titleStyle: TextStyle? = nil,
-        media: MediaPayload? = nil
+        media: MediaPayload? = nil,
+        noteId: UUID? = nil,
+        onRequestDelete: ((UUID) -> Void)? = nil
     ) {
         self.type = type
         self.title = title
@@ -60,6 +70,15 @@ struct NoteCard: View {
         self.background = background
         self.titleStyle = titleStyle
         self.media = media
+        self.noteId = noteId
+        self.onRequestDelete = onRequestDelete
+    }
+
+    /// Reads pin state through `PinStore.shared` inside `body` so the card
+    /// re-renders when pin state flips. `nil` `noteId` => not pinnable.
+    private var isPinned: Bool {
+        guard let noteId else { return false }
+        return PinStore.shared.isPinned(noteId)
     }
 
     var body: some View {
@@ -89,9 +108,46 @@ struct NoteCard: View {
         )
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .dsShadow(.level1)
+        // Phase E.5.15 — pin glyph as status indicator only. Shown
+        // exclusively when the note IS pinned (tap to unpin). Pinning
+        // an unpinned note happens via `.contextMenu`. Keeps the
+        // Timeline visually quiet for the common case where most cards
+        // aren't pinned.
+        .overlay(alignment: .topTrailing) {
+            if let noteId, isPinned {
+                PinButton(isPinned: true) {
+                    PinStore.shared.togglePin(noteId)
+                }
+                .background(
+                    Circle()
+                        .fill(.ultraThinMaterial)
+                        .opacity(media != nil ? 0.85 : 0)
+                        .frame(width: 28, height: 28)
+                )
+                .padding(4)
+                .transition(.scale.combined(with: .opacity))
+            }
+        }
+        .animation(.easeOut(duration: 0.18), value: isPinned)
         .fullScreenCover(isPresented: $isMediaViewerPresented) {
             if let media {
                 MediaViewerScreen(media: media)
+            }
+        }
+        .contextMenu {
+            if let noteId {
+                Button {
+                    PinStore.shared.togglePin(noteId)
+                } label: {
+                    Label(isPinned ? "Unpin" : "Pin", systemImage: isPinned ? "pin.slash" : "pin")
+                }
+                if let onRequestDelete {
+                    Button(role: .destructive) {
+                        onRequestDelete(noteId)
+                    } label: {
+                        Label("Delete", systemImage: "trash")
+                    }
+                }
             }
         }
     }

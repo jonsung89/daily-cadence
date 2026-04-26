@@ -2,11 +2,11 @@ import SwiftUI
 
 /// Settings → Appearance → Note Types.
 ///
-/// Lists the five default note types with their current color. Tapping a
-/// row pushes a swatch picker that lets the user override that type's
-/// color. Selections persist via `NoteTypeStyleStore` and propagate
-/// everywhere `NoteType.color` is read (timeline dots, KeepCard borders,
-/// TypeChip icons, type badges).
+/// Lists every `NoteType` (General, the five categories, Media) with
+/// their current color. Tapping a row pushes a swatch picker that lets
+/// the user override that type's color. Selections persist via
+/// `NoteTypeStyleStore` and propagate everywhere `NoteType.color` is
+/// read (timeline dots, KeepCard borders, TypeChip icons, type badges).
 ///
 /// The data legend stays intact: each type still has ONE color across the
 /// app — it's just the user's choice instead of the design-system default.

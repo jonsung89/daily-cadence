@@ -24,6 +24,9 @@ import SwiftUI
 /// be redundant.
 struct StackedBoardView: View {
     let groups: [(type: NoteType, notes: [MockNote])]
+    /// Forwarded to each `KeepCard`'s `.contextMenu` Delete action
+    /// (Phase E.5.15). Optional so previews don't have to wire it.
+    var onRequestDelete: ((UUID) -> Void)? = nil
 
     @State private var expandedType: NoteType? = nil
     @Namespace private var stackNamespace
@@ -54,13 +57,15 @@ struct StackedBoardView: View {
                     ExpandedColumnSection(
                         group: group,
                         namespace: stackNamespace,
-                        onCollapse: { toggle(group.type) }
+                        onCollapse: { toggle(group.type) },
+                        onRequestDelete: onRequestDelete
                     )
                 } else {
                     CollapsedStackCell(
                         group: group,
                         namespace: stackNamespace,
-                        onTap: { toggle(group.type) }
+                        onTap: { toggle(group.type) },
+                        onRequestDelete: onRequestDelete
                     )
                 }
             }
@@ -83,6 +88,7 @@ private struct CollapsedStackCell: View {
     let group: (type: NoteType, notes: [MockNote])
     let namespace: Namespace.ID
     let onTap: () -> Void
+    var onRequestDelete: ((UUID) -> Void)? = nil
 
     /// Up to 3 most-recent notes — the visible layers when collapsed.
     /// Stored newest-first; index 0 = top of stack.
@@ -120,7 +126,7 @@ private struct CollapsedStackCell: View {
                 // depth: how far behind the top card. 0 = oldest visible
                 // layer (highest in y), count-1 = newest (lowest in y).
                 let depth = topNotes.count - 1 - index
-                KeepCard(note: note)
+                KeepCard(note: note, onRequestDelete: onRequestDelete.map { cb in { cb($0.id) } })
                     .fixedSize(horizontal: false, vertical: true)
                     .scaleEffect(1 - CGFloat(index) * 0.04)
                     .offset(y: CGFloat(depth) * 8)
@@ -157,15 +163,24 @@ private struct CollapsedStackCell: View {
 /// oldest-first (matches `group.notes` natural order); the "Collapse"
 /// pill anchors at the bottom-right of the section, just below the
 /// newest card.
+///
+/// **Double-tap shortcut** (Phase E.5.9) — tapping anywhere in the
+/// section twice quickly collapses the stack. The `.contentShape`
+/// makes gaps between cards part of the tappable surface so the
+/// shortcut works on the section "background" as well as on cards.
+/// Single taps on inner views (e.g., a media card opening the
+/// fullscreen viewer) still pass through; the system briefly defers
+/// them to disambiguate from a double-tap (standard Apple pattern).
 private struct ExpandedColumnSection: View {
     let group: (type: NoteType, notes: [MockNote])
     let namespace: Namespace.ID
     let onCollapse: () -> Void
+    var onRequestDelete: ((UUID) -> Void)? = nil
 
     var body: some View {
         VStack(spacing: 8) {
             ForEach(group.notes) { note in
-                KeepCard(note: note)
+                KeepCard(note: note, onRequestDelete: onRequestDelete.map { cb in { cb($0.id) } })
                     // `fixedSize(vertical: true)` forces the card to use
                     // its intrinsic height regardless of any frame
                     // propagated by `matchedGeometryEffect`. Without it,
@@ -190,6 +205,8 @@ private struct ExpandedColumnSection: View {
                 .buttonStyle(.plain)
             }
         }
+        .contentShape(Rectangle())
+        .onTapGesture(count: 2) { onCollapse() }
     }
 }
 

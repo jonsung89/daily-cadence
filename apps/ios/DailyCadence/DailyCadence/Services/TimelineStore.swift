@@ -33,4 +33,17 @@ final class TimelineStore {
         notes.append(note)
         log.info("Added note: type=\(note.type.rawValue) title=\(note.timelineTitle)")
     }
+
+    /// Removes the note with the given id. No-op if the id isn't present.
+    /// Also clears the note's pin state (so deleting a pinned note doesn't
+    /// leave a ghost id in `PinStore`).
+    ///
+    /// Phase E.5.15 — invoked from the per-card `.contextMenu` Delete
+    /// action after the user confirms via `.confirmationDialog`.
+    func delete(noteId: UUID) {
+        guard let index = notes.firstIndex(where: { $0.id == noteId }) else { return }
+        let removed = notes.remove(at: index)
+        PinStore.shared.forget(noteId)
+        log.info("Deleted note: type=\(removed.type.rawValue) title=\(removed.timelineTitle)")
+    }
 }

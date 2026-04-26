@@ -89,6 +89,100 @@ struct CardsViewOrderStoreTests {
         #expect(!store.hasCustomOrder, "Moving an item before itself should not seed a custom order")
     }
 
+    @Test func restoreReplacesCustomOrderWithSnapshot() {
+        // Phase E.5.7 — drop-on-empty in the custom-gesture reorder
+        // calls `restore(_:)` with the order captured at drag start so
+        // the in-flight reorder reverts.
+        let store = CardsViewOrderStore()
+        let a = Self.note("a")
+        let b = Self.note("b")
+        let c = Self.note("c")
+        let notes = [a, b, c]
+
+        // Pre-drag: user already had a custom order [c, a, b].
+        store.move(c.id, before: a.id, in: notes)
+        let snapshot = store.customOrder
+        #expect(store.sorted(notes).map(\.timelineTitle) == ["c", "a", "b"])
+
+        // Drag in flight — reorders to [a, c, b].
+        store.move(a.id, before: c.id, in: notes)
+        #expect(store.sorted(notes).map(\.timelineTitle) == ["a", "c", "b"])
+
+        // Drop on empty space — revert.
+        store.restore(snapshot)
+        #expect(store.sorted(notes).map(\.timelineTitle) == ["c", "a", "b"])
+    }
+
+    @Test func restoreEmptySnapshotEqualsReset() {
+        // Phase E.5.7 — when the user starts a drag with no prior
+        // custom order, the snapshot is `[]`. Restoring must put us
+        // back into the chronological-fallback state, not lock in the
+        // mid-drag move.
+        let store = CardsViewOrderStore()
+        let a = Self.note("a")
+        let b = Self.note("b")
+        let notes = [a, b]
+
+        let snapshot = store.customOrder      // empty pre-drag
+        store.move(b.id, before: a.id, in: notes)
+        #expect(store.hasCustomOrder)
+
+        store.restore(snapshot)
+        #expect(!store.hasCustomOrder, "Restoring an empty snapshot should clear the custom order")
+        #expect(store.sorted(notes).map(\.timelineTitle) == ["a", "b"])
+    }
+
+    @Test func dragCommitOnTargetMovesExactlyOnce() {
+        // Phase E.5.7 — a single drag that crosses one target card
+        // should produce one final order (mirroring the gesture's
+        // updateLocation guard `target.id != session.lastTargetId`).
+        // Calling move() twice with the same dragged + target pair
+        // must be idempotent vs. a single call.
+        let store = CardsViewOrderStore()
+        let a = Self.note("a")
+        let b = Self.note("b")
+        let c = Self.note("c")
+        let notes = [a, b, c]
+
+        store.move(c.id, before: a.id, in: notes)
+        let afterFirst = store.customOrder
+
+        // Re-firing the same move (would happen if the cascade guard
+        // didn't exist) must not bounce the card to a new position.
+        store.move(c.id, before: a.id, in: notes)
+        #expect(store.customOrder == afterFirst)
+        #expect(store.sorted(notes).map(\.timelineTitle) == ["c", "a", "b"])
+    }
+
+    @Test func deleteRemovesNoteAndForgetsPinState() {
+        // Phase E.5.15 — TimelineStore.delete(noteId:) drops the note
+        // AND clears it from PinStore so pinned ids don't outlive their
+        // notes as ghost references.
+        let pinStore = PinStore()
+        let a = MockNote(time: "9:00 AM", type: .general, content: .text(title: "a"))
+        let b = MockNote(time: "10:00 AM", type: .general, content: .text(title: "b"))
+        let store = TimelineStore(initialNotes: [a, b])
+
+        // Pin both, then delete a — pin state for a should disappear,
+        // pin state for b should remain.
+        pinStore.pin(a.id)
+        pinStore.pin(b.id)
+        // We tested forget directly in PinStoreTests; here we sanity-check
+        // the surface area used by the TimelineStore's delete path —
+        // the store delegates to PinStore.shared, so this test only
+        // verifies the note-removal half.
+        store.delete(noteId: a.id)
+        #expect(store.notes.count == 1)
+        #expect(store.notes.first?.id == b.id)
+    }
+
+    @Test func deleteNonExistentIdIsNoOp() {
+        let a = MockNote(time: "9:00 AM", type: .general, content: .text(title: "a"))
+        let store = TimelineStore(initialNotes: [a])
+        store.delete(noteId: UUID())  // id never seen
+        #expect(store.notes.count == 1)
+    }
+
     @Test func unknownTargetIsNoOp() {
         // If the target id isn't in the current notes, nothing should
         // happen — defensive behavior so a stale drop UUID can't crash

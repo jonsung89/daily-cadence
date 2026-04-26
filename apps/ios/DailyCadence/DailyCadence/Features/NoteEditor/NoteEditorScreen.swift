@@ -215,7 +215,7 @@ struct NoteEditorScreen: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
                 if typePickerExpanded {
-                    ForEach(NoteType.allCases) { type in
+                    ForEach(NoteType.textEditorPickable) { type in
                         TypeChip(type: type, isSelected: draft.selectedType == type) {
                             draft.selectedType = type
                             withAnimation(.easeOut(duration: 0.2)) {

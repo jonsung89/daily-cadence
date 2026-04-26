@@ -1,63 +1,211 @@
 import Foundation
 import SwiftUI
+#if canImport(UIKit)
+import UIKit
+#endif
 
-/// Tracks the active drag-to-reorder session for the Cards Board layout
-/// (Phase E.4.8 → E.5.5).
+/// Drag-to-reorder session state for the Cards Board layout.
 ///
-/// Two pieces of state, both `@Observable` so views that read them inside
-/// `body` re-render automatically:
+/// **Phase E.5.7 — custom-gesture rewrite.** Replaces the prior
+/// `.onDrag` / `.onDrop` plumbing (and the `NoteReorderDropDelegate`)
+/// with a single `LongPressGesture.sequenced(before: DragGesture)` chain
+/// owned by `TimelineScreen.cardsBoardGrid`. The gesture publishes
+/// finger position into this store; the store hit-tests against
+/// `cardFrames` (populated via a `PreferenceKey`) and drives reorder.
 ///
-/// - **`draggingNoteId`** — the source card the user is currently
-///   dragging. Set by `.onDrag`'s closure at drag start; read by
-///   `NoteReorderDropDelegate` so its `dropEntered` can react
-///   synchronously without awaiting an async `NSItemProvider.loadObject`.
-///   Source cards read this to fade out while they're the drag source
-///   (visual confirmation the drag started).
-///
-/// - **`currentDropTargetId`** — the card the finger is currently
-///   hovering over. Maintained by the drop delegate's `dropEntered` /
-///   `dropExited` pair. Cards read this to render a subtle highlight on
-///   themselves when they're the live drop target — gives the user a
-///   clear "this is where it'll land" cue during the drag.
+/// **Why we own hit-testing.** SwiftUI's drop-delegate system gave us
+/// three structural problems (see `docs/TODO_CUSTOM_DRAG_REORDER.md`):
+/// no callback when the drop landed outside any registered target, a
+/// `dropEntered` cascade as cards reflowed under a stationary finger,
+/// and no cancel-on-empty semantics. Owning the gesture cleanly fixes
+/// all three.
 ///
 /// **Lifecycle.**
-/// - **Drag start** → `.onDrag` sets `draggingNoteId`.
-/// - **Hover over card** → `dropEntered` sets `currentDropTargetId`,
-///   moves the dragged note before that target.
-/// - **Hover off card** → `dropExited` clears `currentDropTargetId` (but
-///   leaves `draggingNoteId` intact — drag is still active).
-/// - **Release** → `performDrop` clears both.
-/// - **Cancel** (drag dropped outside any target) → no callback fires,
-///   so state would linger. The next drag's `.onDrag` overwrites
-///   `draggingNoteId`, which is the cleanup signal we lean on.
+/// - **Drag begins** (long press completes + first drag delta) →
+///   `beginSession(...)` snapshots the pre-drag custom order, fires a
+///   medium haptic, and publishes `activeSession`.
+/// - **Drag updates** → `updateLocation(_:in:)` updates the finger's
+///   current position and, if it's over a different card than the
+///   `lastTargetId`, calls `CardsViewOrderStore.shared.move(...)` so
+///   the surrounding cards reflow live.
+/// - **Drag ends over a card** → `endDrag(finalLocation:in:)` keeps
+///   the order produced by the last live move and clears the session.
+/// - **Drag ends over empty space** → `endDrag(...)` calls
+///   `CardsViewOrderStore.shared.restore(_:)` with the snapshot, so
+///   the order returns to where it was at drag start.
 ///
-/// In-memory only — drift across app launches is irrelevant since drags
-/// don't outlive a session.
+/// **`draggingNoteId` / `currentDropTargetId`** are kept as computed
+/// projections off `activeSession` so the existing source-fade and
+/// drop-target outline view code (Phase E.5.5) keeps working unchanged.
 @Observable
 final class DragSessionStore {
     static let shared = DragSessionStore()
 
-    var draggingNoteId: UUID? = nil
-    var currentDropTargetId: UUID? = nil
-    /// The most recent target id we've already committed a `move(_:before:)`
-    /// for during this drag session. Guards against the **dropEntered
-    /// cascade**: as cards animate to new positions during live reflow,
-    /// the user's stationary finger ends up over different cards, each
-    /// firing `dropEntered` again. Without this guard the move would
-    /// recompute several times per hover and the dragged card could
-    /// "bounce" through positions before the user releases.
-    var lastMoveTargetId: UUID? = nil
+    /// The active drag session, or `nil` if no card is being dragged.
+    /// Set in `beginSession`, cleared in `endDrag`.
+    var activeSession: DragSession?
+
+    /// The card whose long press has completed but whose drag hasn't
+    /// started moving yet — i.e. "lifted, awaiting drag." Cards read
+    /// this to render a slight scale + shadow so the user has visual
+    /// confirmation that they held long enough to enter drag mode,
+    /// independent of any actual finger movement.
+    ///
+    /// Cleared at the moment the drag starts moving (handed off to
+    /// `activeSession`'s fade + floating preview) and on every
+    /// `onEnded` so a no-movement release lands back at rest.
+    var liftedNoteId: UUID?
+
+    /// Map of card id → its frame in the cards-grid coordinate space.
+    /// Published by each card via a `PreferenceKey` and read here for
+    /// hit-testing during a drag.
+    var cardFrames: [UUID: CGRect] = [:]
+
+    /// Convenience read for the source-fade visual (Phase E.5.5).
+    /// Reading this inside a `body` registers the view as an observer,
+    /// so the source card re-renders when the drag begins / ends.
+    var draggingNoteId: UUID? { activeSession?.noteId }
+
+    /// Convenience read for the live drop-target outline (Phase E.5.5).
+    /// Mirrors `activeSession.lastTargetId` — the card the finger most
+    /// recently moved over (which is also where the dragged card was
+    /// reordered to). Cleared at end-of-drag.
+    var currentDropTargetId: UUID? { activeSession?.lastTargetId }
 
     init() {}
 
-    /// Clears every drag-related id. Called from `performDrop` and
-    /// `.onDrag`'s drag-start hook (so a previous session that ended
-    /// without a `performDrop` — e.g. the user dropped on the source
-    /// itself, which iOS filters as a drop target — gets cleaned up at
-    /// the start of the next drag).
-    func endSession() {
-        draggingNoteId = nil
-        currentDropTargetId = nil
-        lastMoveTargetId = nil
+    /// Marks `noteId` as "lifted" — the long press has completed but
+    /// the user hasn't started moving yet. Idempotent across repeat
+    /// calls for the same id (the long-press gesture can re-fire its
+    /// `.first(true)` / `.second(true, nil)` callbacks several times
+    /// in succession; we only want one haptic + one visual lift).
+    ///
+    /// Fires a medium-impact haptic to confirm "you held long enough."
+    func liftSource(noteId: UUID) {
+        guard liftedNoteId != noteId else { return }
+        liftedNoteId = noteId
+        Self.fireHaptic(.medium)
     }
+
+    /// Starts a drag session. Captures the pre-drag custom order so an
+    /// "end on empty space" can revert to it. Hands off from the lifted
+    /// state — the lifted scale + shadow goes away as the floating
+    /// preview takes over.
+    func beginSession(
+        noteId: UUID,
+        location: CGPoint,
+        grabOffset: CGSize,
+        preDragOrder: [UUID]
+    ) {
+        activeSession = DragSession(
+            noteId: noteId,
+            currentLocation: location,
+            grabOffset: grabOffset,
+            preDragOrder: preDragOrder,
+            lastTargetId: nil
+        )
+        liftedNoteId = nil
+    }
+
+    /// Updates the finger location during a drag. If the finger is now
+    /// over a card that isn't the source and isn't the most-recent
+    /// target, runs the live reorder. Cards under the finger animate
+    /// into their new positions inside an `.easeOut(0.18)` block.
+    func updateLocation(_ location: CGPoint, in notes: [MockNote]) {
+        guard var session = activeSession else { return }
+        session.currentLocation = location
+
+        if let target = noteAt(location, in: notes),
+           target.id != session.noteId,
+           target.id != session.lastTargetId {
+            session.lastTargetId = target.id
+            withAnimation(.easeOut(duration: 0.18)) {
+                CardsViewOrderStore.shared.move(
+                    session.noteId,
+                    before: target.id,
+                    in: notes
+                )
+            }
+        }
+
+        activeSession = session
+    }
+
+    /// Ends a drag session. If `finalLocation` is over a card, the
+    /// current (already-reordered) layout is committed. Otherwise the
+    /// pre-drag order is restored. Either way, the session clears so
+    /// the source card un-fades and the drop-target outline goes away.
+    func endDrag(finalLocation: CGPoint?, in notes: [MockNote]) {
+        // Always clear the lifted state at end-of-gesture, including the
+        // long-press-then-release-without-moving case where there's no
+        // active session to clear.
+        liftedNoteId = nil
+
+        guard let session = activeSession else { return }
+
+        let droppedOnCard: Bool = {
+            guard let location = finalLocation else { return false }
+            return noteAt(location, in: notes) != nil
+        }()
+
+        if droppedOnCard {
+            Self.fireHaptic(.light)
+        } else {
+            withAnimation(.easeOut(duration: 0.22)) {
+                CardsViewOrderStore.shared.restore(session.preDragOrder)
+            }
+        }
+
+        activeSession = nil
+    }
+
+    /// Cancel any in-flight session without committing or reverting.
+    /// Used as a safety net if the gesture system delivers an `onEnded`
+    /// callback we can't classify. Also clears the lifted-but-not-
+    /// dragging state so a long-press-and-release doesn't leave the
+    /// source card scaled up.
+    func cancelSession() {
+        activeSession = nil
+        liftedNoteId = nil
+    }
+
+    // MARK: - Hit-testing
+
+    private func noteAt(_ location: CGPoint, in notes: [MockNote]) -> MockNote? {
+        for note in notes {
+            if let frame = cardFrames[note.id], frame.contains(location) {
+                return note
+            }
+        }
+        return nil
+    }
+
+    // MARK: - Haptics
+
+    private static func fireHaptic(_ style: HapticStyle) {
+        #if canImport(UIKit)
+        let generator: UIImpactFeedbackGenerator
+        switch style {
+        case .medium: generator = UIImpactFeedbackGenerator(style: .medium)
+        case .light:  generator = UIImpactFeedbackGenerator(style: .light)
+        }
+        generator.impactOccurred()
+        #endif
+    }
+
+    private enum HapticStyle { case light, medium }
+}
+
+/// Snapshot of an in-progress drag. Held by `DragSessionStore`.
+///
+/// `grabOffset` is the vector from the source card's center to the
+/// finger at drag start — applied when rendering the floating preview
+/// so the card stays "in hand" instead of jumping to be centered on
+/// the finger when the drag begins.
+struct DragSession: Equatable {
+    let noteId: UUID
+    var currentLocation: CGPoint
+    let grabOffset: CGSize
+    let preDragOrder: [UUID]
+    var lastTargetId: UUID?
 }

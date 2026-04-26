@@ -1,6 +1,5 @@
 import SwiftUI
 import PhotosUI
-import UniformTypeIdentifiers
 
 /// The Daily Timeline — primary surface of DailyCadence.
 ///
@@ -25,10 +24,65 @@ struct TimelineScreen: View {
     @State private var mediaPickerItem: PhotosPickerItem?
     @State private var isMediaEditorPresented = false
 
+    /// Required by the reorder gesture's `.updating` modifier (Phase E.5.7).
+    /// Real state lives in `DragSessionStore`; this buffer is unused
+    /// outside the gesture closure but `@GestureState` is the
+    /// SwiftUI-supported way to attach side effects to a sequence
+    /// gesture's value stream.
+    @GestureState private var dragGestureBuffer: Bool = false
+
+    /// The note id the user has asked to delete (Phase E.5.15). When
+    /// non-nil, drives the `.confirmationDialog`. The card's
+    /// `.contextMenu` Delete action sets this; user confirmation in
+    /// the dialog calls `TimelineStore.shared.delete(noteId:)`.
+    @State private var pendingDeleteId: UUID? = nil
+
     /// Read-through to `TimelineStore.shared.notes`. Reading inside `body`
     /// registers this view as an observer of the @Observable store, so any
     /// `add(_:)` call re-renders the timeline automatically.
     private var notes: [MockNote] { TimelineStore.shared.notes }
+
+    /// Notes the user has pinned (Phase E.5.15). Reading
+    /// `PinStore.shared.pinnedIds` inside `body` registers this view as
+    /// an observer so the Pinned section appears/disappears live as the
+    /// user toggles pins.
+    private var pinnedNotes: [MockNote] {
+        let pinned = PinStore.shared.pinnedIds
+        return notes.filter { pinned.contains($0.id) }
+    }
+
+    /// The complement — everything not pinned. Used as the input to the
+    /// Board sub-mode layouts so a pinned note doesn't appear twice.
+    private var unpinnedNotes: [MockNote] {
+        let pinned = PinStore.shared.pinnedIds
+        return notes.filter { !pinned.contains($0.id) }
+    }
+
+    /// True while a Cards-layout card is lifted (long-press completed,
+    /// awaiting drag) or in an active drag session. Drives
+    /// `.scrollDisabled` on the outer ScrollView so the page doesn't skid
+    /// under the reorder gesture (Phase E.5.12).
+    private var isCardReorderActive: Bool {
+        DragSessionStore.shared.activeSession != nil
+            || DragSessionStore.shared.liftedNoteId != nil
+    }
+
+    /// Boolean projection of `pendingDeleteId` for the dialog's
+    /// `isPresented:` binding (`.confirmationDialog` doesn't take an
+    /// optional binding directly).
+    private var pendingDeletePresented: Binding<Bool> {
+        Binding(
+            get: { pendingDeleteId != nil },
+            set: { if !$0 { pendingDeleteId = nil } }
+        )
+    }
+
+    /// Closure passed into every card via the `onRequestDelete:` parameter.
+    /// Cards call this from their `.contextMenu` Delete action; this just
+    /// arms the confirmation dialog.
+    private func requestDelete(_ noteId: UUID) {
+        pendingDeleteId = noteId
+    }
 
     var body: some View {
         NavigationStack {
@@ -41,14 +95,7 @@ struct TimelineScreen: View {
 
                     segmentedToggle
                         .padding(.horizontal, 20)
-                        .padding(.bottom, viewMode == .board ? 12 : 16)
-
-                    if viewMode == .board {
-                        boardLayoutToggle
-                            .padding(.horizontal, 20)
-                            .padding(.bottom, cardsOrderBarVisible ? 8 : 16)
-                            .transition(.opacity.combined(with: .move(edge: .top)))
-                    }
+                        .padding(.bottom, cardsOrderBarVisible ? 12 : 16)
 
                     if cardsOrderBarVisible {
                         resetOrderRow
@@ -70,9 +117,17 @@ struct TimelineScreen: View {
             // the FAB persistent and rely on content insets); the
             // hide-on-scroll trick is more Material Design than UIKit.
             .contentMargins(.bottom, 120, for: .scrollContent)
+            // Phase E.5.12 — freeze the page scroll once a Cards-layout
+            // card is lifted (long press completed) or actively dragging.
+            // Without this, the parent scroll's pan recognizer would
+            // compete with our reorder drag and the page would skid
+            // around under the dragged card. The freeze auto-releases
+            // when the gesture ends because both ids clear in `endDrag`.
+            .scrollDisabled(isCardReorderActive)
             .background(Color.DS.bg1)
             .toolbar(.hidden, for: .navigationBar)
             .animation(.easeOut(duration: 0.18), value: viewMode)
+            .animation(.easeOut(duration: 0.18), value: boardLayout)
         }
         .overlay(alignment: .bottomTrailing) {
             // Menu attached directly to the FAB — popup anchors to the
@@ -113,18 +168,57 @@ struct TimelineScreen: View {
             // sheet so the user can add a caption + type before saving.
             if newItem != nil { isMediaEditorPresented = true }
         }
-        .sheet(isPresented: $isEditorPresented) {
+        .sheet(
+            isPresented: $isEditorPresented,
+            // Phase E.5.12 — sheet presentations interrupt the touch
+            // sequence in ways that can leave our LongPressGesture's
+            // internal state half-completed. When the user returns to
+            // the timeline after Save, the next touch was being
+            // misinterpreted as the tail end of a still-tracked
+            // long-press, immediately re-firing our lift / drag
+            // hand-off. Always reset the drag session on dismiss as
+            // a clean baseline.
+            onDismiss: { DragSessionStore.shared.cancelSession() }
+        ) {
             NoteEditorScreen()
         }
-        .sheet(isPresented: $isMediaEditorPresented, onDismiss: { mediaPickerItem = nil }) {
+        .sheet(
+            isPresented: $isMediaEditorPresented,
+            onDismiss: {
+                mediaPickerItem = nil
+                DragSessionStore.shared.cancelSession()
+            }
+        ) {
             MediaNoteEditorScreen(initialItem: mediaPickerItem)
+        }
+        // Phase E.5.17 — delete confirmation uses `.alert` (centered
+        // modal) instead of `.confirmationDialog` (bottom action sheet).
+        // For irreversible single-item destruction Apple consistently
+        // uses an alert (Notes / Photos / Calendar / Reminders all do);
+        // action sheets are reserved for multi-option pickers.
+        .alert(
+            "Delete this note?",
+            isPresented: pendingDeletePresented,
+            presenting: pendingDeleteId
+        ) { id in
+            Button("Delete", role: .destructive) {
+                withAnimation(.easeOut(duration: 0.2)) {
+                    TimelineStore.shared.delete(noteId: id)
+                }
+                pendingDeleteId = nil
+            }
+            Button("Keep", role: .cancel) {
+                pendingDeleteId = nil
+            }
+        } message: { _ in
+            Text("This can't be undone.")
         }
     }
 
     // MARK: - Header
 
     private var header: some View {
-        HStack(alignment: .top, spacing: 12) {
+        HStack(alignment: .top, spacing: 8) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(dayOfWeek)
                     .font(.DS.sans(size: 11, weight: .bold))
@@ -137,6 +231,15 @@ struct TimelineScreen: View {
                     .foregroundStyle(Color.DS.ink)
             }
             Spacer(minLength: 12)
+            // Phase E.5.13 — Board sub-mode picker moved from an inline
+            // segmented row into a top-right toolbar Menu (Apple Files /
+            // Photos pattern). Hidden in Timeline view (no sub-modes).
+            // Icon reflects the active sub-mode so the user has a visual
+            // cue at a glance without opening the menu.
+            if viewMode == .board {
+                boardSubModeMenu
+                    .transition(.opacity.combined(with: .scale(scale: 0.85)))
+            }
             Button(action: openSettings) {
                 Image(systemName: "gearshape")
                     .font(.system(size: 20, weight: .regular))
@@ -147,6 +250,27 @@ struct TimelineScreen: View {
             .buttonStyle(.plain)
             .accessibilityLabel("Settings")
         }
+    }
+
+    /// Top-right Menu picker for the Board sub-mode (Cards / Stack /
+    /// Group). Uses SwiftUI's `Picker` inside a `Menu` so the active
+    /// option auto-renders with a checkmark — native iOS pattern.
+    private var boardSubModeMenu: some View {
+        Menu {
+            Picker("Board layout", selection: $boardLayout) {
+                ForEach(BoardLayoutMode.allCases) { mode in
+                    Label(mode.title, systemImage: mode.systemImage)
+                        .tag(mode)
+                }
+            }
+        } label: {
+            Image(systemName: boardLayout.systemImage)
+                .font(.system(size: 18, weight: .regular))
+                .foregroundStyle(Color.DS.ink)
+                .frame(width: 40, height: 40)
+                .contentShape(Rectangle())
+        }
+        .accessibilityLabel("Board layout — \(boardLayout.title)")
     }
 
     private var dayOfWeek: String {
@@ -178,18 +302,6 @@ struct TimelineScreen: View {
         return [defaultMode] + TimelineViewMode.allCases.filter { $0 != defaultMode }
     }
 
-    /// Sub-toggle shown only when `viewMode == .board`. Lets the user pick how
-    /// cards are organized: stacked by type, grouped into sections by type,
-    /// or free-form (current 2-col masonry).
-    private var boardLayoutToggle: some View {
-        Segmented(
-            options: BoardLayoutMode.allCases.map { mode in
-                SegmentedOption(id: mode, title: mode.title, systemImage: mode.systemImage)
-            },
-            selection: $boardLayout
-        )
-    }
-
     // MARK: - Content
 
     @ViewBuilder
@@ -206,51 +318,143 @@ struct TimelineScreen: View {
         }
     }
 
-    /// Dispatches Board rendering based on `boardLayout`.
+    /// Dispatches Board rendering based on `boardLayout`. Phase E.5.15
+    /// inserts the Pinned section at the top of every sub-mode (when any
+    /// note is pinned); the sub-mode-specific layout below it sees only
+    /// the unpinned subset, so a pinned note never appears twice.
     @ViewBuilder
     private var boardContent: some View {
-        switch boardLayout {
-        case .cards:
-            cardsBoardGrid
-        case .grouped:
-            groupedView
-        case .stacked:
-            StackedBoardView(groups: groupedNotes)
+        VStack(alignment: .leading, spacing: 16) {
+            if !pinnedNotes.isEmpty {
+                pinnedSection
+            }
+            switch boardLayout {
+            case .cards:
+                cardsBoardGrid
+            case .grouped:
+                groupedView
+            case .stacked:
+                StackedBoardView(
+                    groups: groupedNotes,
+                    onRequestDelete: { requestDelete($0) }
+                )
+            }
         }
     }
 
-    /// Free-layout 2-col masonry with drag-to-reorder.
+    /// The "Pinned" section rendered at the top of each Board sub-mode
+    /// when any note is pinned (Phase E.5.15).
     ///
-    /// We use `.onDrag(_:preview:)` (rather than the newer `.draggable`)
-    /// because its data closure runs **at drag start** — that's the hook
-    /// for publishing the dragging id to `DragSessionStore.shared`
-    /// synchronously. `.draggable` only takes an `@autoclosure` payload
-    /// expression, which can't carry side effects in a way that runs
-    /// once when the drag begins.
+    /// **Layout-per-mode.** For Cards and Stack the pinned cards render
+    /// in a 2-col masonry — pinned notes are the user's "important now"
+    /// list, and a flat masonry surfaces them clearly without the per-
+    /// type stacking abstraction (you want pinned items immediately
+    /// readable, not collapsed into a pile). For Group the pinned cards
+    /// render in a horizontal scroll rail to match Group's all-rails
+    /// visual rhythm.
     ///
-    /// `.onDrop(of:delegate:)` + `NoteReorderDropDelegate` returns
-    /// `DropProposal(.move)` from `dropUpdated` (no green "+" badge) and
-    /// performs the live reorder from `dropEntered`. `performDrop` is a
-    /// fallback for cases `dropEntered` missed.
+    /// **Drag-to-reorder is intentionally not wired** for the pinned
+    /// section in Phase 1 — pinned items keep chronological order. To
+    /// rearrange pinned items the user can unpin and re-pin in the
+    /// desired order. (Apple Notes' pinned section behaves the same
+    /// way — sorted automatically, not user-reorderable.)
+    @ViewBuilder
+    private var pinnedSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "pin.fill")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Color.DS.honey)
+                Text("Pinned")
+                    .font(.DS.sans(size: 11, weight: .bold))
+                    .tracking(0.88)
+                    .textCase(.uppercase)
+                    .foregroundStyle(Color.DS.honey)
+                Text("\(pinnedNotes.count)")
+                    .font(.DS.sans(size: 11, weight: .medium))
+                    .foregroundStyle(Color.DS.fg2)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 4)
+
+            if boardLayout == .grouped {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(alignment: .top, spacing: 10) {
+                        ForEach(pinnedNotes) { note in
+                            KeepCard(note: note, onRequestDelete: { requestDelete($0.id) })
+                                .containerRelativeFrame(.horizontal, alignment: .leading) { width, _ in
+                                    width * 0.55
+                                }
+                        }
+                    }
+                    .scrollTargetLayout()
+                }
+                .scrollTargetBehavior(.viewAligned)
+            } else {
+                KeepGrid(items: pinnedNotes) { note in
+                    KeepCard(note: note, onRequestDelete: { requestDelete($0.id) })
+                }
+            }
+        }
+        .padding(.bottom, 4)
+    }
+
+    /// Cards-layout 2-col masonry with custom drag-to-reorder.
     ///
-    /// `.contentShape(.dragPreview, RoundedRectangle(...))` clips the
-    /// long-press lift preview to the card's rounded corners.
+    /// **Phase E.5.7 — custom gesture.** Replaces the prior
+    /// `.onDrag` / `.onDrop` / `NoteReorderDropDelegate` plumbing with
+    /// a single `LongPressGesture(0.4).sequenced(before: DragGesture)`
+    /// chain per card. We own the hit-testing (against `CardFramePreferenceKey`-
+    /// published frames in a named coord space) and the lifecycle, so:
+    ///
+    /// - **Drop on empty space cancels** — the dragged card snaps back
+    ///   to its pre-drag position via `CardsViewOrderStore.restore(_:)`.
+    /// - **No `dropEntered` cascade** — moves only fire when the finger
+    ///   crosses into a *different* card's frame; stationary finger over
+    ///   a single target won't re-fire as the layout reflows.
+    /// - **No "fade stuck" after drop-on-self** — `onEnded` always
+    ///   clears the session (the iOS drag system's source-as-drop-target
+    ///   filtering doesn't apply here).
+    ///
+    /// **Floating preview.** Because we don't use iOS's `.onDrag`
+    /// system, there's no automatic lift preview. Instead, the grid
+    /// container renders a duplicate `KeepCard` in `.overlay` at the
+    /// finger's current location, offset by the user's grab point so
+    /// the card stays "in hand."
     private var cardsBoardGrid: some View {
-        let orderedNotes = CardsViewOrderStore.shared.sorted(notes)
+        // Pinned notes render above this grid in `pinnedSection`; the
+        // Cards masonry only owns unpinned notes (Phase E.5.15).
+        let orderedNotes = CardsViewOrderStore.shared.sorted(unpinnedNotes)
         // Read these from the store inside the body so the views below
         // re-render automatically when the drag session changes (the
         // store is `@Observable`).
-        let draggingId = DragSessionStore.shared.draggingNoteId
-        let dropTargetId = DragSessionStore.shared.currentDropTargetId
+        let session = DragSessionStore.shared.activeSession
+        let draggingId = session?.noteId
+        let dropTargetId = session?.lastTargetId
+        let liftedId = DragSessionStore.shared.liftedNoteId
         return KeepGrid(items: orderedNotes) { note in
             let isSourceOfDrag = draggingId == note.id
+            let isLifted = liftedId == note.id && !isSourceOfDrag
             let isLiveDropTarget = dropTargetId == note.id && !isSourceOfDrag
-            KeepCard(note: note)
+            KeepCard(note: note, onRequestDelete: { requestDelete($0.id) })
                 // Fade the source card while it's being dragged so the
                 // user sees the drag "lifted" and the live-reflow's
-                // shifting cards aren't competing visually with a
-                // double-rendered original.
+                // shifting cards aren't competing visually with the
+                // floating preview rendered in the grid overlay.
                 .opacity(isSourceOfDrag ? 0.35 : 1)
+                // **Lifted state** (Phase E.5.8) — long press just
+                // completed, drag hasn't moved yet. Scale + shadow give
+                // the user a clear "you held long enough, now drag"
+                // confirmation independent of any finger motion. When
+                // the drag actually moves, lifted clears and the
+                // floating preview takes over.
+                .scaleEffect(isLifted ? 1.04 : 1)
+                .shadow(
+                    color: .black.opacity(isLifted ? 0.18 : 0),
+                    radius: isLifted ? 12 : 0,
+                    y: isLifted ? 6 : 0
+                )
+                .zIndex(isLifted ? 1 : 0)
                 // Subtle highlight on whichever card the finger is
                 // currently over — explicit "this is where it'll land"
                 // cue. Uses the user's primary theme color so it picks
@@ -263,43 +467,137 @@ struct TimelineScreen: View {
                     }
                 }
                 .animation(.easeOut(duration: 0.18), value: isSourceOfDrag)
+                .animation(.spring(response: 0.28, dampingFraction: 0.7), value: isLifted)
                 .animation(.easeOut(duration: 0.18), value: isLiveDropTarget)
-                .contentShape(
-                    .dragPreview,
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                )
-                .onDrag {
-                    // Runs once at drag start. Two responsibilities:
-                    //   1. Clear any leftover state from a previous drag
-                    //      that ended without a `performDrop` callback —
-                    //      iOS filters the source view as a drop target,
-                    //      so dropping precisely on yourself never
-                    //      reaches our delegate, leaving the source's
-                    //      fade lingering until the next drag.
-                    //   2. Publish the new dragging id so
-                    //      `NoteReorderDropDelegate.dropEntered` reads
-                    //      it synchronously (no async
-                    //      `NSItemProvider.loadObject` round-trip).
-                    DragSessionStore.shared.endSession()
-                    DragSessionStore.shared.draggingNoteId = note.id
-                    return NSItemProvider(object: note.id.uuidString as NSString)
-                } preview: {
-                    KeepCard(note: note)
-                        .frame(maxWidth: 180)
-                        .opacity(0.85)
-                        .contentShape(
-                            .dragPreview,
-                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                // Publish this card's frame (in the grid coord space)
+                // so the gesture's hit-test can find it from a finger
+                // location.
+                .background {
+                    GeometryReader { geo in
+                        Color.clear.preference(
+                            key: CardFramePreferenceKey.self,
+                            value: [note.id: geo.frame(in: .named(Self.cardsGridCoordinateSpace))]
                         )
+                    }
                 }
-                .onDrop(
-                    of: [.text],
-                    delegate: NoteReorderDropDelegate(
-                        targetNote: note,
-                        allNotes: notes
-                    )
-                )
+                // **`.simultaneousGesture`, not `.gesture`** (Phase E.5.12).
+                // With `.gesture`, our long-press recognizer claimed the
+                // touch exclusively, blocking the parent ScrollView's pan
+                // gesture — the page wouldn't scroll while a finger was
+                // on a card, and the LongPressGesture's failure-on-move
+                // arbitration didn't cleanly hand the touch back to the
+                // scroll. `.simultaneousGesture` lets both recognizers
+                // track the touch in parallel; `LongPressGesture`'s
+                // built-in `maximumDistance` (~10pt) still fails it
+                // cleanly when the user starts a scroll, so we don't
+                // accidentally lift on every swipe.
+                .simultaneousGesture(reorderGesture(for: note, allNotes: orderedNotes))
         }
+        .coordinateSpace(name: Self.cardsGridCoordinateSpace)
+        .onPreferenceChange(CardFramePreferenceKey.self) { frames in
+            DragSessionStore.shared.cardFrames = frames
+        }
+        // Floating drag preview: renders only while a session is active.
+        // Positioned in the same named coord space the gesture reports
+        // into, offset by the grab point so the card stays under the
+        // finger exactly where the user picked it up.
+        .overlay(alignment: .topLeading) {
+            if let session = DragSessionStore.shared.activeSession,
+               let sourceNote = orderedNotes.first(where: { $0.id == session.noteId }),
+               let sourceFrame = DragSessionStore.shared.cardFrames[session.noteId] {
+                let center = CGPoint(
+                    x: session.currentLocation.x - session.grabOffset.width,
+                    y: session.currentLocation.y - session.grabOffset.height
+                )
+                KeepCard(note: sourceNote, showsActions: false)
+                    .frame(width: sourceFrame.width)
+                    .opacity(0.92)
+                    .shadow(color: .black.opacity(0.18), radius: 14, y: 8)
+                    .scaleEffect(1.03)
+                    .position(center)
+                    .allowsHitTesting(false)
+                    .transition(.opacity)
+            }
+        }
+        .animation(.easeOut(duration: 0.18), value: session?.noteId)
+    }
+
+    /// Coord-space name shared by the cards grid's `DragGesture`,
+    /// the `CardFramePreferenceKey` frame collection, and the floating
+    /// drag preview overlay. All three use `.named(...)` against this
+    /// string so finger locations and card frames are directly
+    /// comparable.
+    static let cardsGridCoordinateSpace = "cardsGridSpace"
+
+    /// The reorder gesture chain attached to each card.
+    ///
+    /// `LongPressGesture(0.4)` discriminates a deliberate reorder from
+    /// scroll/tap. `.sequenced(before:)` means the drag only kicks in
+    /// after the long press succeeds (haptic confirms the lift).
+    /// `DragGesture(minimumDistance: 0)` lets the drag track the very
+    /// first delta after the long press, so movement feels immediate
+    /// once lifted.
+    ///
+    /// `.updating` is used (not `.onChanged`) because the sequence
+    /// gesture's value type isn't `Equatable`. We discard the
+    /// `GestureState` itself — all real state lives in
+    /// `DragSessionStore`. Side effects from `.updating` are how the
+    /// store stays in sync with each frame of the drag.
+    private func reorderGesture(
+        for note: MockNote,
+        allNotes: [MockNote]
+    ) -> some Gesture {
+        LongPressGesture(minimumDuration: 0.4)
+            .sequenced(before: DragGesture(
+                minimumDistance: 0,
+                coordinateSpace: .named(Self.cardsGridCoordinateSpace)
+            ))
+            .updating($dragGestureBuffer) { value, _, _ in
+                switch value {
+                case .second(true, nil):
+                    // Long press succeeded, drag hasn't moved yet. This
+                    // is the transition into the second phase of the
+                    // sequence and the only callback we trust to mean
+                    // "the long-press has actually passed its 0.4s
+                    // threshold." Phase E.5.12 dropped the parallel
+                    // `.first(true)` branch — it was firing in
+                    // ScrollView re-render scenarios (notably right
+                    // after the editor sheet dismissed) where SwiftUI
+                    // delivered the value before the duration was
+                    // truly met.
+                    DragSessionStore.shared.liftSource(noteId: note.id)
+                case .second(true, let drag?):
+                    // The first .second(true, drag?) callback is the
+                    // drag-start — initialize the session if we haven't
+                    // already (which also clears the lifted state).
+                    if DragSessionStore.shared.activeSession == nil {
+                        let frame = DragSessionStore.shared.cardFrames[note.id]
+                            ?? CGRect(origin: drag.startLocation, size: .zero)
+                        let cardCenter = CGPoint(x: frame.midX, y: frame.midY)
+                        let grab = CGSize(
+                            width: drag.startLocation.x - cardCenter.x,
+                            height: drag.startLocation.y - cardCenter.y
+                        )
+                        DragSessionStore.shared.beginSession(
+                            noteId: note.id,
+                            location: drag.location,
+                            grabOffset: grab,
+                            preDragOrder: CardsViewOrderStore.shared.customOrder
+                        )
+                    } else {
+                        DragSessionStore.shared.updateLocation(drag.location, in: allNotes)
+                    }
+                default:
+                    break
+                }
+            }
+            .onEnded { value in
+                let finalLocation: CGPoint? = {
+                    if case .second(_, let drag?) = value { return drag.location }
+                    return nil
+                }()
+                DragSessionStore.shared.endDrag(finalLocation: finalLocation, in: allNotes)
+            }
     }
 
     /// Visible whenever the user is on the Free Board layout AND has
@@ -354,22 +652,47 @@ struct TimelineScreen: View {
     /// Cards organized into sections by `NoteType`. Sections appear in
     /// `NoteType.allCases` order so the layout stays stable as notes are
     /// added or removed (sections without any notes are filtered out).
+    ///
+    /// **Phase E.5.11 — horizontal rail per section.** Each section is a
+    /// horizontal `ScrollView` of cards (Apple Music / App Store rail
+    /// pattern) instead of a 2-col vertical grid. Trade-offs:
+    ///
+    /// - Carves out a meaningfully different role from Stack (compact
+    ///   collapsed glance) and Cards (free 2-col masonry) — Group is now
+    ///   "all types visible at once, swipe each row to browse deep
+    ///   types" without one busy type pushing every other type off screen.
+    /// - Cards use a uniform width (~55% of the container, so 2 fit per
+    ///   screen with a peek of the third — visual affordance for "more
+    ///   to swipe"). Heights stay intrinsic per card, capped by the
+    ///   existing `KeepCard.maxHeight`. Section height = tallest card.
+    /// - `.scrollTargetBehavior(.viewAligned)` snaps the scroll to card
+    ///   boundaries so flicks land cleanly.
     private var groupedView: some View {
         VStack(alignment: .leading, spacing: 24) {
             ForEach(groupedNotes, id: \.type) { group in
                 VStack(alignment: .leading, spacing: 10) {
                     groupHeader(type: group.type, count: group.notes.count)
-                    LazyVGrid(
-                        columns: [
-                            GridItem(.flexible(), spacing: 8),
-                            GridItem(.flexible(), spacing: 8),
-                        ],
-                        spacing: 8
-                    ) {
-                        ForEach(group.notes) { note in
-                            KeepCard(note: note)
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(alignment: .top, spacing: 10) {
+                            ForEach(group.notes) { note in
+                                KeepCard(note: note, onRequestDelete: { requestDelete($0.id) })
+                                    // ~55% of the visible scroll width:
+                                    // shows ~2 cards with a peek of the
+                                    // next so the user knows the rail
+                                    // is scrollable. iOS 17 closure form
+                                    // keeps this responsive across
+                                    // device sizes.
+                                    .containerRelativeFrame(
+                                        .horizontal,
+                                        alignment: .leading
+                                    ) { width, _ in
+                                        width * 0.55
+                                    }
+                            }
                         }
+                        .scrollTargetLayout()
                     }
+                    .scrollTargetBehavior(.viewAligned)
                 }
             }
         }
@@ -395,8 +718,10 @@ struct TimelineScreen: View {
 
     /// Notes grouped by `NoteType`, preserving the canonical type ordering.
     /// Empty types are filtered so the layout doesn't render hollow headers.
+    /// Phase E.5.15 — operates on `unpinnedNotes` so pinned items don't
+    /// double up between the Pinned section and their type grouping.
     private var groupedNotes: [(type: NoteType, notes: [MockNote])] {
-        let byType = Dictionary(grouping: notes, by: \.type)
+        let byType = Dictionary(grouping: unpinnedNotes, by: \.type)
         return NoteType.allCases.compactMap { type in
             guard let group = byType[type], !group.isEmpty else { return nil }
             return (type, group)
@@ -417,7 +742,9 @@ struct TimelineScreen: View {
                         message: note.timelineMessage,
                         background: note.resolvedBackgroundStyle,
                         titleStyle: note.titleStyle,
-                        media: note.mediaPayload
+                        media: note.mediaPayload,
+                        noteId: note.id,
+                        onRequestDelete: requestDelete
                     )
                 }
             }

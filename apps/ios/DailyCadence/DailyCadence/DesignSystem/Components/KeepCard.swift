@@ -27,6 +27,14 @@ import SwiftUI
 /// Drag-to-reorder (the `.keep.drag` CSS class) is deferred to a later pass.
 struct KeepCard: View {
     let note: MockNote
+    /// Optional callback fired from the `.contextMenu` Delete action.
+    /// The parent screen owns the actual deletion + confirmation dialog
+    /// (Phase E.5.15). When `nil`, no Delete item appears in the menu.
+    var onRequestDelete: ((MockNote) -> Void)? = nil
+    /// When false, suppresses the pin overlay and the `.contextMenu` —
+    /// useful in preview-only contexts where global pin state mutation
+    /// is undesirable.
+    var showsActions: Bool = true
 
     /// Maximum rendered height for any card in the Board grid. Tuned so a
     /// long-message text card or a tall portrait photo doesn't push the
@@ -34,6 +42,13 @@ struct KeepCard: View {
     static let maxHeight: CGFloat = 480
 
     @State private var isMediaViewerPresented = false
+
+    /// Reads through `PinStore.shared.isPinned(note.id)` inside `body`
+    /// so the Observation framework re-renders the card when pin state
+    /// flips — same pattern as `Color.DS.sage` reading `ThemeStore`.
+    private var isPinned: Bool {
+        PinStore.shared.isPinned(note.id)
+    }
 
     var body: some View {
         Group {
@@ -52,10 +67,51 @@ struct KeepCard: View {
         .fixedSize(horizontal: false, vertical: true)
         .frame(maxHeight: Self.maxHeight)
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        // Phase E.5.15 — pin glyph as **status indicator only**. Shown
+        // only when the card *is* pinned (Apple Notes / Mail flag /
+        // iMessage pinned-conversation pattern); tapping the visible
+        // glyph unpins. Pinning an unpinned card happens via the
+        // `.contextMenu` Pin entry — no permanent chrome on every card.
+        .overlay(alignment: .topTrailing) {
+            if showsActions && isPinned {
+                PinButton(isPinned: true) {
+                    PinStore.shared.togglePin(note.id)
+                }
+                // For media cards the photo can render under the icon;
+                // a thin material backdrop keeps the glyph readable
+                // without mattering on text cards (where the surface is
+                // already a calm tint).
+                .background(
+                    Circle()
+                        .fill(.ultraThinMaterial)
+                        .opacity(note.isMediaNote ? 0.85 : 0)
+                        .frame(width: 28, height: 28)
+                )
+                .padding(2)
+                .transition(.scale.combined(with: .opacity))
+            }
+        }
+        .animation(.easeOut(duration: 0.18), value: isPinned)
         .accessibilityElement(children: .combine)
         .fullScreenCover(isPresented: $isMediaViewerPresented) {
             if let media = note.mediaPayload {
                 MediaViewerScreen(media: media)
+            }
+        }
+        .contextMenu {
+            if showsActions {
+                Button {
+                    PinStore.shared.togglePin(note.id)
+                } label: {
+                    Label(isPinned ? "Unpin" : "Pin", systemImage: isPinned ? "pin.slash" : "pin")
+                }
+                if let onRequestDelete {
+                    Button(role: .destructive) {
+                        onRequestDelete(note)
+                    } label: {
+                        Label("Delete", systemImage: "trash")
+                    }
+                }
             }
         }
     }
@@ -116,17 +172,21 @@ struct KeepCard: View {
     }
 
     private var head: some View {
-        HStack(spacing: 6) {
+        // Phase E.5.14 — bumped from 7pt dot / 9pt label to 9pt / 11pt
+        // so the type indicator reads as a clear "header" on the card
+        // instead of a small footnote. Colored label was already in use;
+        // size + tracking updated proportionally.
+        HStack(spacing: 7) {
             Circle()
                 .fill(note.type.color)
-                .frame(width: 7, height: 7)
+                .frame(width: 9, height: 9)
             Text(note.type.title)
-                .font(.DS.sans(size: 9, weight: .bold))
-                .tracking(0.72)  // 0.08em at 9pt
+                .font(.DS.sans(size: 11, weight: .bold))
+                .tracking(0.88)  // 0.08em at 11pt
                 .textCase(.uppercase)
                 .foregroundStyle(note.type.color)
         }
-        .padding(.bottom, 2)
+        .padding(.bottom, 4)
     }
 
     @ViewBuilder
