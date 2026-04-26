@@ -22,17 +22,51 @@ struct CardsViewOrderStoreTests {
         #expect(!store.hasCustomOrder)
     }
 
-    @Test func moveSeedsFromChronologicalAndInsertsBeforeTarget() {
+    @Test func backwardDragLandsSourceAtTargetSlot() {
+        // Backward drag (later → earlier): source ends up where target
+        // was, target shifts toward source's old slot.
         let store = CardsViewOrderStore()
         let a = Self.note("a")
         let b = Self.note("b")
         let c = Self.note("c")
         let notes = [a, b, c]
 
-        // Move c before a → expect [c, a, b]
-        store.move(c.id, before: a.id, in: notes)
+        // Move c onto a → expect [c, a, b]
+        store.move(c.id, onto: a.id, in: notes)
         #expect(store.hasCustomOrder)
         #expect(store.sorted(notes).map(\.timelineTitle) == ["c", "a", "b"])
+    }
+
+    @Test func forwardDragLandsSourceAtTargetSlot() {
+        // Forward drag (earlier → later): source ends up where target
+        // was, target shifts toward source's old slot. With the older
+        // "insert before target" semantics, dropping an earlier card
+        // onto its immediate next neighbor was a no-op — this test
+        // pins the corrected directional behavior.
+        let store = CardsViewOrderStore()
+        let a = Self.note("a")
+        let b = Self.note("b")
+        let c = Self.note("c")
+        let notes = [a, b, c]
+
+        // Move a onto b (immediate next neighbor) → expect [b, a, c]
+        store.move(a.id, onto: b.id, in: notes)
+        #expect(store.sorted(notes).map(\.timelineTitle) == ["b", "a", "c"])
+    }
+
+    @Test func forwardDragAcrossMultipleSlots() {
+        // Forward drag spanning more than one position: source jumps
+        // past the cards between it and the target.
+        let store = CardsViewOrderStore()
+        let a = Self.note("a")
+        let b = Self.note("b")
+        let c = Self.note("c")
+        let d = Self.note("d")
+        let notes = [a, b, c, d]
+
+        // Move a onto c → expect [b, c, a, d]
+        store.move(a.id, onto: c.id, in: notes)
+        #expect(store.sorted(notes).map(\.timelineTitle) == ["b", "c", "a", "d"])
     }
 
     @Test func subsequentMovesPreserveExistingOrder() {
@@ -43,12 +77,12 @@ struct CardsViewOrderStoreTests {
         let d = Self.note("d")
         let notes = [a, b, c, d]
 
-        // First move: d before b → [a, d, b, c]
-        store.move(d.id, before: b.id, in: notes)
+        // First move: d onto b (backward) → [a, d, b, c]
+        store.move(d.id, onto: b.id, in: notes)
         #expect(store.sorted(notes).map(\.timelineTitle) == ["a", "d", "b", "c"])
 
-        // Second move: c before a → [c, a, d, b]
-        store.move(c.id, before: a.id, in: notes)
+        // Second move: c onto a (backward) → [c, a, d, b]
+        store.move(c.id, onto: a.id, in: notes)
         #expect(store.sorted(notes).map(\.timelineTitle) == ["c", "a", "d", "b"])
     }
 
@@ -59,7 +93,7 @@ struct CardsViewOrderStoreTests {
         let store = CardsViewOrderStore()
         let a = Self.note("a")
         let b = Self.note("b")
-        store.move(b.id, before: a.id, in: [a, b])
+        store.move(b.id, onto: a.id, in: [a, b])
         #expect(store.sorted([a, b]).map(\.timelineTitle) == ["b", "a"])
 
         let c = Self.note("c")
@@ -74,7 +108,7 @@ struct CardsViewOrderStoreTests {
         let store = CardsViewOrderStore()
         let a = Self.note("a")
         let b = Self.note("b")
-        store.move(b.id, before: a.id, in: [a, b])
+        store.move(b.id, onto: a.id, in: [a, b])
         #expect(store.hasCustomOrder)
 
         store.reset()
@@ -85,8 +119,8 @@ struct CardsViewOrderStoreTests {
     @Test func movingToSelfIsNoOp() {
         let store = CardsViewOrderStore()
         let a = Self.note("a")
-        store.move(a.id, before: a.id, in: [a])
-        #expect(!store.hasCustomOrder, "Moving an item before itself should not seed a custom order")
+        store.move(a.id, onto: a.id, in: [a])
+        #expect(!store.hasCustomOrder, "Moving an item onto itself should not seed a custom order")
     }
 
     @Test func restoreReplacesCustomOrderWithSnapshot() {
@@ -100,12 +134,12 @@ struct CardsViewOrderStoreTests {
         let notes = [a, b, c]
 
         // Pre-drag: user already had a custom order [c, a, b].
-        store.move(c.id, before: a.id, in: notes)
+        store.move(c.id, onto: a.id, in: notes)
         let snapshot = store.customOrder
         #expect(store.sorted(notes).map(\.timelineTitle) == ["c", "a", "b"])
 
         // Drag in flight — reorders to [a, c, b].
-        store.move(a.id, before: c.id, in: notes)
+        store.move(a.id, onto: c.id, in: notes)
         #expect(store.sorted(notes).map(\.timelineTitle) == ["a", "c", "b"])
 
         // Drop on empty space — revert.
@@ -124,34 +158,12 @@ struct CardsViewOrderStoreTests {
         let notes = [a, b]
 
         let snapshot = store.customOrder      // empty pre-drag
-        store.move(b.id, before: a.id, in: notes)
+        store.move(b.id, onto: a.id, in: notes)
         #expect(store.hasCustomOrder)
 
         store.restore(snapshot)
         #expect(!store.hasCustomOrder, "Restoring an empty snapshot should clear the custom order")
         #expect(store.sorted(notes).map(\.timelineTitle) == ["a", "b"])
-    }
-
-    @Test func dragCommitOnTargetMovesExactlyOnce() {
-        // Phase E.5.7 — a single drag that crosses one target card
-        // should produce one final order (mirroring the gesture's
-        // updateLocation guard `target.id != session.lastTargetId`).
-        // Calling move() twice with the same dragged + target pair
-        // must be idempotent vs. a single call.
-        let store = CardsViewOrderStore()
-        let a = Self.note("a")
-        let b = Self.note("b")
-        let c = Self.note("c")
-        let notes = [a, b, c]
-
-        store.move(c.id, before: a.id, in: notes)
-        let afterFirst = store.customOrder
-
-        // Re-firing the same move (would happen if the cascade guard
-        // didn't exist) must not bounce the card to a new position.
-        store.move(c.id, before: a.id, in: notes)
-        #expect(store.customOrder == afterFirst)
-        #expect(store.sorted(notes).map(\.timelineTitle) == ["c", "a", "b"])
     }
 
     @Test func deleteRemovesNoteAndForgetsPinState() {
@@ -191,7 +203,7 @@ struct CardsViewOrderStoreTests {
         let a = Self.note("a")
         let b = Self.note("b")
         let stranger = UUID()
-        store.move(b.id, before: stranger, in: [a, b])
+        store.move(b.id, onto: stranger, in: [a, b])
         // After this call, the customOrder may be seeded (move() seeds
         // from chronological before checking target) but order shouldn't
         // change.

@@ -1,6 +1,6 @@
 # DailyCadence — Progress
 
-**Last updated:** 2026-04-26 (Phase F.2.1 — Stack-mode collapsed stacks stop reserving phantom height; badge moved to a non-sizing overlay and gutters now match the Board's 12pt rhythm)
+**Last updated:** 2026-04-26 (Phase E.5.27 — Cards-mode reorder rewritten in pure SwiftUI with `.draggable` + `.dropDestination` over a custom `Layout`; the entire UIKit collection-view bridge from E.5.25–E.5.26 deleted)
 **Current phase:** Phase 1 MVP — iOS app for Jon + wife, TestFlight distribution
 
 This is the living state of the project. Update at the end of every session.
@@ -1179,6 +1179,100 @@ Jon reported: in Cards Board mode the page would only scroll if the pan started 
 **DragSessionStore** gains a `liftLocation: CGPoint?` field and `liftSource(noteId:at:)` now captures it. On the first `.changed` after a lift, `handleReorderEvent` reads `liftLocation` to compute the floating preview's grab offset against where the finger actually landed — not where it's already moved to by the time the first `.changed` fires (which can be tens of points later if the user starts dragging fast). `beginSession`, `endDrag`, and `cancelSession` clear it.
 
 **Net result:** the page scrolls cleanly from anywhere — over a card, between cards, on the header. Long-press on a card still triggers the lift haptic + the live drag preview at the same 0.4s threshold and the reorder UX is unchanged (lift → drag → drop or drop-on-empty-reverts). Build passes; no test changes (the gesture layer isn't unit-tested — verified via the iOS Simulator running the Cards layout).
+
+### Phase E.5.25 — Cards grid migrated to UICollectionView (added this round)
+
+User reported a regression right after E.5.24: in Cards mode, long-pressing a card brought up the action menu before drag-to-reorder could reliably take over. That exposed the deeper issue: even after moving one recognizer down to UIKit, Cards mode still had **two separate long-press systems** competing on the same surface (`KeepCard`'s SwiftUI `.contextMenu` and the custom reorder recognizer). That's not a timing bug; it's the wrong architecture for this interaction mix.
+
+**Clean fix: move Cards mode onto UIKit's native collection-view interaction model.**
+
+- New `Features/Timeline/CardsBoardCollectionView.swift`
+  - `UIViewRepresentable` wrapper around a self-sizing, non-scrollable `UICollectionView` embedded inside the existing Today-screen `ScrollView`.
+  - Each cell renders the existing SwiftUI `KeepCard` via `UIHostingConfiguration`, so the visual design stays identical while interaction ownership moves to UIKit.
+  - The collection view owns:
+    - **context menus** via `collectionView(_:contextMenuConfigurationForItemAt:point:)`
+    - **drag reorder** via `UICollectionViewDragDelegate` / `UICollectionViewDropDelegate`
+    - **order persistence** by writing the resulting id order back to `CardsViewOrderStore`
+- New `Features/Timeline/CardsBoardMasonryLayout.swift`
+  - Native 2-column shortest-column-first masonry layout mirroring the SwiftUI `MasonryLayout`: same 12pt gutter, same intrinsic-height packing, same no-trailing-bottom-gap behavior.
+- `DesignSystem/Components/KeepCard.swift`
+  - Added `showsContextMenu: Bool?` so a parent container can disable the card-owned SwiftUI `.contextMenu` while still keeping the pin-status overlay visible. Cards-mode collection cells use `showsContextMenu: false`; other surfaces keep the old default behavior.
+- `Features/Timeline/TimelineScreen.swift`
+  - `cardsBoardGrid` now renders `CardsBoardCollectionView(notes:onRequestDelete:)` instead of the old custom SwiftUI gesture grid.
+  - Removed the old Cards-only scroll freeze (`.scrollDisabled(isCardReorderActive)`) and the editor-sheet drag-session reset hooks, since Cards mode no longer uses the custom `DragSessionStore` gesture path.
+
+**Why this is better**
+- Scroll-from-card, long-press drag reorder, and long-press context menus now live in the **same native interaction system** instead of being arbitrated across SwiftUI gesture modifiers.
+- This is the common iOS architecture for a surface with **variable-height cards + reorder + context menu**.
+- The rest of Today stays SwiftUI; only Cards mode crosses the bridge, which keeps the refactor scoped.
+
+**Verification**
+- `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -project apps/ios/DailyCadence/DailyCadence.xcodeproj -scheme DailyCadence -destination 'platform=iOS Simulator,name=iPhone 17,OS=26.3.1' build` succeeds.
+- Direct simulator install succeeds via `xcrun simctl install booted .../DailyCadence.app`.
+- Direct simulator launch still fails on this machine with `FBSOpenApplicationServiceErrorDomain` when opening `com.jonsung.DailyCadence`, so I could not do an interaction-level manual verification pass from the CLI.
+
+### Phase E.5.26 — Cards-mode live reflow during reorder (added this round)
+
+After the E.5.25 collection-view migration, reordering was structurally sound but still behaved like a "pick up, hover, then reconcile on drop" flow: the dragged card floated over the masonry while the surrounding cards stayed put, which looked wrong when moving a taller card into a tighter slot.
+
+**Root cause.** The collection view was still using a manual `UICollectionViewDragDelegate` / `UICollectionViewDropDelegate` implementation that only mutated `orderedIDs` in `performDropWith`. That means the custom masonry layout didn't get a new ordering while the drag was in flight, so it had no chance to repack the columns around the dragged card's size until after the drop committed.
+
+**Clean fix: adopt diffable-data-source reordering, not manual drop commits.**
+
+- `Features/Timeline/CardsBoardCollectionView.swift`
+  - Removed the manual drop-commit reorder path.
+  - Enabled `UICollectionViewDiffableDataSource.reorderingHandlers`:
+    - `canReorderItem = true`
+    - `didReorder` captures the collection view's final item order from the diffable transaction and persists it to `CardsViewOrderStore`
+  - Set `collectionView.reorderingCadence = .immediate` so the native collection-view reorder engine continuously repacks as the user drags, instead of waiting for drop.
+  - Cards mode still keeps native context menus via `contextMenuConfigurationForItemAt` and native drag lift via `UICollectionViewDragDelegate`.
+
+**Why this is the modern/common path**
+- This hands live reflow back to UIKit's **own reorder machinery** instead of simulating it ourselves in `performDropWith`.
+- It keeps one source of truth for in-flight reorder state: the collection view + diffable data source, not a second custom hover model.
+- The custom masonry layout now simply reacts to the order UIKit is actively maintaining during the drag.
+
+**Verification**
+- `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -project apps/ios/DailyCadence/DailyCadence.xcodeproj -scheme DailyCadence -destination 'platform=iOS Simulator,name=iPhone 17,OS=26.3.1' build` succeeds after the reorderingHandlers + `.immediate` change.
+
+### Phase E.5.27 — Cards reorder rewritten in pure SwiftUI (added this round)
+
+In real use the E.5.25 / E.5.26 collection-view path had visible layout breakage on drop — cards landing with the wrong height for their slot, neighboring cards overlapping, and a ~2-second settle while the layout reconciled. After several scoped patches (drop delegate, masonry frame-cache invalidation, height memoization), the underlying issue was clearly architectural rather than perf: the bridge maintained **three independent representations of card height** (the cell's `UIHostingConfiguration`, a sidecar `UIHostingController` used to pre-measure, and the masonry layout's `[CGFloat]` array). Each rendered in a different SwiftUI context, so they drifted under real workloads.
+
+**Clean fix: delete the bridge entirely; use SwiftUI's native primitives.**
+
+- New `Features/Timeline/CardsBoardView.swift` (~90 lines)
+  - `MasonryLayout(columns: 2, spacing: 12)` reuses the existing `DesignSystem/Components/MasonryLayout.swift` (the same custom `Layout` Stack mode already uses) — no duplicate. The same render context measures and places each card, so what the layout packs is exactly what gets drawn.
+  - `.draggable(NoteDragPayload(id: note.id))` on each card and `.dropDestination(for: NoteDragPayload.self)` on each card. Both route through iOS's system drag-and-drop (`UIDragInteraction`), which arbitrates with the parent `ScrollView`'s pan recognizer at the UIKit gesture layer — scrolling continues to work from any touch start, including over a card.
+  - `NoteDragPayload` is a small `Codable` + `Transferable` wrapper using `CodableRepresentation(contentType: .data)`. Generic-data content type keeps the drag intra-app — text-accepting apps (Notes, Mail) don't advertise as drop targets, and we don't have to register a custom UTType in Info.plist.
+  - Drop handler calls `CardsViewOrderStore.shared.move(sourceID, onto: note.id, in: notes)` inside `withAnimation(.easeInOut(duration: 0.22))`. On empty-space release iOS cancels the drag and no order change happens — no manual snapshot/revert plumbing needed.
+  - `CardsViewOrderStore.move(_:before:in:)` was renamed to `move(_:onto:in:)` and its semantics tightened: source lands at target's original slot regardless of direction (forward drag → source after target; backward drag → source before target). The previous "insert before target" rule made forward drag onto an immediate-next neighbor a no-op (source was already there), which read as "drag did nothing." Two new tests pin the symmetric behavior; one obsolete cascade-guard test (Phase E.5.7-era) was deleted because the system drag pipeline doesn't fire repeated moves during a single drag.
+  - `KeepCard`'s built-in `.contextMenu` (Pin / Delete) coexists with `.draggable` automatically: tap-and-hold-without-drift opens the menu; tap-and-hold-then-drag begins reorder. Standard iOS disambiguation.
+
+- `Features/Timeline/TimelineScreen.swift`
+  - `cardsBoardGrid` now renders `CardsBoardView(notes:onRequestDelete:)` and the inline doc comment notes the rationale for the rewrite.
+
+**Deleted (the entire bridge — six files):**
+
+- `Features/Timeline/CardsBoardCollectionView.swift` — the `UIViewRepresentable` + diffable-data-source coordinator
+- `Features/Timeline/CardsBoardMasonryLayout.swift` — the UIKit-side `UICollectionViewLayout` masonry
+- `Features/Timeline/CardReorderRecognizer.swift` — UIKit long-press recognizer bridge from the pre-collection-view era
+- `Features/Timeline/CardFramePreferenceKey.swift` — preference key feeding the old gesture's hit-test map
+- `Services/DragSessionStore.swift` — drag-session state for the old custom-gesture path
+- `docs/TODO_CUSTOM_DRAG_REORDER.md` — historical spec for the deleted custom-gesture flow
+
+**Why this is solid/stable/common**
+- One framework, one sizing model. SwiftUI measures each card via `Layout.subviews[i].sizeThatFits(...)`; that's the same call that produces the rendered frame. No second measurement, nothing to drift.
+- `.draggable` + `.dropDestination` is the iOS-canonical drag-to-reorder primitive — same surface Notes / Reminders / Files use. iOS owns long-press initiation, haptic, lift, floating preview, and cancel-on-empty.
+- `CardsViewOrderStore.move(_:onto:in:)` is the single drop primitive — no other reorder service-layer plumbing needed.
+- ~600 lines deleted, ~90 lines added.
+
+**Behavior trade-off (transparent)**
+- E.5.26's "live reflow during drag" (cards shifting around a hovering finger) is gone. With system `.draggable` the reorder commits on drop. This matches the iOS Notes / Reminders pattern and is the more common idiom; if live reflow becomes a wanted refinement later it can be added on top of the SwiftUI surface.
+
+**Verification**
+- Code-level grep confirms no dangling references to deleted symbols (`DragSessionStore`, `CardsBoardCollectionView`, `CardReorderRecognizer`, `CardFramePreferenceKey`, `IntrinsicHeightCollectionView`, `CardHeightCache`).
+- Xcode build verification pending — Jon to run on his machine since the CLI environment lacks an active Xcode developer directory.
 
 ### Tests (79/79 passing — +3 this round)
 - `ColorHexTests` (16) — hex initializer, every palette family in light + dark, invariant tokens, role flips

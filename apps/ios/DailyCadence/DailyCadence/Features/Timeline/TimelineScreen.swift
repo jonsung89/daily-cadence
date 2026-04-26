@@ -51,15 +51,6 @@ struct TimelineScreen: View {
         return notes.filter { !pinned.contains($0.id) }
     }
 
-    /// True while a Cards-layout card is lifted (long-press completed,
-    /// awaiting drag) or in an active drag session. Drives
-    /// `.scrollDisabled` on the outer ScrollView so the page doesn't skid
-    /// under the reorder gesture (Phase E.5.12).
-    private var isCardReorderActive: Bool {
-        DragSessionStore.shared.activeSession != nil
-            || DragSessionStore.shared.liftedNoteId != nil
-    }
-
     /// Boolean projection of `pendingDeleteId` for the dialog's
     /// `isPresented:` binding (`.confirmationDialog` doesn't take an
     /// optional binding directly).
@@ -110,13 +101,6 @@ struct TimelineScreen: View {
             // the FAB persistent and rely on content insets); the
             // hide-on-scroll trick is more Material Design than UIKit.
             .contentMargins(.bottom, 120, for: .scrollContent)
-            // Phase E.5.12 — freeze the page scroll once a Cards-layout
-            // card is lifted (long press completed) or actively dragging.
-            // Without this, the parent scroll's pan recognizer would
-            // compete with our reorder drag and the page would skid
-            // around under the dragged card. The freeze auto-releases
-            // when the gesture ends because both ids clear in `endDrag`.
-            .scrollDisabled(isCardReorderActive)
             .background(Color.DS.bg1)
             .toolbar(.hidden, for: .navigationBar)
             .animation(.easeOut(duration: 0.18), value: viewMode)
@@ -168,16 +152,7 @@ struct TimelineScreen: View {
             if newItem != nil { isMediaEditorPresented = true }
         }
         .sheet(
-            isPresented: $isEditorPresented,
-            // Phase E.5.12 — sheet presentations interrupt the touch
-            // sequence in ways that can leave our LongPressGesture's
-            // internal state half-completed. When the user returns to
-            // the timeline after Save, the next touch was being
-            // misinterpreted as the tail end of a still-tracked
-            // long-press, immediately re-firing our lift / drag
-            // hand-off. Always reset the drag session on dismiss as
-            // a clean baseline.
-            onDismiss: { DragSessionStore.shared.cancelSession() }
+            isPresented: $isEditorPresented
         ) {
             NoteEditorScreen()
         }
@@ -185,7 +160,6 @@ struct TimelineScreen: View {
             isPresented: $isMediaEditorPresented,
             onDismiss: {
                 mediaPickerItem = nil
-                DragSessionStore.shared.cancelSession()
             }
         ) {
             MediaNoteEditorScreen(initialItem: mediaPickerItem)
@@ -398,189 +372,18 @@ struct TimelineScreen: View {
         .padding(.bottom, 4)
     }
 
-    /// Cards-layout 2-col masonry with custom drag-to-reorder.
+    /// Cards-layout 2-col masonry, pure SwiftUI.
     ///
-    /// **Phase E.5.7 — custom gesture.** Replaces the prior
-    /// `.onDrag` / `.onDrop` / `NoteReorderDropDelegate` plumbing with
-    /// a single `LongPressGesture(0.4).sequenced(before: DragGesture)`
-    /// chain per card. We own the hit-testing (against `CardFramePreferenceKey`-
-    /// published frames in a named coord space) and the lifecycle, so:
-    ///
-    /// - **Drop on empty space cancels** — the dragged card snaps back
-    ///   to its pre-drag position via `CardsViewOrderStore.restore(_:)`.
-    /// - **No `dropEntered` cascade** — moves only fire when the finger
-    ///   crosses into a *different* card's frame; stationary finger over
-    ///   a single target won't re-fire as the layout reflows.
-    /// - **No "fade stuck" after drop-on-self** — `onEnded` always
-    ///   clears the session (the iOS drag system's source-as-drop-target
-    ///   filtering doesn't apply here).
-    ///
-    /// **Floating preview.** Because we don't use iOS's `.onDrag`
-    /// system, there's no automatic lift preview. Instead, the grid
-    /// container renders a duplicate `KeepCard` in `.overlay` at the
-    /// finger's current location, offset by the user's grab point so
-    /// the card stays "in hand."
+    /// Reorder uses `.draggable` + `.dropDestination` (iOS system drag,
+    /// arbitrates cleanly with the parent `ScrollView`'s pan); masonry
+    /// is a custom `Layout` that measures and places each card in the
+    /// same render context. See `CardsBoardView` for the rationale on
+    /// why this replaced the previous `UICollectionView` bridge.
     private var cardsBoardGrid: some View {
-        // Pinned notes render above this grid in `pinnedSection`; the
-        // Cards masonry only owns unpinned notes (Phase E.5.15).
-        let orderedNotes = CardsViewOrderStore.shared.sorted(unpinnedNotes)
-        // Read these from the store inside the body so the views below
-        // re-render automatically when the drag session changes (the
-        // store is `@Observable`).
-        let session = DragSessionStore.shared.activeSession
-        let draggingId = session?.noteId
-        let dropTargetId = session?.lastTargetId
-        let liftedId = DragSessionStore.shared.liftedNoteId
-        return KeepGrid(items: orderedNotes) { note in
-            let isSourceOfDrag = draggingId == note.id
-            let isLifted = liftedId == note.id && !isSourceOfDrag
-            let isLiveDropTarget = dropTargetId == note.id && !isSourceOfDrag
-            KeepCard(note: note, onRequestDelete: { requestDelete($0.id) })
-                // Fade the source card while it's being dragged so the
-                // user sees the drag "lifted" and the live-reflow's
-                // shifting cards aren't competing visually with the
-                // floating preview rendered in the grid overlay.
-                .opacity(isSourceOfDrag ? 0.35 : 1)
-                // **Lifted state** (Phase E.5.8) — long press just
-                // completed, drag hasn't moved yet. Scale + shadow give
-                // the user a clear "you held long enough, now drag"
-                // confirmation independent of any finger motion. When
-                // the drag actually moves, lifted clears and the
-                // floating preview takes over.
-                .scaleEffect(isLifted ? 1.04 : 1)
-                .shadow(
-                    color: .black.opacity(isLifted ? 0.18 : 0),
-                    radius: isLifted ? 12 : 0,
-                    y: isLifted ? 6 : 0
-                )
-                .zIndex(isLifted ? 1 : 0)
-                // Subtle highlight on whichever card the finger is
-                // currently over — explicit "this is where it'll land"
-                // cue. Uses the user's primary theme color so it picks
-                // up the active palette.
-                .overlay {
-                    if isLiveDropTarget {
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .strokeBorder(Color.DS.sage, lineWidth: 2)
-                            .transition(.opacity)
-                    }
-                }
-                .animation(.easeOut(duration: 0.18), value: isSourceOfDrag)
-                .animation(.spring(response: 0.28, dampingFraction: 0.7), value: isLifted)
-                .animation(.easeOut(duration: 0.18), value: isLiveDropTarget)
-                // Publish this card's frame (in the grid coord space)
-                // so the gesture's hit-test can find it from a finger
-                // location.
-                .background {
-                    GeometryReader { geo in
-                        Color.clear.preference(
-                            key: CardFramePreferenceKey.self,
-                            value: [note.id: geo.frame(in: .named(Self.cardsGridCoordinateSpace))]
-                        )
-                    }
-                }
-                // **UIKit-bridged recognizer** (Phase E.5.24). The prior
-                // SwiftUI `LongPressGesture(0.4).sequenced(before: DragGesture(0))`
-                // chain — even attached via `.simultaneousGesture` — claimed
-                // the touch sequence in a way that prevented the parent
-                // ScrollView's pan from engaging while a finger was on a
-                // card (page only scrolled from empty space). Bridging to
-                // a `UILongPressGestureRecognizer` with
-                // `cancelsTouchesInView = false` and a delegate returning
-                // `true` for `shouldRecognizeSimultaneouslyWith` lets the
-                // ScrollView's pan and our long-press track the same
-                // touch in parallel at the UIKit gesture-arbitration
-                // layer — the proper iOS-native cooperation pattern.
-                .gesture(CardReorderRecognizer(
-                    coordinateSpace: .named(Self.cardsGridCoordinateSpace),
-                    minimumDuration: 0.4
-                ) { event in
-                    handleReorderEvent(event, for: note, allNotes: orderedNotes)
-                })
-        }
-        .coordinateSpace(name: Self.cardsGridCoordinateSpace)
-        .onPreferenceChange(CardFramePreferenceKey.self) { frames in
-            DragSessionStore.shared.cardFrames = frames
-        }
-        // Floating drag preview: renders only while a session is active.
-        // Positioned in the same named coord space the gesture reports
-        // into, offset by the grab point so the card stays under the
-        // finger exactly where the user picked it up.
-        .overlay(alignment: .topLeading) {
-            if let session = DragSessionStore.shared.activeSession,
-               let sourceNote = orderedNotes.first(where: { $0.id == session.noteId }),
-               let sourceFrame = DragSessionStore.shared.cardFrames[session.noteId] {
-                let center = CGPoint(
-                    x: session.currentLocation.x - session.grabOffset.width,
-                    y: session.currentLocation.y - session.grabOffset.height
-                )
-                KeepCard(note: sourceNote, showsActions: false)
-                    .frame(width: sourceFrame.width)
-                    .opacity(0.92)
-                    .shadow(color: .black.opacity(0.18), radius: 14, y: 8)
-                    .scaleEffect(1.03)
-                    .position(center)
-                    .allowsHitTesting(false)
-                    .transition(.opacity)
-            }
-        }
-        .animation(.easeOut(duration: 0.18), value: session?.noteId)
-    }
-
-    /// Coord-space name shared by the cards grid's `DragGesture`,
-    /// the `CardFramePreferenceKey` frame collection, and the floating
-    /// drag preview overlay. All three use `.named(...)` against this
-    /// string so finger locations and card frames are directly
-    /// comparable.
-    static let cardsGridCoordinateSpace = "cardsGridSpace"
-
-    /// Routes `CardReorderRecognizer` events to `DragSessionStore`.
-    ///
-    /// - `.began` — long press has crossed its 0.4s threshold with the
-    ///   finger still within `allowableMovement`. Lift the source card
-    ///   (sets `liftedNoteId`, fires the medium haptic, captures the
-    ///   lift location for grab-offset reuse on first move).
-    /// - `.changed` — the finger has moved. On the *first* call we
-    ///   transition lifted → active by computing the grab offset from
-    ///   the captured lift location and starting the session.
-    ///   Subsequent calls just update the finger position.
-    /// - `.ended` — drop. Hand the final location to `endDrag` so it
-    ///   commits or restores depending on whether the finger landed
-    ///   over a card.
-    /// - `.cancelled` — system interruption. Treat as a drop on empty
-    ///   space (no final location) so the order reverts cleanly.
-    private func handleReorderEvent(
-        _ event: CardReorderRecognizer.Event,
-        for note: MockNote,
-        allNotes: [MockNote]
-    ) {
-        switch event {
-        case .began(let location):
-            DragSessionStore.shared.liftSource(noteId: note.id, at: location)
-        case .changed(let location):
-            if DragSessionStore.shared.activeSession == nil {
-                let liftLocation = DragSessionStore.shared.liftLocation ?? location
-                let frame = DragSessionStore.shared.cardFrames[note.id]
-                    ?? CGRect(origin: liftLocation, size: .zero)
-                let cardCenter = CGPoint(x: frame.midX, y: frame.midY)
-                let grab = CGSize(
-                    width: liftLocation.x - cardCenter.x,
-                    height: liftLocation.y - cardCenter.y
-                )
-                DragSessionStore.shared.beginSession(
-                    noteId: note.id,
-                    location: location,
-                    grabOffset: grab,
-                    preDragOrder: CardsViewOrderStore.shared.customOrder
-                )
-            } else {
-                DragSessionStore.shared.updateLocation(location, in: allNotes)
-            }
-        case .ended(let location):
-            DragSessionStore.shared.endDrag(finalLocation: location, in: allNotes)
-        case .cancelled:
-            DragSessionStore.shared.endDrag(finalLocation: nil, in: allNotes)
-        }
+        CardsBoardView(
+            notes: CardsViewOrderStore.shared.sorted(unpinnedNotes),
+            onRequestDelete: requestDelete
+        )
     }
 
     /// Visible whenever the user is on the Free Board layout AND has

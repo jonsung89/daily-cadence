@@ -112,18 +112,17 @@ Three sub-layouts, picked from a **top-right toolbar Menu** that only appears wh
 
 #### Cards (default)
 
-- 2-column masonry via custom `MasonryLayout` (shortest-column-first packing).
+- 2-column shortest-column-first masonry — pure SwiftUI via the iOS 16+ `Layout` protocol (`MasonryLayout`).
 - 12pt gap between cards (column gap = row gap), 12pt outer horizontal padding.
 - Each card uses its **intrinsic** height — short cards don't inflate to fill column space.
 - Card max height capped at 480pt.
-- **Drag-to-reorder:** long-press (~0.4s) any card → drag anywhere → release.
-  - Drag uses a custom `LongPressGesture.sequenced(before: DragGesture)` chain owned by the cards grid (Phase E.5.7) — *not* iOS's `.onDrag`/`.onDrop` system.
-  - **Lift confirmation** (Phase E.5.8) — the moment the long press completes (before the user moves), the card scales to 1.04, gains a soft shadow (black @ 0.18, radius 12, y 6), and gets a `zIndex(1)` so it sits above its neighbors. A medium-impact haptic fires at the same moment. Tells the user "you held long enough, now drag" — independent of any finger movement. The lifted state animates in via `.spring(response: 0.28, dampingFraction: 0.7)` and clears the moment the drag actually moves (handed off to the floating preview) or on release.
-  - **Live reflow during drag** — surrounding cards shift in real time as the finger crosses into a different card's frame. Hit-testing is against per-card frames published into a named coordinate space via `CardFramePreferenceKey`; reorder is driven by `DragSessionStore.updateLocation(_:in:)`.
-  - **Source card fades to ~0.35 opacity** while it's being dragged so the lift is visually obvious. A duplicate `KeepCard` is rendered in the grid's `.overlay` at the finger position, offset by the user's grab point so the card stays "in hand."
-  - **Live drop target outline** — whichever card the finger is currently over gets a 2pt sage-tinted border so the user has a clear "this is where it'll land" cue. Tracked via `DragSessionStore.currentDropTargetId` (a projection of `activeSession.lastTargetId`).
-  - **Drop on empty space cancels.** Releasing the finger outside any card frame restores the order captured at drag start (`CardsViewOrderStore.restore(_:)`); releasing over a card commits the live-reflowed order and fires a light-impact haptic.
-  - **No `dropEntered` cascade.** Reorder only fires when the finger crosses into a *different* target than the most-recent `lastTargetId`, so a stationary finger over a single target won't re-shuffle as the layout reflows.
+- **Drag-to-reorder:** long-press any card → drag → drop on a target card.
+  - Reorder is built on SwiftUI's `.draggable` + `.dropDestination`, which route through iOS's system drag-and-drop (`UIDragInteraction`). The system owns long-press initiation, haptic, lift animation, the floating drag preview, and cancel-on-empty-space.
+  - Drop on a card: the dragged card lands at that card's slot — target (and anything between) shifts toward where the dragged card came from. Symmetric in both directions: backward drag (later → earlier) places source before target; forward drag (earlier → later) places source after target. Surrounding cards reflow to the new packed positions in a single animated layout pass.
+  - Drop on empty space: drag is cancelled, no order change.
+  - Because `.draggable` participates in UIKit's gesture arbitration (not SwiftUI's), the parent `ScrollView`'s pan recognizer continues to work from any touch start, including over a card.
+  - `KeepCard`'s built-in `.contextMenu` (Pin / Delete) coexists with `.draggable`: tap-and-hold-without-drift opens the menu; tap-and-hold-then-drag begins a reorder. Standard iOS disambiguation, no manual gesture coordination.
+  - Reorder writes the final item order to `CardsViewOrderStore` (via `move(_:onto:in:)`) so the Reset-order pill and subsequent renders stay in sync.
 - **Reset order:** when the user has any custom ordering, a small `↺ Reset order` pill appears at the top-right of the Board area. Tap → animated revert to chronological order.
 - New notes added after a manual reorder always land at the **end** of the custom order (never injected into the middle of a hand-curated layout).
 
@@ -153,13 +152,13 @@ Three sub-layouts, picked from a **top-right toolbar Menu** that only appears wh
 Every card surfaces actions through two parallel paths (Phase E.5.15 — modeled on Google Keep + Apple Notes):
 
 - **Pin glyph as status indicator** (Phase E.5.16 refinement) — appears in the top-right corner of a card **only when that card is pinned** (Apple Notes / Mail flag / iMessage pinned-conversation pattern). Tapping the visible glyph unpins. Unpinned cards show no glyph at all, keeping the surface visually quiet for the common case. Glyph is honey-yellow `pin.fill`; on media cards a thin `.ultraThinMaterial` backdrop circle sits behind it for readability.
-- **`.contextMenu` (long-press anywhere on the card)** is the path to **pin** an unpinned card (Pin entry) and to access **Delete**. Unpin is also available here in addition to the glyph tap.
+- **Long-press menu** is the path to **pin** an unpinned card (Pin entry) and to access **Delete**. Across all Board sub-modes the menu comes from SwiftUI's `.contextMenu` on `KeepCard`. Unpin is also available there in addition to the glyph tap.
 
-**Drag-to-reorder coexists with the context menu** via natural gesture arbitration — `LongPressGesture(0.4).sequenced(before: DragGesture)` for our drag and SwiftUI's built-in `.contextMenu` long-press recognizer fork on what the user does next:
-- Hold + start moving → drag's lift + reorder, no menu.
-- Hold + stay still past ~0.5s → context menu appears, drag never engages.
+**Cards-mode gesture model.** A single SwiftUI surface owns both interactions:
+- Hold + start moving → `.draggable` initiates a system drag for reorder.
+- Hold + stay still → `.contextMenu` opens.
 
-This is the Apple Photos / Files pattern.
+iOS arbitrates between the two automatically — the same Apple Photos / Files pattern, expressed in SwiftUI primitives.
 
 **Delete confirmation.** Selecting Delete arms `pendingDeleteId` on `TimelineScreen`, which presents an `.alert("Delete this note?" / "This can't be undone.")` (centered modal — Apple's pattern for irreversible single-item destruction; see Notes / Photos / Calendar / Reminders). Buttons: destructive **Delete** + cancel **Keep**. Confirmation animates the row out via `withAnimation(.easeOut(0.2))` while `TimelineStore.delete(noteId:)` removes the note (and `PinStore.forget(_:)` clears any ghost pin reference). Cancel just clears `pendingDeleteId` and dismisses.
 
@@ -489,7 +488,6 @@ All `@Observable` singletons. None hit Supabase yet — Phase F follow-up.
 | `NoteDraftStore` | in-memory | session | Recovers in-progress text-note edits across accidental sheet dismiss. |
 | `CardsViewOrderStore` | in-memory | session | Custom note ordering for the Cards Board layout. |
 | `PinStore` | in-memory | session | Set of pinned note ids (Phase E.5.15). Drives the "Pinned" section at the top of every Board sub-mode + the visible pin glyph on each card. |
-| `DragSessionStore` | in-memory | per-drag | Owns the active Cards-layout reorder session — finger location, source id, pre-drag snapshot for revert, and per-card frame map for hit-testing (Phase E.5.7). |
 
 Repository services (read-only) for JSON-backed catalogs:
 

@@ -14,9 +14,9 @@ import SwiftUI
 /// **Lifecycle.**
 /// - Empty `customOrder` ⇒ Cards view falls back to the timeline's
 ///   chronological order from `TimelineStore`.
-/// - User drags a card on top of another ⇒ `move(_:before:in:)` initializes
+/// - User drags a card on top of another ⇒ `move(_:onto:in:)` initializes
 ///   `customOrder` from the current chronological list (so subsequent
-///   sorts are stable) and inserts the dragged note at the new position.
+///   sorts are stable) and places the dragged note at the target's slot.
 /// - User taps **Reset order** ⇒ `reset()` empties `customOrder` and the
 ///   Cards view falls back to chronological.
 ///
@@ -59,11 +59,25 @@ final class CardsViewOrderStore {
         }.map(\.element)
     }
 
-    /// Moves `draggedId` to immediately before `targetId` in the custom
-    /// order. If this is the first reorder, `customOrder` is initialized
-    /// from `notes`'s current chronological order so the move has a
-    /// stable reference frame.
-    func move(_ draggedId: UUID, before targetId: UUID, in notes: [MockNote]) {
+    /// Moves `draggedId` onto `targetId`'s slot — `draggedId` takes
+    /// `targetId`'s original position, and everything between shifts
+    /// toward the slot `draggedId` came from.
+    ///
+    /// This produces the symmetric "swap-and-shift" reorder users expect
+    /// from drag-to-reorder in iOS Files / Notes / Reminders:
+    /// - Backward drag (later → earlier): source lands BEFORE target.
+    /// - Forward drag (earlier → later): source lands AFTER target.
+    ///
+    /// A single API expresses both cases because, after removing the
+    /// source, inserting at `targetId`'s **original** index naturally
+    /// lands the source after the target on forward drags (target's index
+    /// shifted left by one) and before the target on backward drags
+    /// (target's index unchanged).
+    ///
+    /// If this is the first reorder, `customOrder` is initialized from
+    /// `notes`'s current chronological order so the move has a stable
+    /// reference frame.
+    func move(_ draggedId: UUID, onto targetId: UUID, in notes: [MockNote]) {
         guard draggedId != targetId else { return }
 
         // Seed from the chronological order on first move; otherwise,
@@ -77,8 +91,9 @@ final class CardsViewOrderStore {
             order.append(note.id)
         }
 
-        order.removeAll(where: { $0 == draggedId })
-        guard let targetIdx = order.firstIndex(of: targetId) else { return }
+        guard let sourceIdx = order.firstIndex(of: draggedId),
+              let targetIdx = order.firstIndex(of: targetId) else { return }
+        order.remove(at: sourceIdx)
         order.insert(draggedId, at: targetIdx)
         customOrder = order
     }

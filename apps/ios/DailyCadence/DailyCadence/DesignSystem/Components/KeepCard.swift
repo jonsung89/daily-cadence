@@ -31,9 +31,9 @@ struct KeepCard: View {
     /// The parent screen owns the actual deletion + confirmation dialog
     /// (Phase E.5.15). When `nil`, no Delete item appears in the menu.
     var onRequestDelete: ((MockNote) -> Void)? = nil
-    /// When false, suppresses the pin overlay and the `.contextMenu` —
-    /// useful in preview-only contexts where global pin state mutation
-    /// is undesirable.
+    /// When false, suppresses the pin overlay and the card-owned
+    /// `.contextMenu`. Used by previews and other surfaces that want a
+    /// purely presentational card.
     var showsActions: Bool = true
 
     /// Maximum rendered height for any card in the Board grid. Tuned so a
