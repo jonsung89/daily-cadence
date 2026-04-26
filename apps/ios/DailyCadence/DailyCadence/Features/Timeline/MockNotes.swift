@@ -35,10 +35,14 @@ struct MockNote: Identifiable, Hashable {
     /// / `quote`). In production these will be driven by per-type editor
     /// fields on the real `Note` model.
     enum Content: Hashable {
-        /// Title (plain `String`) + optional rich-text message
-        /// (`AttributedString?`). Phase E.2 made the message attributed so
-        /// the editor can vary font + color per character run.
-        case text(title: String, message: AttributedString? = nil)
+        /// Title (plain `String`) + a vertical list of body blocks
+        /// (paragraphs of rich text and inline media). Phase E.5.18
+        /// migrated this from a single `AttributedString?` message to a
+        /// `[TextBlock]` body so journal-style mixed text + media notes
+        /// can render naturally. Phase E.2's per-character rich-text
+        /// (font + color) still applies — it lives on each paragraph
+        /// block's AttributedString.
+        case text(title: String, body: [TextBlock])
         case stat(title: String, value: String, sub: String? = nil)
         case list(title: String, items: [String])
         case quote(text: String)
@@ -148,10 +152,16 @@ struct MockNote: Identifiable, Hashable {
     /// timeline; the synthesized lines for stat/list variants wrap plain
     /// strings (no attributes), which `Text(_: AttributedString)` renders the
     /// same as a normal `Text(_: String)`.
+    ///
+    /// **Phase E.5.18 — block-aware.** For `.text` content, this collapses
+    /// the body's paragraph blocks into a single AttributedString
+    /// (separated by spaces). Inline media blocks are skipped — Timeline's
+    /// `NoteCard` doesn't render the inline images for text notes; the
+    /// full block layout is for the Board / Cards view.
     var timelineMessage: AttributedString? {
         switch content {
-        case .text(_, let message):
-            return message
+        case .text(_, let body):
+            return Self.flattenParagraphs(body)
         case .stat(_, let value, let sub):
             if let sub { return AttributedString("\(value) · \(sub)") }
             return AttributedString(value)
@@ -165,6 +175,34 @@ struct MockNote: Identifiable, Hashable {
             // "Photo"/"Video"), and the actual media renders inside the card.
             return nil
         }
+    }
+
+    /// Concatenates every paragraph block's AttributedString into one,
+    /// separated by a single space (so multi-paragraph notes read as a
+    /// single line on the dense timeline rail). Returns nil when the
+    /// body has no non-empty paragraphs.
+    private static func flattenParagraphs(_ body: [TextBlock]) -> AttributedString? {
+        var combined = AttributedString("")
+        var didAppend = false
+        for block in body {
+            guard case .paragraph(let text) = block.kind, !text.characters.isEmpty else {
+                continue
+            }
+            if didAppend {
+                combined.append(AttributedString(" "))
+            }
+            combined.append(text)
+            didAppend = true
+        }
+        return didAppend ? combined : nil
+    }
+
+    /// Inline media blocks for the `.text` body (Phase E.5.18). Used by
+    /// the Board card scaffold to render the block list. Empty for
+    /// non-text content variants.
+    var textBodyBlocks: [TextBlock] {
+        if case .text(_, let body) = content { return body }
+        return []
     }
 
     /// Convenience accessor for the media payload, when this note is one.
@@ -202,10 +240,32 @@ struct MockNote: Identifiable, Hashable {
     var isMediaNote: Bool { kind != .text }
 }
 
+// MARK: - Backward-compat constructors
+
+extension MockNote.Content {
+    /// Convenience for the common one-paragraph case (Phase E.5.18).
+    /// Wraps the message into a single `.paragraph` block. Lets seed
+    /// data, tests, and editor save paths that pre-date the block model
+    /// keep their `text(title:message:)` call shape unchanged.
+    static func text(title: String, message: AttributedString? = nil) -> Self {
+        let blocks: [TextBlock]
+        if let message, !message.characters.isEmpty {
+            blocks = [.paragraph(message)]
+        } else {
+            blocks = []
+        }
+        return .text(title: title, body: blocks)
+    }
+}
+
 enum MockNotes {
-    /// A realistic sample day spanning all five default note types and all
-    /// four card-content variants. A few notes carry a custom background to
-    /// demonstrate Phase D.1 — the rest fall back to the type-default tinting.
+    /// A realistic sample day spanning the default note types and the
+    /// four card-content variants. **Phase E.5.21 — reset to type-default
+    /// styling.** Cards display with their type's default tint (no
+    /// custom backgrounds, no per-note title styles), so the seed reads
+    /// as a "what does the app look like out of the box" baseline. Demo
+    /// notes for custom backgrounds / per-note text styling can be added
+    /// to a debug menu when we want to showcase those features.
     static let today: [MockNote] = [
         MockNote(
             time: "6:45 AM",
@@ -228,9 +288,7 @@ enum MockNotes {
         MockNote(
             time: "10:05 AM",
             type: .mood,
-            content: .text(title: "Focused"),
-            background: .color(swatchId: "pastel.mint"),  // demo: pastel mint highlight
-            titleStyle: TextStyle(fontId: "playfair", colorId: "bold.emerald")  // demo: per-note styled title
+            content: .text(title: "Focused")
         ),
         MockNote(
             time: "12:40 PM",
@@ -245,8 +303,7 @@ enum MockNotes {
         MockNote(
             time: "6:20 PM",
             type: .mood,
-            content: .quote(text: "Noticed I'm less anxious on running days."),
-            background: .color(swatchId: "bold.cobalt")  // demo: bold cobalt under a quote
+            content: .quote(text: "Noticed I'm less anxious on running days.")
         ),
         MockNote(
             time: "9:30 PM",
@@ -259,4 +316,25 @@ enum MockNotes {
             content: .text(title: "Lights out", message: AttributedString("Planning 7h again."))
         ),
     ]
+}
+
+// MARK: - Inline-media demo helper (Phase E.5.18)
+
+extension MockNotes {
+    /// Builds a sample text note that exercises the new block-based body
+    /// (paragraph → inline image → paragraph). Not added to `today` by
+    /// default — Jon can opt in from a debug menu or use this in
+    /// previews. Kept here rather than in the seed list so a TestFlight
+    /// build for Jon's wife doesn't ship a synthetic-looking demo card.
+    static func inlineMediaDemo(payload: MediaPayload, size: MediaBlockSize = .medium) -> MockNote {
+        MockNote(
+            time: "8:15 AM",
+            type: .workout,
+            content: .text(title: "Morning run", body: [
+                .paragraph(AttributedString("Felt strong this morning, sun was just over the trees.")),
+                .media(payload, size: size),
+                .paragraph(AttributedString("Cooled down with a slow loop around the block.")),
+            ])
+        )
+    }
 }

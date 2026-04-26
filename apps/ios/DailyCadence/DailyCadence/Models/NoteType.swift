@@ -107,6 +107,23 @@ enum NoteType: String, CaseIterable, Identifiable, Hashable, Codable {
         }
     }
 
+    /// **Phase E.5.22 — scheme-aware tint opacity.** When a card has no
+    /// user-picked background, KeepCard tints the surface with the
+    /// type's pigment as a calm visual cue. In light mode 0.333 over
+    /// the cream surface produces a soft pastel; in dark mode the same
+    /// opacity over the dark surface read as muddy because the type
+    /// `dark` hexes are lifted/saturated for legibility on dark text.
+    ///
+    /// **E.5.22a:** dark-mode tint dropped to **0.10** — barely a hint.
+    /// The dot + uppercase label already carry the type identity
+    /// strongly; the card body should stay close to neutral dark to
+    /// avoid the muddy mid-tone problem. Apple Notes / Bear effectively
+    /// do this (zero card-fill tinting in dark mode) — 0.10 keeps a
+    /// trace of color without the heaviness.
+    static func defaultTintOpacity(for scheme: ColorScheme) -> Double {
+        scheme == .dark ? 0.90 : 0.6
+    }
+
     /// SF Symbol placeholder name. Replace with the design system's custom
     /// line icons when extracted.
     var systemImage: String {

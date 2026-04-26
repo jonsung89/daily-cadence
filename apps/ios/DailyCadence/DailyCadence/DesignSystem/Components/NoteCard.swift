@@ -27,8 +27,9 @@ struct NoteCard: View {
     /// container (e.g. `TimelineItem`) already shows the time.
     let time: String?
     /// Optional per-note background. `.none` uses the neutral default surface
-    /// (`bg-2`); `.color` applies a swatch at 0.333 opacity over the default;
-    /// `.image` renders a photo scaled-to-fill with user-chosen opacity.
+    /// (`bg-2`); `.color` fills with the user-picked swatch at full opacity
+    /// (Phase E.5.20 — WYSIWYG); `.image` renders a photo scaled-to-fill
+    /// with user-chosen opacity.
     let background: NoteBackgroundStyle
     /// Optional font + color override for the title text. `nil` = card default.
     let titleStyle: TextStyle?
@@ -244,10 +245,12 @@ struct NoteCard: View {
         case .none:
             EmptyView()
         case .color(let swatch):
-            // Tinted overlay above bg-2 — design system's "no full-saturation
-            // large fills" rule keeps this at 0.333 opacity.
+            // Phase E.5.20 — full-opacity user-picked swatch (WYSIWYG).
+            // Matches the picker preview; the user can pick a contrasting
+            // text color via the editor's style toolbar if their swatch
+            // demands it. Same change as KeepCard.
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(swatch.color().opacity(0.333))
+                .fill(swatch.color())
         case .image(let data, let opacity):
             if let uiImage = UIImage(data: data) {
                 Image(uiImage: uiImage)

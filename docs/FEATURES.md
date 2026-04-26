@@ -130,8 +130,9 @@ Three sub-layouts, picked from a **top-right toolbar Menu** that only appears wh
 #### Stack
 
 - Per-`NoteType` overlapping-card stacks in a 2-col masonry.
-- Default top card is the newest of that type; older cards peek above (each layer 8pt up, 0.04 smaller, 0.16 more faded).
-- `+N` badge on the bottom-right of the stack when the group has more than 3 notes.
+- Shares the same 12pt column/row gutter as Cards mode.
+- Default top card is the newest of that type; older cards peek above (each layer 4pt down from the one above it, 0.04 smaller, 0.16 more faded).
+- A total-count badge sits in the stack's upper-right corner when the group has more than 1 note.
 - Tap a stack → unfurls vertically inside its column with `matchedGeometryEffect(id:in:properties: .position)` for smooth in-place expansion. Other column unaffected.
 - Only one stack open at a time; switching collapses the previous.
 - Single-card "stacks" are non-interactive (the card is the whole content).
@@ -210,6 +211,28 @@ Sheet presented from the FAB menu's **Text Note** option.
 - Per-character runs carry font, foregroundColor, and size attributes.
 - `.scrollDisabled(true)` so it self-sizes; the parent ScrollView is the single source of vertical scroll.
 - Placeholder ("What's on your mind?") overlay-rendered behind the editor; hides as soon as the message is non-empty.
+- **Backed by a `[TextBlock]` body** (Phase E.5.18). The editor's TextEditor reads/writes the first paragraph block via a `NoteDraftStore.message` bridge. Inserting a photo via the toolbar's `+image` icon appends a media block (with default `MediaBlockSize.medium`) plus a fresh trailing paragraph — the model supports interleaving paragraphs with media in any order; the Phase 1 editor UI just appends new attachments after the typed paragraph (mid-paragraph insertion is a future iteration).
+
+### Attachments strip (inline media in text notes)
+
+Phase E.5.18 / E.5.18a. When the user taps the `+image` icon in the StyleToolbar, the iOS PhotosPicker opens (`.any(of: [.images, .videos])`); the selected asset is imported via `MediaImporter`. **For images, a crop sheet** (`PhotoCropView`) is presented with freeform + aspect-preset chips before the cropped payload is added to `draft.body` as a `TextBlock.media` (Phase E.5.18a). Videos skip cropping and insert directly. The strip below the message editor renders one `InlineMediaBlockView` per media block, sized by `MediaBlockSize.widthFraction` (Small ~45% / Medium ~75% / Large 100%).
+
+- **Tap a thumbnail in the editor** → opens the fullscreen `MediaViewerScreen` viewer (Phase E.5.18a — pinch-zoom for images, AVPlayer for videos). Same behavior as cards.
+- **Long-press a thumbnail in the editor** → `.contextMenu` opens with a size `Picker` (Small / Medium / Large) and a destructive **Remove** entry. Apple Notes / Photos pattern. Picking a size mutates the block's size in `NoteDraftStore.resizeMediaBlock(id:to:)`; Remove drops the block via `NoteDraftStore.removeBlock(id:)`. If removal would empty the body, an empty paragraph is restored so the editor keeps a cursor target.
+- Errors during import surface inline below the strip ("Couldn't load that file…") so the user knows without a disruptive alert.
+- Saved blocks survive `TimelineStore.add` round-trip — the test suite covers paragraph + media interleaving.
+
+### Trailing TextEditor (type after the images)
+
+Phase E.5.18a. `NoteDraftStore.insertMedia(...)` maintains the structural invariant `[firstParagraph?, media*, trailingParagraph]` — every inline media block sits between the first and last paragraph. When the body has any media, the editor renders a **second TextEditor below the attachments strip** bound to `NoteDraftStore.trailerMessage` (the last paragraph). This is the "type after the images" affordance: write some intro text → attach a photo → keep typing in the new editor below the photo.
+
+- Hidden when the body has no media (one TextEditor handles the only paragraph).
+- Style toolbar applies to whichever paragraph is currently focused — first or last — by routing the `transformAttributes(in:)` call via `transformActiveBody`.
+- Mid-paragraph media insertion (full per-block focused TextEditors) is intentionally deferred — the data model supports it; the UI ships the simpler "intro / attachments / outro" three-zone editor for now.
+
+### Card rendering of inline media (Board view)
+
+`KeepCard` walks the `.text` content's body block-by-block: paragraphs render as `Text(AttributedString)`, media blocks render via `InlineMediaBlockView` at the user's chosen size (centered for Small / Medium, full-width for Large). Tapping a media block in a card opens `MediaViewerScreen` full-screen (pinch-zoom for images, AVPlayer for videos). On the Timeline (`NoteCard`), inline media is intentionally *not* rendered — `MockNote.timelineMessage` flattens paragraph blocks to a single AttributedString and skips media (the dense rail favors text-only summaries; the full block layout is the Board view's job).
 
 ### Style toolbar (compact icon bar above keyboard)
 
@@ -401,6 +424,7 @@ Full-screen viewer presented via `.fullScreenCover` when a media card is tapped.
 | `TabBar.swift` | Custom 5-column bottom navigation. |
 | `TypeBadge.swift` | 10pt colored dot + 11pt uppercase type label (rendered in `type.color`) + optional time in mono `fg2`. Phase E.5.14 bump from 8pt/10pt-grey for stronger type signal on Timeline cards. |
 | `PinButton.swift` | 13pt `pin` / `pin.fill` SF Symbol in honey-yellow with 32pt hit area. (Phase E.5.15 introduced; E.5.16 made it a status indicator — only shown on pinned cards. Tapping the visible glyph unpins.) The unpinned-state visual is retained for any future read-only contexts. |
+| `InlineMediaBlockView.swift` | Inline photo/video block (Phase E.5.18) used by KeepCard and NoteEditorScreen's attachments strip. Sizes via `MediaBlockSize.widthFraction` (~45% / ~75% / 100%); `isInteractive` toggle controls whether tapping opens fullscreen (cards) or is suppressed for a parent Menu (editor). |
 | `TypeChip.swift` | Note-type picker chip (icon + label, ink-filled when selected). |
 | `TimelineItem.swift` | Time column + sage-dotted rail + trailing card slot for the Timeline view. |
 

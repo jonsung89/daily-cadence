@@ -56,6 +56,14 @@ final class DragSessionStore {
     /// `onEnded` so a no-movement release lands back at rest.
     var liftedNoteId: UUID?
 
+    /// The cards-grid-space location of the finger at the moment the
+    /// long-press succeeded. Captured in `liftSource` and consumed by
+    /// `beginSession` on the first drag movement so the floating
+    /// preview's grab offset is computed against where the finger
+    /// actually landed — not where it's already moved to by the first
+    /// `.changed` callback. Cleared in `beginSession` and `cancelSession`.
+    var liftLocation: CGPoint?
+
     /// Map of card id → its frame in the cards-grid coordinate space.
     /// Published by each card via a `PreferenceKey` and read here for
     /// hit-testing during a drag.
@@ -75,15 +83,16 @@ final class DragSessionStore {
     init() {}
 
     /// Marks `noteId` as "lifted" — the long press has completed but
-    /// the user hasn't started moving yet. Idempotent across repeat
-    /// calls for the same id (the long-press gesture can re-fire its
-    /// `.first(true)` / `.second(true, nil)` callbacks several times
-    /// in succession; we only want one haptic + one visual lift).
+    /// the user hasn't started moving yet. Captures `location` (in the
+    /// cards-grid coordinate space) so `beginSession` can compute a
+    /// stable grab offset on the first drag movement. Idempotent across
+    /// repeat calls for the same id.
     ///
     /// Fires a medium-impact haptic to confirm "you held long enough."
-    func liftSource(noteId: UUID) {
+    func liftSource(noteId: UUID, at location: CGPoint) {
         guard liftedNoteId != noteId else { return }
         liftedNoteId = noteId
+        liftLocation = location
         Self.fireHaptic(.medium)
     }
 
@@ -105,6 +114,7 @@ final class DragSessionStore {
             lastTargetId: nil
         )
         liftedNoteId = nil
+        liftLocation = nil
     }
 
     /// Updates the finger location during a drag. If the finger is now
@@ -140,6 +150,7 @@ final class DragSessionStore {
         // long-press-then-release-without-moving case where there's no
         // active session to clear.
         liftedNoteId = nil
+        liftLocation = nil
 
         guard let session = activeSession else { return }
 
@@ -167,6 +178,7 @@ final class DragSessionStore {
     func cancelSession() {
         activeSession = nil
         liftedNoteId = nil
+        liftLocation = nil
     }
 
     // MARK: - Hit-testing

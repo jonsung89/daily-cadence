@@ -32,7 +32,7 @@ struct StackedBoardView: View {
     @Namespace private var stackNamespace
 
     var body: some View {
-        HStack(alignment: .top, spacing: 8) {
+        HStack(alignment: .top, spacing: 12) {
             column(at: leftIndices)
             column(at: rightIndices)
         }
@@ -50,7 +50,7 @@ struct StackedBoardView: View {
     }
 
     private func column(at indices: [Int]) -> some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 12) {
             ForEach(indices, id: \.self) { idx in
                 let group = groups[idx]
                 if group.type == expandedType {
@@ -96,8 +96,11 @@ private struct CollapsedStackCell: View {
         Array(group.notes.reversed().prefix(3))
     }
 
-    private var hiddenCount: Int {
-        max(0, group.notes.count - 3)
+    /// Total cards in the group. Drives the upper-right count badge
+    /// (Phase E.5.23). Only shown when > 1 — single-card stacks read
+    /// as plain cards already.
+    private var totalCount: Int {
+        group.notes.count
     }
 
     @ViewBuilder
@@ -119,8 +122,30 @@ private struct CollapsedStackCell: View {
         // of whether the top card is taller than the cards beneath — peeking
         // *below* would disappear behind a tall top card and the stack would
         // look like a single card.
-        let topOffset = CGFloat(max(0, topNotes.count - 1)) * 8
-
+        //
+        // **Phase E.5.27** — two coordinated changes:
+        //
+        // 1. `.padding(.top, depth × peek)` instead of `.offset(y: depth × 8)
+        //    + .padding(.bottom, topOffset)`. The previous form used a
+        //    visual-only offset that didn't participate in layout, so the
+        //    ZStack's reported frame ended at `max(card heights)` while the
+        //    newest card actually drew lower than that — and the cell
+        //    tacked on a `.padding(.bottom, ...)` to compensate. That
+        //    layout/visual mismatch is what `matchedGeometryEffect`
+        //    reads, so when one stack expanded the spring animation
+        //    propagated the warped frame into the opposite column and
+        //    cards over there shifted. Padding-top is layout-affecting:
+        //    the ZStack's frame now equals the newest card's true
+        //    visual bottom, anchors are accurate, and the cross-column
+        //    glitch goes away.
+        //
+        // 2. `peek` reduced from 8pt to 4pt per layer — the strip above
+        //    the newest's "header" was `(count − 1) × 8 = 16pt` for a
+        //    3-card stack and read as a visible gap before the newest's
+        //    content. At 4pt the strip drops to 4-8pt and reads as a
+        //    layered hint rather than a chunky gap. Older cards still
+        //    visibly peek; the rhythm is preserved.
+        let peek: CGFloat = 4
         return ZStack(alignment: .top) {
             ForEach(Array(topNotes.enumerated()), id: \.element.id) { index, note in
                 // depth: how far behind the top card. 0 = oldest visible
@@ -129,31 +154,35 @@ private struct CollapsedStackCell: View {
                 KeepCard(note: note, onRequestDelete: onRequestDelete.map { cb in { cb($0.id) } })
                     .fixedSize(horizontal: false, vertical: true)
                     .scaleEffect(1 - CGFloat(index) * 0.04)
-                    .offset(y: CGFloat(depth) * 8)
+                    .padding(.top, CGFloat(depth) * peek)
                     .opacity(1 - CGFloat(index) * 0.16)
                     .zIndex(Double(topNotes.count - index))
                     .matchedGeometryEffect(id: note.id, in: namespace, properties: .position)
             }
 
-            if hiddenCount > 0 {
-                Text("+\(hiddenCount)")
+        }
+        .overlay(alignment: .topTrailing) {
+            // Phase E.5.23 — total-count badge in the upper-right corner
+            // when the stack has more than one card. Replaces the
+            // previous lower-right "+N hidden" badge with a single
+            // unambiguous count (Apple Notes / Photos folder pattern).
+            // Rendered as an overlay so it doesn't advertise an infinite
+            // vertical size back to the parent VStack column.
+            if totalCount > 1 {
+                Text("\(totalCount)")
                     .font(.DS.sans(size: 11, weight: .semibold))
-                    .foregroundStyle(Color.DS.fg2)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Capsule().fill(Color.DS.bg2))
-                    .overlay(Capsule().stroke(Color.DS.border1, lineWidth: 1))
-                    .padding(10)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
-                    // Match the newest card's offset so the badge anchors
-                    // to its corner, not the ZStack frame's corner.
-                    .offset(y: topOffset)
+                    .foregroundStyle(Color.DS.ink.opacity(0.85))
+                    .frame(minWidth: 22, minHeight: 22)
+                    .padding(.horizontal, 6)
+                    .background(Capsule().fill(.ultraThinMaterial))
+                    .overlay(
+                        Capsule()
+                            .strokeBorder(Color.DS.ink.opacity(0.12), lineWidth: 0.5)
+                    )
+                    .padding(8)
                     .zIndex(Double(topNotes.count + 1))
             }
         }
-        // Reserve breathing room below for the newest card's offset so
-        // it doesn't visually overflow into the next column item.
-        .padding(.bottom, topOffset)
     }
 }
 

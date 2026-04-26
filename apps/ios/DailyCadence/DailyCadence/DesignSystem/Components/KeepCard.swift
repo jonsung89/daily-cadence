@@ -42,6 +42,9 @@ struct KeepCard: View {
     static let maxHeight: CGFloat = 480
 
     @State private var isMediaViewerPresented = false
+    /// Phase E.5.22 — drives the scheme-aware default-tint opacity so
+    /// dark-mode cards don't read as muddy.
+    @Environment(\.colorScheme) private var colorScheme
 
     /// Reads through `PinStore.shared.isPinned(note.id)` inside `body`
     /// so the Observation framework re-renders the card when pin state
@@ -151,14 +154,23 @@ struct KeepCard: View {
 
             switch style {
             case .none:
-                // Default tint matches the type's pigment color at the same
-                // 0.333 opacity used for user-picked swatches — so a fresh
-                // note "with a tag" already reads as that tag's color.
+                // Phase E.5.22 — type-default tint with scheme-aware
+                // opacity. Light: 0.333 (soft pastel over cream). Dark:
+                // 0.18 (just a hint over the dark surface — matches
+                // Notion / Bear / Apple Notes dark-mode card patterns
+                // and avoids the muddy look from saturated tint over
+                // dark bg2).
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(note.type.color.opacity(0.333))
+                    .fill(note.type.color.opacity(NoteType.defaultTintOpacity(for: colorScheme)))
             case .color(let swatch):
+                // Phase E.5.20 — user-picked swatches render at FULL
+                // opacity (WYSIWYG). The picker shows the swatch at full
+                // saturation and the card now matches. Dark / bold
+                // swatches make default ink text harder to read; the
+                // user can pick a contrasting text color via the style
+                // toolbar (Apple Notes / Bear pattern).
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(swatch.color().opacity(0.333))
+                    .fill(swatch.color())
             case .image(let data, let opacity):
                 if let uiImage = UIImage(data: data) {
                     Image(uiImage: uiImage)
@@ -173,9 +185,14 @@ struct KeepCard: View {
 
     private var head: some View {
         // Phase E.5.14 — bumped from 7pt dot / 9pt label to 9pt / 11pt
-        // so the type indicator reads as a clear "header" on the card
-        // instead of a small footnote. Colored label was already in use;
-        // size + tracking updated proportionally.
+        // so the type indicator reads as a clear "header" on the card.
+        //
+        // **Phase E.5.22b — neutral label on tinted bg.** With the
+        // bumped default tint opacity (0.6 light / 0.9 dark) the card
+        // body fills with the type's color; rendering the label in the
+        // same color makes it disappear. Switched to `Color.DS.ink`
+        // (auto-adapts dark↔light) for high contrast against any
+        // saturation. The colored DOT still carries identity.
         HStack(spacing: 7) {
             Circle()
                 .fill(note.type.color)
@@ -184,7 +201,7 @@ struct KeepCard: View {
                 .font(.DS.sans(size: 11, weight: .bold))
                 .tracking(0.88)  // 0.08em at 11pt
                 .textCase(.uppercase)
-                .foregroundStyle(note.type.color)
+                .foregroundStyle(Color.DS.ink)
         }
         .padding(.bottom, 4)
     }
@@ -192,8 +209,8 @@ struct KeepCard: View {
     @ViewBuilder
     private var contentView: some View {
         switch note.content {
-        case .text(let title, let message):
-            textContent(title: title, message: message)
+        case .text(let title, let body):
+            textContent(title: title, body: body)
         case .stat(let title, let value, let sub):
             statContent(title: title, value: value, sub: sub)
         case .list(let title, let items):
@@ -210,20 +227,42 @@ struct KeepCard: View {
 
     // MARK: - Variants
 
-    private func textContent(title: String, message: AttributedString?) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
+    /// Phase E.5.18 — block-aware text body. Renders title + each block
+    /// in vertical order: paragraph blocks render as `Text(AttributedString)`,
+    /// media blocks render as inline images sized per `MediaBlockSize`.
+    /// Tap an inline media block to open `MediaViewerScreen`. Blocks
+    /// stack with consistent spacing so a "thought / photo / thought"
+    /// rhythm reads cleanly.
+    private func textContent(title: String, body: [TextBlock]) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
             Text(title)
                 .font(note.titleStyle.resolvedFont(defaultFontId: "inter", size: 14, weight: .semibold))
                 .foregroundStyle(note.titleStyle.resolvedColor(default: Color.DS.ink))
                 .lineSpacing(14 * 0.3)
                 .frame(maxWidth: .infinity, alignment: .leading)
-            if let message, !message.characters.isEmpty {
-                Text(message)
+            ForEach(body) { block in
+                bodyBlockView(block)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func bodyBlockView(_ block: TextBlock) -> some View {
+        switch block.kind {
+        case .paragraph(let text):
+            if !text.characters.isEmpty {
+                Text(text)
                     .font(.DS.sans(size: 12, weight: .regular))
-                    .foregroundStyle(Color.DS.fg2)
+                    // Phase E.5.22b — secondary body text on tinted cards.
+                    // Bumped from `fg2` (warm gray) to `ink @ 0.75` so the
+                    // text reads against saturated card bgs in both modes
+                    // without being as loud as the title's full ink.
+                    .foregroundStyle(Color.DS.ink.opacity(0.75))
                     .lineSpacing(12 * 0.5)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
+        case .media(let payload, let size):
+            InlineMediaBlockView(payload: payload, size: size, cornerRadius: 8)
         }
     }
 
@@ -240,7 +279,7 @@ struct KeepCard: View {
             if let sub {
                 Text(sub)
                     .font(.DS.sans(size: 12, weight: .regular))
-                    .foregroundStyle(Color.DS.fg2)
+                    .foregroundStyle(Color.DS.ink.opacity(0.7))
                     .padding(.top, 2)
             }
         }
@@ -254,8 +293,12 @@ struct KeepCard: View {
                 .padding(.bottom, 2)
             ForEach(items, id: \.self) { item in
                 HStack(spacing: 6) {
+                    // Phase E.5.22b — checkbox stroke uses ink @ 0.5
+                    // (was `border2` warm-gray) so it contrasts against
+                    // the tinted card bg in both light + dark modes.
+                    // Border-token grays blended into the saturated fills.
                     RoundedRectangle(cornerRadius: 3, style: .continuous)
-                        .strokeBorder(Color.DS.border2, lineWidth: 1.5)
+                        .strokeBorder(Color.DS.ink.opacity(0.5), lineWidth: 1.5)
                         .frame(width: 12, height: 12)
                     Text(item)
                         .font(.DS.sans(size: 12, weight: .regular))

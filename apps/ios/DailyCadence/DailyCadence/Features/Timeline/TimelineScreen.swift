@@ -24,13 +24,6 @@ struct TimelineScreen: View {
     @State private var mediaPickerItem: PhotosPickerItem?
     @State private var isMediaEditorPresented = false
 
-    /// Required by the reorder gesture's `.updating` modifier (Phase E.5.7).
-    /// Real state lives in `DragSessionStore`; this buffer is unused
-    /// outside the gesture closure but `@GestureState` is the
-    /// SwiftUI-supported way to attach side effects to a sequence
-    /// gesture's value stream.
-    @GestureState private var dragGestureBuffer: Bool = false
-
     /// The note id the user has asked to delete (Phase E.5.15). When
     /// non-nil, drives the `.confirmationDialog`. The card's
     /// `.contextMenu` Delete action sets this; user confirmation in
@@ -139,16 +132,22 @@ struct TimelineScreen: View {
             // FAB stays persistent; the ScrollView's `.contentMargins`
             // reserves a 120pt bottom buffer so the last card never
             // ends up underneath the button.
+            // SwiftUI's `Menu` anchored to a bottom-trailing FAB opens
+            // upward and orders items closest-to-anchor first (so the
+            // last-declared item renders at the visual TOP of the
+            // popup). Text Note is the more frequent action — putting
+            // it last in source places it on top, matching Apple Mail's
+            // compose menu ordering.
             Menu {
-                Button {
-                    isEditorPresented = true
-                } label: {
-                    Label("Text Note", systemImage: "note.text")
-                }
                 Button {
                     isMediaPickerPresented = true
                 } label: {
                     Label("Photo or Video", systemImage: "photo.on.rectangle")
+                }
+                Button {
+                    isEditorPresented = true
+                } label: {
+                    Label("Text Note", systemImage: "note.text")
                 }
             } label: {
                 FABAppearance()
@@ -480,18 +479,24 @@ struct TimelineScreen: View {
                         )
                     }
                 }
-                // **`.simultaneousGesture`, not `.gesture`** (Phase E.5.12).
-                // With `.gesture`, our long-press recognizer claimed the
-                // touch exclusively, blocking the parent ScrollView's pan
-                // gesture — the page wouldn't scroll while a finger was
-                // on a card, and the LongPressGesture's failure-on-move
-                // arbitration didn't cleanly hand the touch back to the
-                // scroll. `.simultaneousGesture` lets both recognizers
-                // track the touch in parallel; `LongPressGesture`'s
-                // built-in `maximumDistance` (~10pt) still fails it
-                // cleanly when the user starts a scroll, so we don't
-                // accidentally lift on every swipe.
-                .simultaneousGesture(reorderGesture(for: note, allNotes: orderedNotes))
+                // **UIKit-bridged recognizer** (Phase E.5.24). The prior
+                // SwiftUI `LongPressGesture(0.4).sequenced(before: DragGesture(0))`
+                // chain — even attached via `.simultaneousGesture` — claimed
+                // the touch sequence in a way that prevented the parent
+                // ScrollView's pan from engaging while a finger was on a
+                // card (page only scrolled from empty space). Bridging to
+                // a `UILongPressGestureRecognizer` with
+                // `cancelsTouchesInView = false` and a delegate returning
+                // `true` for `shouldRecognizeSimultaneouslyWith` lets the
+                // ScrollView's pan and our long-press track the same
+                // touch in parallel at the UIKit gesture-arbitration
+                // layer — the proper iOS-native cooperation pattern.
+                .gesture(CardReorderRecognizer(
+                    coordinateSpace: .named(Self.cardsGridCoordinateSpace),
+                    minimumDuration: 0.4
+                ) { event in
+                    handleReorderEvent(event, for: note, allNotes: orderedNotes)
+                })
         }
         .coordinateSpace(name: Self.cardsGridCoordinateSpace)
         .onPreferenceChange(CardFramePreferenceKey.self) { frames in
@@ -529,75 +534,53 @@ struct TimelineScreen: View {
     /// comparable.
     static let cardsGridCoordinateSpace = "cardsGridSpace"
 
-    /// The reorder gesture chain attached to each card.
+    /// Routes `CardReorderRecognizer` events to `DragSessionStore`.
     ///
-    /// `LongPressGesture(0.4)` discriminates a deliberate reorder from
-    /// scroll/tap. `.sequenced(before:)` means the drag only kicks in
-    /// after the long press succeeds (haptic confirms the lift).
-    /// `DragGesture(minimumDistance: 0)` lets the drag track the very
-    /// first delta after the long press, so movement feels immediate
-    /// once lifted.
-    ///
-    /// `.updating` is used (not `.onChanged`) because the sequence
-    /// gesture's value type isn't `Equatable`. We discard the
-    /// `GestureState` itself — all real state lives in
-    /// `DragSessionStore`. Side effects from `.updating` are how the
-    /// store stays in sync with each frame of the drag.
-    private func reorderGesture(
+    /// - `.began` — long press has crossed its 0.4s threshold with the
+    ///   finger still within `allowableMovement`. Lift the source card
+    ///   (sets `liftedNoteId`, fires the medium haptic, captures the
+    ///   lift location for grab-offset reuse on first move).
+    /// - `.changed` — the finger has moved. On the *first* call we
+    ///   transition lifted → active by computing the grab offset from
+    ///   the captured lift location and starting the session.
+    ///   Subsequent calls just update the finger position.
+    /// - `.ended` — drop. Hand the final location to `endDrag` so it
+    ///   commits or restores depending on whether the finger landed
+    ///   over a card.
+    /// - `.cancelled` — system interruption. Treat as a drop on empty
+    ///   space (no final location) so the order reverts cleanly.
+    private func handleReorderEvent(
+        _ event: CardReorderRecognizer.Event,
         for note: MockNote,
         allNotes: [MockNote]
-    ) -> some Gesture {
-        LongPressGesture(minimumDuration: 0.4)
-            .sequenced(before: DragGesture(
-                minimumDistance: 0,
-                coordinateSpace: .named(Self.cardsGridCoordinateSpace)
-            ))
-            .updating($dragGestureBuffer) { value, _, _ in
-                switch value {
-                case .second(true, nil):
-                    // Long press succeeded, drag hasn't moved yet. This
-                    // is the transition into the second phase of the
-                    // sequence and the only callback we trust to mean
-                    // "the long-press has actually passed its 0.4s
-                    // threshold." Phase E.5.12 dropped the parallel
-                    // `.first(true)` branch — it was firing in
-                    // ScrollView re-render scenarios (notably right
-                    // after the editor sheet dismissed) where SwiftUI
-                    // delivered the value before the duration was
-                    // truly met.
-                    DragSessionStore.shared.liftSource(noteId: note.id)
-                case .second(true, let drag?):
-                    // The first .second(true, drag?) callback is the
-                    // drag-start — initialize the session if we haven't
-                    // already (which also clears the lifted state).
-                    if DragSessionStore.shared.activeSession == nil {
-                        let frame = DragSessionStore.shared.cardFrames[note.id]
-                            ?? CGRect(origin: drag.startLocation, size: .zero)
-                        let cardCenter = CGPoint(x: frame.midX, y: frame.midY)
-                        let grab = CGSize(
-                            width: drag.startLocation.x - cardCenter.x,
-                            height: drag.startLocation.y - cardCenter.y
-                        )
-                        DragSessionStore.shared.beginSession(
-                            noteId: note.id,
-                            location: drag.location,
-                            grabOffset: grab,
-                            preDragOrder: CardsViewOrderStore.shared.customOrder
-                        )
-                    } else {
-                        DragSessionStore.shared.updateLocation(drag.location, in: allNotes)
-                    }
-                default:
-                    break
-                }
+    ) {
+        switch event {
+        case .began(let location):
+            DragSessionStore.shared.liftSource(noteId: note.id, at: location)
+        case .changed(let location):
+            if DragSessionStore.shared.activeSession == nil {
+                let liftLocation = DragSessionStore.shared.liftLocation ?? location
+                let frame = DragSessionStore.shared.cardFrames[note.id]
+                    ?? CGRect(origin: liftLocation, size: .zero)
+                let cardCenter = CGPoint(x: frame.midX, y: frame.midY)
+                let grab = CGSize(
+                    width: liftLocation.x - cardCenter.x,
+                    height: liftLocation.y - cardCenter.y
+                )
+                DragSessionStore.shared.beginSession(
+                    noteId: note.id,
+                    location: location,
+                    grabOffset: grab,
+                    preDragOrder: CardsViewOrderStore.shared.customOrder
+                )
+            } else {
+                DragSessionStore.shared.updateLocation(location, in: allNotes)
             }
-            .onEnded { value in
-                let finalLocation: CGPoint? = {
-                    if case .second(_, let drag?) = value { return drag.location }
-                    return nil
-                }()
-                DragSessionStore.shared.endDrag(finalLocation: finalLocation, in: allNotes)
-            }
+        case .ended(let location):
+            DragSessionStore.shared.endDrag(finalLocation: location, in: allNotes)
+        case .cancelled:
+            DragSessionStore.shared.endDrag(finalLocation: nil, in: allNotes)
+        }
     }
 
     /// Visible whenever the user is on the Free Board layout AND has

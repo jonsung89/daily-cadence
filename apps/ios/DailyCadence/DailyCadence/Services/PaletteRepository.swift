@@ -22,6 +22,21 @@ final class PaletteRepository {
     /// is the right tradeoff.
     private let cached: [ColorPalette]
 
+    /// **Phase E.5.21 — synthetic "essentials" swatches.** White + black
+    /// don't belong to any of the JSON palettes (we don't want them
+    /// appearing as note-background tabs in the BackgroundPickerView),
+    /// but the text-color picker should always offer them at the front.
+    /// They live here as invariant-color synthetic swatches and are
+    /// resolvable by `swatch(id:)` like any other swatch — `TextStyle.colorId`
+    /// round-trips through the same path. `allPalettes()` and
+    /// `allSwatches()` *do not* include them, so picker surfaces that
+    /// iterate by palette/swatch are unaffected unless they explicitly
+    /// call `essentialSwatches()`.
+    private static let essentials: [Swatch] = [
+        Swatch(id: "essentials.white", name: "White", light: "#FFFFFF", dark: "#FFFFFF"),
+        Swatch(id: "essentials.black", name: "Black", light: "#000000", dark: "#000000"),
+    ]
+
     init(bundle: Bundle = .main) {
         self.bundle = bundle
         self.cached = Self.loadSeed(bundle: bundle)
@@ -33,14 +48,27 @@ final class PaletteRepository {
     }
 
     /// Flat list of every swatch across every palette. Useful when a picker
-    /// surfaces swatches without their palette grouping.
+    /// surfaces swatches without their palette grouping. Does **not**
+    /// include `essentialSwatches()` — those are only for surfaces that
+    /// opt in (e.g. the text-color picker).
     func allSwatches() -> [Swatch] {
         cached.flatMap(\.swatches)
     }
 
-    /// Look up a swatch by its fully-qualified id (e.g. `"neutral.clay"`).
+    /// White + black, in that order. The text-color picker shows these
+    /// first (after Default) so high-contrast picks are always at hand.
+    func essentialSwatches() -> [Swatch] {
+        Self.essentials
+    }
+
+    /// Look up a swatch by its fully-qualified id. Checks essentials
+    /// first (`essentials.white` / `essentials.black`), then the palette
+    /// JSON (`neutral.clay`, `bold.cobalt`, etc.).
     func swatch(id: String) -> Swatch? {
-        allSwatches().first { $0.id == id }
+        if let essential = Self.essentials.first(where: { $0.id == id }) {
+            return essential
+        }
+        return allSwatches().first { $0.id == id }
     }
 
     /// Look up a palette by id (e.g. `"bold"`).

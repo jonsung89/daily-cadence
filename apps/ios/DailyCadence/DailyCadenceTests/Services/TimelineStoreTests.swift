@@ -73,8 +73,17 @@ struct TimelineStoreTests {
             content: .text(title: "Rich", message: attributed)
         ))
 
-        guard case let .text(_, recovered)? = store.notes.first?.content else {
+        // Phase E.5.18 — `.text` content body is a `[TextBlock]` list.
+        // The convenience constructor wraps a single AttributedString
+        // into one `.paragraph` block; we extract it back out for
+        // the round-trip assertion.
+        guard case let .text(_, body)? = store.notes.first?.content else {
             Issue.record("Expected stored content to be .text")
+            return
+        }
+        guard let firstBlock = body.first,
+              case let .paragraph(recovered) = firstBlock.kind else {
+            Issue.record("Expected body to start with a paragraph block carrying the message")
             return
         }
         #expect(recovered == attributed,

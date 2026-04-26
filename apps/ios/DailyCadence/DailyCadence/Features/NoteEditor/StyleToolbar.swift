@@ -5,9 +5,25 @@ import SwiftUI
 /// Defined here (not as a nested type) so both `NoteEditorScreen` (owner of
 /// the `@FocusState`) and `StyleToolbar` (the inline picker) can refer to
 /// the same enum without an import dance.
+///
+/// **Phase E.5.18a — `.trailer` case.** Once a note carries inline media,
+/// the editor renders a second TextEditor below the attachments strip
+/// for "type after the images." `.message` continues to mean the first
+/// paragraph (the existing top messageEditor); `.trailer` means the
+/// last paragraph (the new trailing editor below the photos). The
+/// StyleToolbar treats both as message-style body text.
 enum NoteEditorField: Hashable {
     case title
     case message
+    case trailer
+}
+
+extension NoteEditorField {
+    /// True when the field is one of the body-text editors (message or
+    /// trailer) — i.e., styling should treat it as "message," not title.
+    var isBodyText: Bool {
+        self == .message || self == .trailer
+    }
 }
 
 /// Which expanded panel — if any — is currently visible above the icon bar.
@@ -62,9 +78,14 @@ struct StyleToolbar: View {
     /// `MockNote.Background`; the editor renders the right preview.
     let backgroundPreview: AnyView
     let onTapBackground: () -> Void
+    /// Phase E.5.18 — `+image` button. Fires when the user taps it to
+    /// insert an inline media block into the note's body. Optional so
+    /// callers that don't support inline attachments can omit the icon.
+    let onTapInsertImage: (() -> Void)?
 
     private let fonts: [NoteFontDefinition]
     private let swatches: [Swatch]
+    private let essentialSwatches: [Swatch]
 
     init(
         activeField: NoteEditorField,
@@ -75,6 +96,7 @@ struct StyleToolbar: View {
         expandedPanel: Binding<StyleToolbarPanel?>,
         backgroundPreview: AnyView,
         onTapBackground: @escaping () -> Void,
+        onTapInsertImage: (() -> Void)? = nil,
         fontRepository: FontRepository = .shared,
         paletteRepository: PaletteRepository = .shared
     ) {
@@ -86,36 +108,107 @@ struct StyleToolbar: View {
         self._expandedPanel = expandedPanel
         self.backgroundPreview = backgroundPreview
         self.onTapBackground = onTapBackground
+        self.onTapInsertImage = onTapInsertImage
         self.fonts = fontRepository.allFonts()
         self.swatches = paletteRepository.allSwatches()
+        self.essentialSwatches = paletteRepository.essentialSwatches()
     }
 
     var body: some View {
-        VStack(spacing: 0) {
+        // Phase E.5.19 — floating-pill style (Apple Notes / Mail / Reminders
+        // iOS 17+ pattern). Each piece (expanded panel + icon bar) is its
+        // own glass-backed RoundedRectangle floating above the keyboard
+        // with horizontal inset, replacing the prior flush rectangle that
+        // visually divided the canvas.
+        VStack(spacing: 8) {
             if let panel = expandedPanel {
                 expandedPanelView(panel)
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 12)
+                    .background(toolbarPillBackground)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
             iconBar
+                .background(toolbarPillBackground)
         }
-        .background(toolbarBackground)
+        .padding(.horizontal, 12)
+        .padding(.bottom, 8)
         .animation(.easeOut(duration: 0.2), value: expandedPanel)
+    }
+
+    /// Reusable floating-pill background — iOS 26 "Liquid Glass" style.
+    ///
+    /// Layered look:
+    /// 1. **`.ultraThinMaterial` fill** — the translucent base that auto-
+    ///    adapts to light/dark and shows what's behind through frosted blur.
+    /// 2. **Inner rim highlight** — a top-to-bottom white gradient stroked
+    ///    on the edge that catches the "light" the way Apple's iOS 26 glass
+    ///    surfaces do (most visible on the upper edge). Without this the
+    ///    pill reads as a tinted rectangle rather than a glass surface.
+    /// 3. **Hairline outer border** — very subtle (`border1` @ 0.25)
+    ///    grounds the pill against any backdrop without competing with
+    ///    the rim highlight.
+    /// 4. **Soft drop shadow** — slight lift off the keyboard, also iOS 26.
+    private var toolbarPillBackground: some View {
+        let shape = RoundedRectangle(cornerRadius: 24, style: .continuous)
+        return shape
+            .fill(.ultraThinMaterial)
+            // Inner rim highlight — the iOS 26 glass "edge catches the light" effect.
+            .overlay(
+                shape
+                    .stroke(
+                        LinearGradient(
+                            colors: [
+                                Color.white.opacity(0.32),
+                                Color.white.opacity(0.06),
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        ),
+                        lineWidth: 0.8
+                    )
+            )
+            // Outermost hairline grounds the pill against any backdrop.
+            .overlay(
+                shape.strokeBorder(Color.DS.border1.opacity(0.25), lineWidth: 0.5)
+            )
+            .shadow(color: .black.opacity(0.08), radius: 8, y: 2)
     }
 
     // MARK: - Icon bar
 
     private var iconBar: some View {
-        HStack(spacing: 6) {
+        // Phase E.5.19 — fits inside the floating pill with horizontal
+        // padding for icon-to-edge breathing room. Outer pill background
+        // is applied in `body`. Vertical padding compresses since the
+        // pill itself sits above the keyboard with its own spacing.
+        HStack(spacing: 4) {
             fontIcon
             colorIcon
             sizeIcon
             Spacer(minLength: 0)
+            if onTapInsertImage != nil {
+                insertImageIcon
+            }
             backgroundIcon
         }
-        .padding(.horizontal, 14)
-        .padding(.top, 6)
-        .padding(.bottom, 12)  // clear the keyboard's top edge
-        .frame(height: 56)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+    }
+
+    /// Phase E.5.18 / E.5.19 — `+image` icon, bare on the floating
+    /// pill. Fires `onTapInsertImage` to start the inline-media
+    /// insertion flow (typically a PhotosPicker in the editor).
+    private var insertImageIcon: some View {
+        Button(action: { onTapInsertImage?() }) {
+            Image(systemName: "photo.badge.plus")
+                .font(.system(size: 18, weight: .regular))
+                .foregroundStyle(Color.DS.ink)
+                .frame(width: 44, height: 36)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Insert image")
     }
 
     private var fontIcon: some View {
@@ -171,27 +264,30 @@ struct StyleToolbar: View {
     }
 
     private var backgroundIcon: some View {
+        // Phase E.5.19 — bare on glass to match the other icons in the
+        // floating pill. The preview swatch/dot itself is the visual
+        // affordance; no surrounding chip.
         Button(action: onTapBackground) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(Color.DS.bg1)
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .strokeBorder(Color.DS.border1, lineWidth: 0.5)
-                    }
-                backgroundPreview
-                    .frame(width: 18, height: 18)
-                    .clipShape(Circle())
-            }
-            .frame(width: 44, height: 36)
+            backgroundPreview
+                .frame(width: 22, height: 22)
+                .clipShape(Circle())
+                .overlay(
+                    Circle()
+                        .strokeBorder(Color.DS.border1.opacity(0.6), lineWidth: 0.5)
+                )
+                .frame(width: 44, height: 36)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Background")
     }
 
-    /// Generic icon-bar button used for font / color / size. Active state
-    /// fills with `ink` so the user can see at a glance which panel is
-    /// open.
+    /// Generic icon-bar button used for font / color / size.
+    /// **Phase E.5.19** — bare on the floating pill's glass surface.
+    /// Active state still fills with `ink` so the user can see at a
+    /// glance which panel is open; inactive state has no background
+    /// chip (the pill itself supplies the visual container — Apple
+    /// Notes / Mail floating-toolbar pattern).
     private func iconButton<Content: View>(
         isActive: Bool,
         action: @escaping () -> Void,
@@ -201,15 +297,10 @@ struct StyleToolbar: View {
             content()
                 .frame(width: 44, height: 36)
                 .background {
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(isActive ? Color.DS.ink : Color.DS.bg1)
-                }
-                .overlay {
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .strokeBorder(
-                            isActive ? Color.clear : Color.DS.border1,
-                            lineWidth: 0.5
-                        )
+                    if isActive {
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(Color.DS.ink)
+                    }
                 }
         }
         .buttonStyle(.plain)
@@ -316,12 +407,26 @@ struct StyleToolbar: View {
     private var colorRow: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 10) {
+                // Default (slash glyph) — clears any per-note color override.
                 colorDot(
                     isSelected: currentColorId == nil,
                     fill: nil,
                     accessibilityLabel: "Default color",
                     onTap: { onSelectColor(nil) }
                 )
+                // Phase E.5.21 — essentials (white + black) shown before
+                // the palette swatches so high-contrast picks are always
+                // immediately reachable. They're synthetic swatches —
+                // resolvable via PaletteRepository.swatch(id:) but not
+                // part of any palette tab.
+                ForEach(essentialSwatches) { swatch in
+                    colorDot(
+                        isSelected: currentColorId == swatch.id,
+                        fill: swatch.color(),
+                        accessibilityLabel: swatch.name,
+                        onTap: { onSelectColor(swatch.id) }
+                    )
+                }
                 ForEach(swatches) { swatch in
                     colorDot(
                         isSelected: currentColorId == swatch.id,
@@ -390,17 +495,8 @@ struct StyleToolbar: View {
         .padding(.vertical, 6)
     }
 
-    // MARK: - Background
-
-    @ViewBuilder
-    private var toolbarBackground: some View {
-        ZStack(alignment: .top) {
-            Color.DS.bg2
-            Rectangle()
-                .fill(Color.DS.border1)
-                .frame(height: 0.5)
-        }
-    }
+    // (Phase E.5.19 removed the legacy flush `toolbarBackground`. The
+    // floating pills carry their own `toolbarPillBackground` in `body`.)
 }
 
 // MARK: - Panel labels

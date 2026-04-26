@@ -1,6 +1,6 @@
 # DailyCadence — Progress
 
-**Last updated:** 2026-04-25 (Phase E.5.17 — delete confirmation swapped from bottom action sheet to centered alert, matching Apple's pattern for irreversible single-item destruction)
+**Last updated:** 2026-04-26 (Phase F.2.1 — Stack-mode collapsed stacks stop reserving phantom height; badge moved to a non-sizing overlay and gutters now match the Board's 12pt rhythm)
 **Current phase:** Phase 1 MVP — iOS app for Jon + wife, TestFlight distribution
 
 This is the living state of the project. Update at the end of every session.
@@ -203,6 +203,19 @@ The `.stacked` branch of `boardContent` now renders an actual macOS-Stacks-inspi
 - **`KeepCard` opacity fix** — the card background now layers tint/image on top of a solid `Color.DS.bg2` base. Stacked layers no longer see through to each other (previously the translucent type-tint compounded with each peeking layer producing a muddy look).
 
 **End-to-end flow:** Board → Stack → see a 2-col masonry of stacks (one per type) with the latest note on top of each → tap a stack → its cards unfurl vertically inside its own column; the top card morphs into the bottom of the unfurled list while older cards fade in above → tap the "Collapse" pill (or tap another stack) → it folds back into a single cell.
+
+### Phase F.2.1 — Stack-mode collapsed spacing fix (added this round)
+
+User reported that collapsed multi-card stacks could leave abnormally large gaps before the next stack in the column, making the Board rhythm feel inconsistent and causing the next stack/card to sit lower than expected.
+
+- `Features/Timeline/StackedBoardView.swift`
+  - **Badge overlay no longer participates in layout height.** The collapsed stack's total-count badge moved from an inner child using `.frame(maxHeight: .infinity)` to `.overlay(alignment: .topTrailing)`. This keeps the badge visually pinned to the stack without advertising flexible vertical size back to the parent `VStack` column.
+  - **Stack gutter now matches the rest of Board.** The outer `HStack` column gap and each column's `VStack` item gap both changed from 8pt → 12pt so Stack mode shares the same rhythm as Cards mode.
+- `docs/FEATURES.md` updated to reflect the current Stack behavior (12pt gutters, 4pt peek depth, total-count badge in the upper-right).
+
+**Verification**
+- `xcodebuild -list -project apps/ios/DailyCadence/DailyCadence.xcodeproj` succeeds with `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`.
+- `xcodebuild test -project apps/ios/DailyCadence/DailyCadence.xcodeproj -scheme DailyCadence -destination 'platform=iOS Simulator,name=iPhone 17,OS=26.3.1' -only-testing:DailyCadenceTests` builds the app and test target, compiles the updated `StackedBoardView.swift`, but the simulator on this machine fails to launch the app (`FBSOpenApplicationServiceErrorDomain` / `SBMainWorkspace` request denied), so no green unit-test result was available this round.
 
 ### Phase E.1.1 — Inline Style toolbar (added this round)
 
@@ -1030,6 +1043,143 @@ The alert pattern is more "in your face" by design, which is exactly the right v
 
 **Tests:** 106/106 still passing.
 
+### Phase E.5.18 — Inline media in text notes (added this round)
+
+The big one this round: a text note can now carry photos and videos *inline*, journal-app style. Previously bare media notes lived in the Media section (auto-tagged) and text notes were text-only — there was no way to attach a photo to a thought. Phase E.5.18 closes that gap with a **block-based body model** (text + media blocks in any order), a `+image` button in the editor's StyleToolbar that opens the iOS PhotosPicker, and **per-image Small / Medium / Large sizing** (Apple Notes pattern) so the user controls the visual presence.
+
+**Why block-based, not NSTextAttachment.** SwiftUI's read-only `Text(_:AttributedString)` doesn't render NSTextAttachment images for cards — the only path to mid-paragraph inline rendering is wrapping UITextView in UIViewRepresentable for both edit and read. That's a 3+ round refactor of our existing rich-text editor (Phase E.2). The block model delivers the same user-facing journaling feel ("write, drop a photo, keep writing") with native SwiftUI components: each `.paragraph` is a `Text(AttributedString)` in cards / `TextEditor` in the editor; each `.media` is an `InlineMediaBlockView`. They stack vertically. Apple Notes / Notion / Google Keep / Bear all do this same block approach for inline media.
+
+**Model**
+- `Models/TextBlock.swift` — new `TextBlock` value type (id-stable Identifiable wrapper) + `MediaBlockSize` enum (`small` / `medium` / `large` with corresponding width fractions ~45% / ~75% / 100%).
+- `MockNote.Content.text(title:body:)` — replaces `.text(title:message:)`. Body is `[TextBlock]`. A backward-compat static `text(title:message:)` constructor wraps a single AttributedString into one paragraph block so seed data, tests, and existing editor save paths keep working unchanged.
+- `MockNote.timelineMessage` — flattens paragraph blocks into a single AttributedString for the dense Timeline rail (skipping inline media); the full block layout is the Board view's job.
+- `MockNote.textBodyBlocks` — convenience accessor returning the body for `.text` content.
+
+**Card rendering (`KeepCard`)**
+- `textContent(title:body:)` walks the block list. Paragraph blocks render as `Text(AttributedString)`, media blocks render via the new `InlineMediaBlockView`.
+- `InlineMediaBlockView` (new component) sizes the asset by `MediaBlockSize.widthFraction` of the card's content width, height proportional to clamped aspect ratio. Centered for Small/Medium, full-width for Large. Tap → fullscreen viewer (reuses `MediaViewerScreen`).
+
+**Editor (`NoteEditorScreen`)**
+- New `+image` icon in the `StyleToolbar` icon bar (Phase E.5.18 added the `onTapInsertImage` parameter; renders only when the callback is provided). SF Symbol `photo.badge.plus`, mirrors the `🖼` background icon's styling so the right side of the bar reads as a coherent "asset actions" cluster.
+- Tap → iOS PhotosPicker (`.any(of: [.images, .videos])`) → on selection, `MediaImporter.makePayload` runs → `NoteDraftStore.insertMedia(payload, size: .medium)` adds a `TextBlock.media` block (after the focused paragraph + a fresh trailing paragraph for continued typing).
+- New `attachmentsStrip` view below the message editor renders one row per media block in the draft body. Each row is a SwiftUI `Menu` containing a size `Picker` (Small / Medium / Large) + destructive **Remove** button. The `InlineMediaBlockView` is rendered with `isInteractive: false` so the Menu's tap-to-open captures the gesture (no fullscreen viewer collision in the editor).
+- Removing the last block restores an empty paragraph so the editor keeps a cursor target.
+- Errors during photo import surface inline below the strip ("Couldn't load that file…") rather than via a disruptive alert.
+
+**Save path**
+- `NoteEditorScreen.save()` serialises `draft.body` directly into `.text(title:body:)`. Empty paragraph blocks are dropped; non-empty paragraphs get leading/trailing whitespace trimmed (preserving per-run AttributedString attributes on the kept characters); media blocks pass through unchanged.
+
+**Draft store (`NoteDraftStore`)**
+- `body: [TextBlock]` is the canonical state, defaulting to a single empty paragraph (so the editor always has a cursor target).
+- `focusedBlockId: UUID?` tracks which paragraph block has the cursor — used by `insertMedia(...)` to decide where to place the new media block.
+- `insertMedia(_:size:)`, `removeBlock(id:)`, `resizeMediaBlock(id:to:)`, `updateParagraph(id:to:)` — public block-list mutators.
+- **Single-paragraph compatibility bridge**: `message: AttributedString` is a computed property that reads/writes the first paragraph block. Lets the existing single-pane editor continue working (Phase E.5.18 ships the simpler "appended attachments" UX rather than per-block focused TextEditors). Mid-paragraph editor is a future iteration when the demand is real.
+- `clear()` resets body to a single empty paragraph (alongside the rest of the draft fields).
+
+**MockNotes**
+- `MockNotes.inlineMediaDemo(payload:size:)` — opt-in helper that builds a sample text note with a `[paragraph, media, paragraph]` body. Not added to `today` so a TestFlight build doesn't ship a synthetic-looking demo card; useful for previews and a future debug menu.
+
+**Tests (127/127, +21 this round)**
+- `TextBlockTests` (9): id stability across edits, empty/paragraph/media predicates, full block round-trip through TimelineStore (paragraph-media-paragraph), backward-compat constructor wraps message into one paragraph, title-only constructor produces empty body, timelineMessage flattens paragraphs / drops media, timelineMessage returns nil for media-only or empty bodies, MediaBlockSize width-fraction order invariant.
+- `NoteDraftStoreTests` (12): fresh draft starts with one empty paragraph, message bridge reads/writes first paragraph, message bridge prepends paragraph if body starts with media, insertMedia places after focused paragraph + appends trailing paragraph, insertMedia with no focus appends at end, removeBlock deletes & preserves neighbors, removeBlock restores empty paragraph if body would empty, resizeMediaBlock updates size, resize on paragraph is no-op, updateParagraph mutates text, clear resets body to single empty paragraph.
+- `TimelineStoreTests` updated for the new body shape.
+
+**End-to-end:** Tap **+** in the FAB menu → editor opens → type "Felt strong this morning" → tap the **`+image`** icon in the toolbar → PhotosPicker opens → pick a photo → photo appears as a Medium-sized thumbnail row below the text → tap the photo in the editor → Menu pops with **Small / Medium / Large / Remove** → pick Large → Save → the note shows up on the Board (Cards mode) as: title + paragraph + full-width photo, vertically stacked. Tap the photo on the card → fullscreen viewer.
+
+**Known scope (deferred for future iteration):**
+- **Mid-paragraph image insertion in the editor.** The data model supports interleaved blocks; the editor UI currently appends new media after the typed paragraph. To insert mid-paragraph would mean per-block focused TextEditors with split/merge logic — significant rework, deferred until use justifies it.
+- **Drag-to-reorder blocks.** Same — data model supports it; UI doesn't yet.
+
+### Phase E.5.18a — Inline-media editor polish (added this round)
+
+Three asks landed together based on Jon's first pass with the inline-media editor:
+
+1. **Couldn't add text after the image** — the editor only had one TextEditor (above the attachments strip); no way to type after a photo.
+2. **Wanted crop control on insert** — using existing `PhotoCropView` (freeform + aspect presets).
+3. **Wanted tap-to-view-fullscreen** — the `Menu` wrapper was capturing every tap so users couldn't preview attachments at full size from the editor.
+
+**Trailing TextEditor (#1).**
+- `NoteDraftStore.insertMedia(...)` rewritten to maintain the structural invariant `[firstParagraph?, media*, trailingParagraph]` — each new media block inserts *just before* the trailing paragraph (rather than appending media + new paragraph each time). Multi-insert keeps a single trailing paragraph.
+- New `NoteDraftStore.trailerMessage: AttributedString` accessor (read/write the last paragraph) + `hasMedia: Bool`.
+- New `NoteEditorField.trailer` case + `isBodyText` helper. The editor's title remains `.title`; the top messageEditor remains `.message`; the new bottom editor uses `.trailer`. StyleToolbar treats both `.message` and `.trailer` as body-text styling.
+- New `trailerEditor` view in `NoteEditorScreen` — a TextEditor bound to `draft.trailerMessage`, only rendered when `draft.hasMedia` is true (hidden when there's no media so the single messageEditor isn't double-bound).
+- Style apply functions (`applyMessageFont`/`Color`/`Size`) now route through a shared `transformActiveBody(_:)` helper that picks `draft.message` (first paragraph) or `draft.trailerMessage` (last paragraph) based on `lastEditedField`. Existing single-selection behavior preserved — SwiftUI's TextEditor writes its own selection into `draft.messageSelection` when focused.
+
+**Crop-on-insert sheet (#2).**
+- `NoteEditorScreen` gained `pendingCropPayload: MediaPayload?` + `pendingCropState: PhotoCropState?`.
+- `importAttachment(_:)` now branches: images → stage for cropping (sheet opens); videos → insert directly.
+- Crop sheet body re-uses `PhotoCropView` (already used by `MediaNoteEditorScreen`) — same freeform + 1:1 / 4:3 / 3:4 / 16:9 / 9:16 aspect presets, same corner-drag + center-drag UX, same `commitCrop()` to produce the cropped JPEG + new aspect ratio.
+- Confirm builds a fresh `MediaPayload` from the cropped bytes and calls `draft.insertMedia(...)`. Cancel discards the staged image.
+
+**Tap behavior on attachments (#3).**
+- Editor's `attachmentRow` was `Menu { … } label: { InlineMediaBlockView(isInteractive: false) }` — Menu captured every tap.
+- Now: `InlineMediaBlockView(isInteractive: true).contextMenu { Picker · Remove }` — **tap opens the fullscreen `MediaViewerScreen`** (Apple Photos pattern), **long-press opens the resize/remove context menu** (Apple Notes pattern). Same gesture vocabulary as inline media in cards (Phase E.5.18) so the experience is consistent everywhere.
+
+**Bonus polish.** The previous commit's TextEditor `minHeight: 60` (down from 160) carries through — empty editor still has a clear tap target without leaving a big gap before the attachments strip.
+
+**Tests (131/131, +4 this round)**
+- `NoteDraftStoreTests`: `insertMediaPlacesBeforeTrailingParagraphAndPreservesIt`, `insertMediaAppendsTrailingParagraphWhenNoneExists`, `multipleInsertsKeepSingleTrailingParagraph`, `trailerMessageReadsLastParagraph` / `trailerMessageWritesLastParagraph`, `hasMediaReflectsBodyContents`. Replaces older insertMedia-after-focus tests that were tied to the prior insertion semantics.
+
+**End-to-end:** Tap **+** in FAB → text editor → type "Felt strong this morning" → tap the **`+image`** icon → PhotosPicker → pick a photo → **crop sheet opens** → adjust corners + pick an aspect chip → tap **Add** → photo lands in the strip below your text → **a second TextEditor ("Add more thoughts…") appears below the photo** → type "Cooldown was great" → tap the photo → **fullscreen viewer opens** → swipe down to dismiss → long-press the photo → menu pops with **Small / Medium / Large / Remove**. Save → card renders all three blocks vertically (intro text → photo → outro text).
+
+### Phase E.5.18b — Duplicate-text bug fix (added this round)
+
+Jon reported: typed "my snack for today" + Enter into the message editor, tapped `+image`, picked a photo. The trailing TextEditor that appeared below the image rendered the same "my snack for today" text — duplicated in two editors.
+
+**Root cause.** `NoteDraftStore.insertMedia(...)` ensured a *trailing* paragraph but not a *leading* one. With body `[paragraph("my snack...")]` (single typed paragraph) the logic saw the last block was already a paragraph, inserted media before it, and produced `[media, paragraph("my snack...")]`. The `message` accessor (first paragraph) and `trailerMessage` accessor (last paragraph) then resolved to the **same** block — both TextEditors rendered the same text.
+
+**Fix.** `insertMedia` now ensures BOTH a leading and a *distinct* trailing paragraph before placing the media. Algorithm:
+1. If body's first block isn't a paragraph, prepend a fresh paragraph.
+2. If body's last block isn't a paragraph OR is the same block as the leading paragraph, append a fresh paragraph.
+3. Insert the media just before the trailing paragraph.
+
+The leading paragraph keeps the user's typed text intact; the trailing paragraph is a fresh empty target for the trailerEditor.
+
+**Tests (132/132, +1 this round).**
+- `NoteDraftStoreTests.insertMediaIntoSingleParagraphBodyAddsDistinctTrailingParagraph` — explicit regression test for the duplicate-text bug. Asserts `message` returns "my snack for today" and `trailerMessage` returns "" after insertMedia (different blocks, different content).
+- `insertMediaIntoMediaOnlyBodyEnsuresLeadingAndTrailingParagraphs` — the prior `insertMediaAppendsTrailingParagraphWhenNoneExists` test, updated for the new behavior (leading paragraph is also prepended).
+
+### Phase E.5.19 — StyleToolbar floating-pill redesign (added this round)
+
+The previous StyleToolbar was a flush opaque rectangle (`Color.DS.bg2`) spanning the full width with a hairline top border — visually divided the canvas from the keyboard. Apple Notes / Mail / Reminders all moved to a **floating glass pill** in iOS 17+ (rounded RoundedRectangle backed by `.ultraThinMaterial`, inset from the screen edges). Modernized to match.
+
+**`StyleToolbar.swift` changes:**
+- Outer container: each piece (expanded panel + icon bar) is now its own RoundedRectangle (corner radius 22) backed by `.ultraThinMaterial` for the glass look — `toolbarPillBackground` view extracted for reuse.
+- Horizontal inset (12pt) so the pills float free of the screen edges.
+- 8pt vertical gap between expanded panel and icon bar (each reads as its own surface, like Notes' format toolbar that stacks two pills).
+- Hairline border at `Color.DS.border1.opacity(0.5)` defines the pill edge against the keyboard backdrop without being heavy.
+- Subtle drop shadow (`.shadow(color: .black.opacity(0.06), radius: 6, y: 1)`) for a slight lift off the keyboard.
+
+**Bare-icon styling on glass:**
+- `iconButton` (font / color / size): dropped the `Color.DS.bg1` background + border. Icons now render bare on the glass pill. Active state still fills with `Color.DS.ink` (the user can see at a glance which panel is open).
+- `backgroundIcon` + `insertImageIcon`: also dropped per-icon backgrounds. Background icon shows just the swatch / photo preview circle with a thin border; insert-image icon is a bare `photo.badge.plus` glyph.
+- iconBar's outer padding tightened (horizontal 14→8, vertical asymmetric→6/6) since the pill itself supplies the visual container.
+
+**Removed:** the legacy `toolbarBackground` ZStack (flush bg2 + 0.5pt border).
+
+**Tests:** 132/132 still passing — pure visual change, no behavior shifts.
+
+**End-to-end:** Open the editor → keyboard rises → the styling toolbar above it is now two floating glass pills (or one when no panel is expanded) inset from the screen edges with rounded corners, translucent backdrop, soft shadow. Tap the **Aa** icon → font panel pill grows above the icon-bar pill with the same glass styling. Tap a font chip → applies. Same icons, much more modern feel.
+
+### Phase E.5.24 — Cards-mode scroll-from-card fix via UIKit gesture bridge (added this round)
+
+Jon reported: in Cards Board mode the page would only scroll if the pan started over empty space outside any card. Touches that started on a card never handed control back to the parent `ScrollView`'s pan recognizer.
+
+**Root cause.** The Cards-mode reorder used SwiftUI's `LongPressGesture(0.4).sequenced(before: DragGesture(minimumDistance: 0))` attached via `.simultaneousGesture` (Phase E.5.7 / Phase E.5.12). On iOS 26 that combination still claims the touch sequence in a way that prevents the parent ScrollView's pan from engaging — `.simultaneousGesture` improved the situation but didn't fully resolve it. The arbitration happens inside SwiftUI's gesture machinery, where simultaneity with the underlying UIKit ScrollView's pan recognizer isn't reliable for this exact chain.
+
+**Fix.** Bridge to UIKit at the proper layer. New `Features/Timeline/CardReorderRecognizer.swift` is a `UIGestureRecognizerRepresentable` (iOS 18+ first-class SwiftUI ↔ UIKit gesture bridge) wrapping a single `UILongPressGestureRecognizer`:
+
+- `cancelsTouchesInView = false` — the recognizer doesn't swallow touches on their way to the underlying view hierarchy.
+- A `Coordinator: NSObject, UIGestureRecognizerDelegate` returns `true` for `gestureRecognizer(_:shouldRecognizeSimultaneouslyWith:)` — UIKit lets the ScrollView's pan and our long-press track the same touch sequence in parallel.
+- Single recognizer instead of a sequenced chain. After the press duration elapses the recognizer transitions to `.began` (the lift) and then reports finger movement via `.changed` (the drag) until release (`.ended`) — one state machine, no SwiftUI value-type discrimination across `.first(true)` / `.second(true, _)` callbacks.
+- Locations are reported in the cards-grid named coordinate space directly via `context.converter.location(in: coordinateSpace)` — the touch coords are already in the space `cardFrames` are stored in, no manual conversion.
+
+**TimelineScreen** loses `@GestureState dragGestureBuffer` and the `reorderGesture(for:allNotes:)` helper. The card now attaches the recognizer with `.gesture(CardReorderRecognizer(coordinateSpace: .named(Self.cardsGridCoordinateSpace), minimumDuration: 0.4) { event in handleReorderEvent(event, …) })`. The new `handleReorderEvent(_:for:allNotes:)` switch maps `.began` / `.changed` / `.ended` / `.cancelled` to `DragSessionStore` calls.
+
+**DragSessionStore** gains a `liftLocation: CGPoint?` field and `liftSource(noteId:at:)` now captures it. On the first `.changed` after a lift, `handleReorderEvent` reads `liftLocation` to compute the floating preview's grab offset against where the finger actually landed — not where it's already moved to by the time the first `.changed` fires (which can be tens of points later if the user starts dragging fast). `beginSession`, `endDrag`, and `cancelSession` clear it.
+
+**Net result:** the page scrolls cleanly from anywhere — over a card, between cards, on the header. Long-press on a card still triggers the lift haptic + the live drag preview at the same 0.4s threshold and the reorder UX is unchanged (lift → drag → drop or drop-on-empty-reverts). Build passes; no test changes (the gesture layer isn't unit-tested — verified via the iOS Simulator running the Cards layout).
+
 ### Tests (79/79 passing — +3 this round)
 - `ColorHexTests` (16) — hex initializer, every palette family in light + dark, invariant tokens, role flips
 - `FontLoaderTests` (5) — bundled font registration + variable-axis weight
@@ -1058,7 +1208,7 @@ The alert pattern is more "in your face" by design, which is exactly the right v
 
 ## 🚧 In flight
 
-Nothing active — Phase E.5.17 (delete confirmation moved to alert) landed. Open follow-ups: **inline attachments in text notes** (load-bearing for "semantic context with media" — see Phase E.5.10), pinch-to-zoom in the crop tool, inline text formatting (bold/italic/underline/strikethrough), auto-bullet + checkboxes in text notes, auto-scroll the cards grid when dragging near a viewport edge, optional Pinned section on Timeline view (pinned currently still renders chronologically there), discoverability hint for the long-press → context menu (relevant once Phase 1 expands beyond Jon + wife).
+Nothing active — Phase E.5.18a (inline-media editor polish) landed. Open follow-ups: per-block focused TextEditors (mid-paragraph image insertion — currently the model supports it but UI ships intro/attachments/outro three-zone layout), drag-to-reorder blocks, pinch-to-zoom in the crop tool, inline text formatting (bold/italic/underline/strikethrough), auto-bullet + checkboxes in text notes, auto-scroll the cards grid when dragging near a viewport edge, optional Pinned section on Timeline view, discoverability hint for the long-press → context menu, **persistence work (Supabase schema + auth + Apple Developer enrollment)**.
 
 ---
 

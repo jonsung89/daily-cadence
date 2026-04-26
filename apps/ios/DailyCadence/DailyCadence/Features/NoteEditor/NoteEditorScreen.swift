@@ -1,4 +1,5 @@
 import SwiftUI
+import PhotosUI
 
 /// The Create / Edit Note sheet — Phases C through E.2.2.
 ///
@@ -29,6 +30,10 @@ import SwiftUI
 /// the note's `time` string. Date/time picking lands when backdating ships.
 struct NoteEditorScreen: View {
     @Environment(\.dismiss) private var dismiss
+    /// Phase E.5.22 — drives the scheme-aware default-tint opacity in
+    /// the live preview background so the editor matches KeepCard's
+    /// dark-mode treatment.
+    @Environment(\.colorScheme) private var colorScheme
 
     /// Source of truth for every editable field — survives accidental
     /// dismissals during the same app session (see `NoteDraftStore`).
@@ -59,6 +64,21 @@ struct NoteEditorScreen: View {
     /// Drives the Cancel-button confirmation dialog. Skipped entirely
     /// when there's nothing to lose (draft is empty).
     @State private var isCancelConfirmationPresented = false
+
+    /// Phase E.5.18 — drives the inline-attachment PhotosPicker. Tap the
+    /// `+image` icon in the StyleToolbar → `isImagePickerPresented = true`.
+    /// Selected items run through `MediaImporter` → image goes through
+    /// the crop sheet (Phase E.5.18a); videos skip cropping and insert
+    /// directly via `draft.insertMedia`.
+    @State private var isImagePickerPresented = false
+    @State private var attachmentPickerItem: PhotosPickerItem?
+    @State private var attachmentImportError: String?
+
+    /// Phase E.5.18a — the imported (but not yet inserted) image
+    /// payload + its `PhotoCropState`. Drives the crop sheet. Video
+    /// imports never populate this — they bypass cropping.
+    @State private var pendingCropPayload: MediaPayload?
+    @State private var pendingCropState: PhotoCropState?
 
     var body: some View {
         @Bindable var draft = draft
@@ -110,16 +130,37 @@ struct NoteEditorScreen: View {
                     onSelectColor: handleSelectColor,
                     expandedPanel: $expandedPanel,
                     backgroundPreview: AnyView(backgroundIconPreview),
-                    onTapBackground: { isBackgroundPickerPresented = true }
+                    onTapBackground: { isBackgroundPickerPresented = true },
+                    onTapInsertImage: { isImagePickerPresented = true }
                 )
             }
             .sheet(isPresented: $isBackgroundPickerPresented) {
                 BackgroundPickerView(selection: $draft.background)
             }
-            .confirmationDialog(
+            .photosPicker(
+                isPresented: $isImagePickerPresented,
+                selection: $attachmentPickerItem,
+                matching: .any(of: [.images, .videos]),
+                photoLibrary: .shared()
+            )
+            .onChange(of: attachmentPickerItem) { _, newItem in
+                guard let newItem else { return }
+                Task { await importAttachment(newItem) }
+            }
+            // Phase E.5.18a — crop sheet, presented when an image was
+            // imported and is awaiting user-confirmed cropping.
+            // Re-uses the same `PhotoCropView` the bare-media editor uses.
+            .sheet(isPresented: cropSheetPresented) {
+                cropSheet
+            }
+            // Phase E.5.18c — discard-draft confirmation is `.alert`,
+            // not `.confirmationDialog`. Matches the same Apple-pattern
+            // alignment we did in E.5.17 for delete: irreversible
+            // single-item destruction → centered alert (Notes / Photos
+            // / Calendar / Reminders), not bottom action sheet.
+            .alert(
                 "Discard draft?",
-                isPresented: $isCancelConfirmationPresented,
-                titleVisibility: .visible
+                isPresented: $isCancelConfirmationPresented
             ) {
                 Button("Discard Draft", role: .destructive) {
                     draft.clear()
@@ -139,9 +180,10 @@ struct NoteEditorScreen: View {
 
     // MARK: - Live preview background
     //
-    // The editor surface previews how the saved note will render. Color
-    // backgrounds tint at 0.333 opacity (matches card rendering); image
-    // backgrounds fill scaled-to-fill at user-chosen opacity.
+    // The editor surface previews how the saved note will render.
+    // Phase E.5.20 — type-default tints at 0.333 opacity (calm accent);
+    // user-picked swatches render at FULL opacity (WYSIWYG, matches the
+    // picker preview). Image backgrounds use the user-chosen opacity.
 
     @ViewBuilder
     private var previewBackground: some View {
@@ -149,13 +191,14 @@ struct NoteEditorScreen: View {
             Color.DS.bg1
             switch resolvedPreviewStyle {
             case .none:
-                // Mirror KeepCard's default — the tag's pigment at 0.333
-                // opacity — so the editor previews exactly what the saved
-                // card will look like when the user hasn't picked an
-                // override.
-                draft.selectedType.color.opacity(0.333)
+                // Phase E.5.22 — mirror KeepCard's scheme-aware default
+                // tint so the editor previews exactly what the saved
+                // card will look like in either color scheme. Dark mode
+                // drops to 0.18 to avoid muddy saturated tint.
+                draft.selectedType.color.opacity(NoteType.defaultTintOpacity(for: colorScheme))
             case .color(let swatch):
-                swatch.color().opacity(0.333)
+                // Full opacity — matches saved KeepCard / NoteCard rendering.
+                swatch.color()
             case .image(let data, let opacity):
                 if let uiImage = UIImage(data: data) {
                     Image(uiImage: uiImage)
@@ -252,11 +295,237 @@ struct NoteEditorScreen: View {
                 .submitLabel(.next)
 
             messageEditor
+
+            attachmentsStrip
+
+            // Phase E.5.18a — only render the trailing TextEditor once
+            // there are inline media blocks. Without media, `messageEditor`
+            // edits the only paragraph; both editors would be tied to
+            // the same block and confuse the user.
+            if draft.hasMedia {
+                trailerEditor
+            }
         }
         .padding(.horizontal, 20)
         .padding(.top, 20)
         .padding(.bottom, 16)
         .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+
+    /// "Type after the images" TextEditor (Phase E.5.18a). Bound to
+    /// `draft.trailerMessage` (the LAST paragraph block); only rendered
+    /// when `draft.hasMedia == true`. Lives below `attachmentsStrip` so
+    /// the visual order matches the saved block order:
+    /// `firstParagraph → media… → trailingParagraph`.
+    private var trailerEditor: some View {
+        @Bindable var draft = draft
+        return ZStack(alignment: .topLeading) {
+            if draft.trailerMessage.characters.isEmpty {
+                Text("Add more thoughts…")
+                    .font(.DS.sans(size: 16, weight: .regular))
+                    .foregroundStyle(Color.DS.fg2.opacity(0.7))
+                    .padding(.top, 8)
+                    .padding(.leading, 4)
+                    .allowsHitTesting(false)
+            }
+            TextEditor(text: $draft.trailerMessage, selection: $draft.messageSelection)
+                .font(.DS.sans(size: 16, weight: .regular))
+                .foregroundStyle(Color.DS.ink)
+                .scrollContentBackground(.hidden)
+                .scrollDisabled(true)
+                .focused($focusedField, equals: .trailer)
+                // Mirrors the messageEditor's tight 40pt minHeight —
+                // empty-state placeholder still readable, no wasted
+                // reserved space below the photo when the user starts
+                // typing in the trailer.
+                .frame(minHeight: 40)
+        }
+    }
+
+    /// Phase E.5.18 — vertical strip of inline media blocks rendered
+    /// below the message editor. Each block has a tap-to-open `Menu`
+    /// for resize (Small / Medium / Large) + remove. The data model
+    /// supports interleaving media with paragraphs anywhere in the
+    /// body, but this Phase 1 editor UI just appends new media after
+    /// the typed paragraph — mid-paragraph insertion can come in a
+    /// follow-up round once the demand is real.
+    @ViewBuilder
+    private var attachmentsStrip: some View {
+        let mediaBlocks = draft.body.compactMap { block -> (UUID, MediaPayload, MediaBlockSize)? in
+            if case .media(let payload, let size) = block.kind {
+                return (block.id, payload, size)
+            }
+            return nil
+        }
+        if !mediaBlocks.isEmpty {
+            VStack(spacing: 12) {
+                ForEach(mediaBlocks, id: \.0) { id, payload, size in
+                    attachmentRow(blockId: id, payload: payload, size: size)
+                }
+            }
+            .transition(.opacity)
+        }
+        if let attachmentImportError {
+            Text(attachmentImportError)
+                .font(.DS.small)
+                .foregroundStyle(.red)
+        }
+    }
+
+    /// One inserted attachment in the editor strip. **Tap = open the
+    /// fullscreen viewer; long-press = `.contextMenu` for resize / remove**
+    /// (Phase E.5.18a — Apple Notes pattern). Previously this was a
+    /// `Menu` wrapping the image which captured every tap; users had no
+    /// way to view attachments full-screen from the editor.
+    ///
+    /// `InlineMediaBlockView`'s own tap-to-view behavior handles the
+    /// view path (`isInteractive: true`); SwiftUI's `.contextMenu`
+    /// modifier handles the long-press menu.
+    private func attachmentRow(
+        blockId: UUID,
+        payload: MediaPayload,
+        size: MediaBlockSize
+    ) -> some View {
+        InlineMediaBlockView(
+            payload: payload,
+            size: size,
+            cornerRadius: 10,
+            isInteractive: true
+        )
+        .contextMenu {
+            Picker("Size", selection: sizeBinding(for: blockId)) {
+                ForEach(MediaBlockSize.allCases) { size in
+                    Text(size.title).tag(size)
+                }
+            }
+            Divider()
+            Button(role: .destructive) {
+                withAnimation(.easeOut(duration: 0.18)) {
+                    draft.removeBlock(id: blockId)
+                }
+            } label: {
+                Label("Remove", systemImage: "trash")
+            }
+        }
+    }
+
+    /// Two-way binding for one media block's `MediaBlockSize`. Reading
+    /// finds the block in `draft.body`; writing routes through
+    /// `NoteDraftStore.resizeMediaBlock(id:to:)`.
+    private func sizeBinding(for blockId: UUID) -> Binding<MediaBlockSize> {
+        Binding(
+            get: {
+                for block in draft.body {
+                    if block.id == blockId, case .media(_, let size) = block.kind {
+                        return size
+                    }
+                }
+                return .medium
+            },
+            set: { newSize in
+                draft.resizeMediaBlock(id: blockId, to: newSize)
+            }
+        )
+    }
+
+    /// Imports a `PhotosPickerItem` via `MediaImporter`. **Images go
+    /// through the crop sheet** (Phase E.5.18a — reusing
+    /// `PhotoCropView` from MediaCrop); **videos insert directly** since
+    /// we don't have a video-trim tool yet. Errors surface inline below
+    /// the strip without an alert.
+    private func importAttachment(_ item: PhotosPickerItem) async {
+        attachmentImportError = nil
+        do {
+            let payload = try await MediaImporter.makePayload(from: item)
+            await MainActor.run {
+                attachmentPickerItem = nil
+                if payload.kind == .image, let cropState = PhotoCropState(data: payload.data) {
+                    // Stage for cropping. Sheet presents on the next
+                    // render cycle when both fields are set.
+                    pendingCropPayload = payload
+                    pendingCropState = cropState
+                } else {
+                    // Video (or image whose data couldn't decode) —
+                    // insert directly without cropping.
+                    withAnimation(.easeOut(duration: 0.2)) {
+                        draft.insertMedia(payload, size: .medium)
+                    }
+                }
+            }
+        } catch {
+            await MainActor.run {
+                attachmentImportError = "Couldn't load that file. Try another one."
+                attachmentPickerItem = nil
+            }
+        }
+    }
+
+    /// User confirmed the crop. Build a fresh `MediaPayload` from the
+    /// cropped data + new aspect ratio and insert as a media block.
+    private func confirmCrop() {
+        guard let pending = pendingCropPayload,
+              let cropState = pendingCropState,
+              let result = cropState.commitCrop() else {
+            cancelCrop()
+            return
+        }
+        let croppedPayload = MediaPayload(
+            kind: .image,
+            data: result.data,
+            posterData: nil,
+            aspectRatio: result.aspectRatio,
+            caption: pending.caption
+        )
+        withAnimation(.easeOut(duration: 0.2)) {
+            draft.insertMedia(croppedPayload, size: .medium)
+        }
+        pendingCropPayload = nil
+        pendingCropState = nil
+    }
+
+    /// User cancelled the crop sheet — discard the staged image without
+    /// inserting it.
+    private func cancelCrop() {
+        pendingCropPayload = nil
+        pendingCropState = nil
+    }
+
+    /// Bool projection of the staged-crop pair for `.sheet(isPresented:)`.
+    /// Resetting to `false` (e.g. via swipe-down) calls `cancelCrop()`
+    /// so the staged image doesn't ghost the next picker open.
+    private var cropSheetPresented: Binding<Bool> {
+        Binding(
+            get: { pendingCropPayload != nil && pendingCropState != nil },
+            set: { if !$0 { cancelCrop() } }
+        )
+    }
+
+    /// The crop sheet body. Reuses `PhotoCropView` from MediaCrop so
+    /// users get the same freeform / aspect-preset chips and corner-drag
+    /// crop UX as the bare-media editor.
+    @ViewBuilder
+    private var cropSheet: some View {
+        if let cropState = pendingCropState {
+            NavigationStack {
+                PhotoCropView(state: cropState)
+                    .padding(.top, 8)
+                    .navigationTitle("Crop image")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Cancel", action: cancelCrop)
+                        }
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Add", action: confirmCrop)
+                                .fontWeight(.semibold)
+                        }
+                    }
+            }
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+        } else {
+            EmptyView()
+        }
     }
 
     /// iOS 26 `TextEditor` bound to an `AttributedString` + selection.
@@ -290,7 +559,13 @@ struct NoteEditorScreen: View {
                 .scrollContentBackground(.hidden)  // let previewBackground show through
                 .scrollDisabled(true)               // outer ScrollView scrolls
                 .focused($focusedField, equals: .message)
-                .frame(minHeight: 160)
+                // Phase E.5.18 → E.5.18d — dropped from 160 → 60 → 40.
+                // 60pt still left ~25pt of empty space below a short
+                // typed message before the inline image, making the
+                // photo feel disconnected from the text. 40pt is tight
+                // enough to wrap one-line content while still leaving
+                // a clear tap target for the empty-state placeholder.
+                .frame(minHeight: 40)
         }
     }
 
@@ -326,15 +601,15 @@ struct NoteEditorScreen: View {
 
     private var currentFontId: String? {
         switch lastEditedField {
-        case .title:    return draft.titleStyle?.fontId
-        case .message:  return draft.messageFontId
+        case .title:                return draft.titleStyle?.fontId
+        case .message, .trailer:    return draft.messageFontId
         }
     }
 
     private var currentColorId: String? {
         switch lastEditedField {
-        case .title:    return draft.titleStyle?.colorId
-        case .message:  return draft.messageColorId
+        case .title:                return draft.titleStyle?.colorId
+        case .message, .trailer:    return draft.messageColorId
         }
     }
 
@@ -342,7 +617,11 @@ struct NoteEditorScreen: View {
         switch lastEditedField {
         case .title:
             draft.titleStyle = updatedTitleStyle(fontId: id)
-        case .message:
+        case .message, .trailer:
+            // Phase E.5.18a — both message and trailer paragraphs share
+            // the same toolbar-mirrored font id. The actual
+            // transformAttributes call applies to whichever paragraph
+            // (first or last) is currently focused.
             draft.messageFontId = id
             applyMessageFont(id: id)
         }
@@ -352,7 +631,7 @@ struct NoteEditorScreen: View {
         switch lastEditedField {
         case .title:
             draft.titleStyle = updatedTitleStyle(colorId: id)
-        case .message:
+        case .message, .trailer:
             draft.messageColorId = id
             applyMessageColor(id: id)
         }
@@ -378,9 +657,23 @@ struct NoteEditorScreen: View {
     //   - Collapsed cursor → updates the selection's typing attributes so
     //     the next typed characters inherit the new font/color.
 
+    /// Phase E.5.18a — routes the transformAttributes call to the
+    /// AttributedString of the currently focused paragraph: `.message`
+    /// (first paragraph / top messageEditor) or `.trailer` (last
+    /// paragraph / trailerEditor). Falls back to `.message` if neither
+    /// is focused (e.g. background sheet just dismissed).
+    private func transformActiveBody(_ body: (inout AttributeContainer) -> Void) {
+        switch lastEditedField {
+        case .trailer:
+            draft.trailerMessage.transformAttributes(in: &draft.messageSelection, body: body)
+        case .title, .message:
+            draft.message.transformAttributes(in: &draft.messageSelection, body: body)
+        }
+    }
+
     private func applyMessageFont(id: String?) {
         let size = draft.messageSize
-        draft.message.transformAttributes(in: &draft.messageSelection) { container in
+        transformActiveBody { container in
             if let id, let def = FontRepository.shared.font(id: id) {
                 container.font = def.font(size: size).weight(.regular)
             } else {
@@ -390,7 +683,7 @@ struct NoteEditorScreen: View {
     }
 
     private func applyMessageColor(id: String?) {
-        draft.message.transformAttributes(in: &draft.messageSelection) { container in
+        transformActiveBody { container in
             if let id, let swatch = PaletteRepository.shared.swatch(id: id) {
                 container.foregroundColor = swatch.color()
             } else {
@@ -403,7 +696,7 @@ struct NoteEditorScreen: View {
     /// Keeps the user's currently chosen font family — falls back to the
     /// design-system default Inter when none is selected.
     private func applyMessageSize(_ size: CGFloat) {
-        draft.message.transformAttributes(in: &draft.messageSelection) { container in
+        transformActiveBody { container in
             if let fontId = draft.messageFontId,
                let def = FontRepository.shared.font(id: fontId) {
                 container.font = def.font(size: size).weight(.regular)
@@ -425,12 +718,24 @@ struct NoteEditorScreen: View {
         let trimmedTitle = draft.title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedTitle.isEmpty else { return }
 
-        // Trim leading/trailing whitespace from the message while preserving
-        // per-run attributes on the kept characters.
-        let trimmedMessage = draft.message.trimmingTrailingAndLeadingWhitespace()
-        let messageArg: AttributedString? = trimmedMessage.characters.isEmpty ? nil : trimmedMessage
+        // Phase E.5.18 — serialize the draft's block list straight into
+        // `.text(title:body:)`. Each paragraph block gets its leading/
+        // trailing whitespace trimmed (preserving per-run attrs on the
+        // kept characters); empty paragraph blocks are dropped from the
+        // saved body so a note doesn't carry phantom blank rows. Media
+        // blocks pass through untouched.
+        let savedBlocks: [TextBlock] = draft.body.compactMap { block in
+            switch block.kind {
+            case .paragraph(let text):
+                let trimmed = text.trimmingTrailingAndLeadingWhitespace()
+                if trimmed.characters.isEmpty { return nil }
+                return TextBlock(id: block.id, kind: .paragraph(trimmed))
+            case .media:
+                return block
+            }
+        }
 
-        let content: MockNote.Content = .text(title: trimmedTitle, message: messageArg)
+        let content: MockNote.Content = .text(title: trimmedTitle, body: savedBlocks)
         let note = MockNote(
             time: currentTimeString,
             type: draft.selectedType,
