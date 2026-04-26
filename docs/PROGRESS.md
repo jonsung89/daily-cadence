@@ -1,6 +1,6 @@
 # DailyCadence — Progress
 
-**Last updated:** 2026-04-26 (Phase E.5.27 — Cards-mode reorder rewritten in pure SwiftUI with `.draggable` + `.dropDestination` over a custom `Layout`; the entire UIKit collection-view bridge from E.5.25–E.5.26 deleted)
+**Last updated:** 2026-04-26 (Phase D.2.2 + crop tool refinements — interactive crop for backgrounds unified with media notes, downscale-on-import, plus pinch + pan + corner-handle inset on the shared crop tool)
 **Current phase:** Phase 1 MVP — iOS app for Jon + wife, TestFlight distribution
 
 This is the living state of the project. Update at the end of every session.
@@ -137,9 +137,7 @@ PhotosPicker integration plus an opacity slider. Notes can now carry a photo bac
 
 **End-to-end flow works:** Today tab → tap **+** → tap Background → tap "Choose a photo" → pick from your library → opacity slider appears → drag to taste → Done → editor preview tints with the photo at chosen opacity → Save → note appears in timeline with the photo behind the text.
 
-**Deferred to D.2.2:**
-- Interactive pan/zoom crop UI (currently auto scale-to-fill the card)
-- Image downscaling on import (currently stores full-res library asset; fine for MVP, will matter when notes are persisted)
+**Deferred to D.2.2:** ✅ landed — see the Phase D.2.2 entry below.
 
 ### Phase E.1 — Per-field font + color customization (added this round)
 
@@ -1274,6 +1272,95 @@ In real use the E.5.25 / E.5.26 collection-view path had visible layout breakage
 - Code-level grep confirms no dangling references to deleted symbols (`DragSessionStore`, `CardsBoardCollectionView`, `CardReorderRecognizer`, `CardFramePreferenceKey`, `IntrinsicHeightCollectionView`, `CardHeightCache`).
 - Xcode build verification pending — Jon to run on his machine since the CLI environment lacks an active Xcode developer directory.
 
+### Phase D.2.2 — Interactive crop for image backgrounds + downscale on import (added this round)
+
+Closes the Phase D.2.1 deferral. Backgrounds now route through the same crop UI media notes already use, and picked photos are downscaled before being stored.
+
+**Unification, not duplication.** Instead of writing a second crop tool (the originally-proposed pan/zoom transform stored as `(offset, scale)` metadata applied at render time), we reuse the existing `Features/MediaCrop/PhotoCropView` directly. Backgrounds become **pre-cropped bytes** — same storage shape as media notes — so:
+
+- `MockNote.ImageBackground` shape stays `(imageData: Data, opacity: Double)` — no new `Crop` struct.
+- `NoteBackgroundStyle.image(data:opacity:)` unchanged.
+- `KeepCard` / `NoteCard` render unchanged — still `.scaledToFill().clipped()` against the (now user-cropped) bytes.
+- One crop UI file is the single source of truth for cropping in the whole app. Future tweaks (haptics, snap-to-thirds, undo) land in one place.
+
+**Background photo flow:**
+
+1. User taps `🖼` in the editor toolbar → `BackgroundPickerView` opens.
+2. User picks a photo from their library.
+3. `BackgroundPickerView.loadPhoto` calls `MediaImporter.downscale(_:maxDimension: 1024)` — re-encodes as JPEG q=0.85 with the longest edge clamped to 1024pt. A 4032×3024 HEIC (~3 MB) becomes a ~150–250 KB 1024×768 JPEG. Plenty for cards (which never render larger than ~400pt × 480pt onscreen) and keeps future Supabase Storage costs bounded.
+4. The downscaled bytes seed both `selection` and a fresh `PhotoCropState` — the crop sheet auto-launches (Apple Notes / Notion pattern, lands the user straight in the framing decision).
+5. User crops with the existing chip set (Free / 1:1 / 4:3 / 3:4 / 16:9 / 9:16) and corner-resize + center-drag UX. **Done** writes `result.data` back to `selection`. **Cancel** keeps the uncropped picked photo as-is.
+6. Subsequent edits via the new **Edit crop** button re-open the same sheet against the current bytes for refinement.
+
+**Files:**
+- `Services/MediaImporter.swift` — added `static func downscale(_ data: Data, maxDimension: CGFloat) -> Data?` (decode → redraw at clamped size → JPEG q=0.85). Used only by backgrounds; media-note photos preserve full quality so the fullscreen `MediaViewerScreen` can show the original.
+- `Features/NoteEditor/BackgroundPickerView.swift` — `@State private var cropState: PhotoCropState?`, `cropSheet` body, `confirmCrop()` / `openCropForCurrent()`, "Edit crop" button between Replace and Remove, downscale + auto-launch in `loadPhoto`.
+- `DailyCadenceTests/Services/MediaImporterTests.swift` (new, 5 tests) — landscape & portrait clamp to 1024 long edge, already-small images aren't upscaled, output is JPEG (magic bytes), invalid bytes return nil.
+
+**Decisions called out + outcome:**
+- **Destructive crop, no "revert to original."** If the user wants the source photo back, they re-pick from the library. Matches Apple Notes / Notion. No state to track for an "undo crop" affordance.
+- ~~**No pinch-to-zoom this phase.**~~ Reversed mid-round — see "Crop tool: pinch + pan + handle inset" below.
+- **Auto-launch crop on first pick.** Tighter than "pick → see uncropped → tap Crop." Cancel keeps the uncropped photo, so it's a recoverable default.
+- **Downscale only for backgrounds.** Media notes keep full bytes; backgrounds are clamped at 1024px max. Avoids regressing the fullscreen photo viewer.
+
+**Behavior preserved**
+- Existing notes' image backgrounds (already in memory before this change) keep working — same model shape, same render path. Their bytes are whatever they were; no migration needed.
+
+**Verification**
+- `MediaImporterTests` + existing `MockNoteBackgroundTests` cover the model + helper invariants.
+- UI flows verified via SwiftUI Previews; manual interaction verification pending Xcode build on Jon's machine.
+
+### Crop tool: pinch + pan + handle inset (added this round)
+
+Two refinements to `PhotoCropView` that benefit both media notes and the new background flow (since both share the same crop UI per Phase D.2.2):
+
+**Pinch-to-zoom + image pan.** The crop tool now matches Apple Photos' interaction model.
+- `PhotoCropState` gains `imageScale: CGFloat = 1.0` (range 1×–5×) and `imageOffset: CGSize = .zero`, plus a `displayedImageRect` computed property and a `clampedOffset(_:for:)` helper.
+- `Image` gets `.scaleEffect(imageScale, anchor: .center).offset(imageOffset)`.
+- New `MagnifyGesture` on the canvas updates `imageScale` (re-clamps offset on every change so pinching out doesn't expose canvas chrome).
+- The single-finger drag inside the crop-rect interior, which previously moved the rect, now **pans the image** under it. The rect is fixed; the image moves. This is the Apple Photos pattern and removes the gesture-overload concern that delayed pinch in earlier phases.
+- `commitCrop` maps the canvas-space crop rect through `displayedImageRect` (which folds in pinch + pan) instead of `imageRect`. At zoom 1× / offset 0 this collapses to the original mapping, so existing workflows are unchanged.
+- Aspect chip selection resets `imageScale` and `imageOffset` to defaults (matches Apple Photos: changing aspect is a clean state).
+- `clampPosition` (only used by the removed center-drag-of-rect) deleted.
+
+**Corner handle inset.** Visible L-glyph offset 9pt inward from the corner so it stays inside the crop rect, regardless of where the rect lands. Bug: when the rect equaled the image rect at a canvas edge (typical for portrait photos in a wider canvas), the corner-centered handles half-rendered above the canvas top and got eaten by `.clipped()`. Hit zone (36pt) stays centered for a generous touch target — only the 18pt visible glyph moved.
+
+**Crash fix: 48 MP ProRAW jetsam.** A user-reported crash on a specific image surfaced through the new logs:
+
+```
+types=com.adobe.raw-image
+loaded 61897601 bytes (59.0 MB)
+imagePayload decoded: 6048×8064 (48.8 MP) orientation=3
+PhotoCropState.init decoded: 6048×8064 (48.8 MP) orientation=3
+normalizedUp redraw: 6048×8064 (48.8 MP) orientation=3
+                                                             ← OS terminated for memory pressure
+```
+
+A ProRAW capture from an iPhone 14 Pro: 59 MB on disk, ~187 MB fully decoded as RGBA. The pipeline held *two* full decodes in parallel (`MediaPayload.data`-derived UIImage + `PhotoCropState.original`) and then `normalizedUp()` tried to allocate a third same-size bitmap for EXIF rotation. ~560 MB live → jetsam.
+
+**Fix: switch the downscale path to ImageIO's thumbnail API.** `CGImageSourceCreateThumbnailAtIndex` decodes the source *directly to the target size* without ever holding the full-resolution decode in memory. Peak memory drops from ~187 MB to a few MB. Also bakes in EXIF orientation (`...WithTransform`), so the returned JPEG is already `.up`-oriented and `normalizedUp()` short-circuits.
+
+- `MediaImporter.downscale(_:maxDimension:)` rewritten on top of `CGImageSourceCreateThumbnailAtIndex`. Same signature, same JPEG q=0.85 output, but memory-bounded.
+- `MediaImporter.imagePayload` now calls `downscale(_, maxDimension: mediaNoteMaxDimension /* 2048 */)` *before* any full UIImage decode. Stored `MediaPayload.data` is the downscaled JPEG, so `PhotoCropState` and downstream cells never see the 48 MP source.
+- 2048px cap is generous for fullscreen viewing on iPhone 15 Pro Max (1290×2796) but ~10× smaller than a 48 MP ProRAW. RAW notes lose RAW-quality, but media notes are journal snapshots, not master files.
+- Backgrounds keep their existing 1024px cap (defined in `BackgroundPickerView`); they benefit from the more memory-efficient `downscale` implementation too.
+
+**Crash logging instrumentation (kept).** `OSLog` calls across `MediaImporter` (byte counts, decoded dimensions, orientation) and `PhotoCropView` (PhotoCropState init, normalizedUp redraw entry/exit). The `autoreleasepool` wrap on `normalizedUp` stays as a defensive safety net for any remaining edge case where a smaller image still needs orientation rebake. Sequence-aware logging proved its worth on the first repro.
+
+### Cards-board reorder: suppress the system "+" copy badge (added this round)
+
+User noticed the green `+` badge on the drag preview during reorder — iOS's system "drop accepts copy" indicator. Misleading for a reorder (which is a move, not an add); Apple's own Notes / Reminders show a "move" cursor (no badge) instead.
+
+**Why the rewrite couldn't avoid it.** The modern `.dropDestination(for:action:)` modifier doesn't expose drop *operation* type, so it always defaults to `.copy` and surfaces the `+` badge. The only SwiftUI path that lets you specify `.move` is the legacy `.onDrop(of:delegate:)` + a `DropDelegate` whose `dropUpdated` returns `DropProposal(operation: .move)`. That's what the Phase E.4.6 codepath did before the Phase E.5.27 rewrite.
+
+**Fix.** Switch the *drop side* (only) from `.dropDestination(for: NoteDragPayload.self)` to `.onDrop(of: [.data], delegate: CardsReorderDropDelegate(targetID:notes:))`. Drag side keeps `.draggable(NoteDragPayload(id:))` — same `Transferable` payload, just decoded manually in `performDrop` via `NSItemProvider.loadDataRepresentation`. The delegate runs the same `CardsViewOrderStore.move(_:onto:in:)` call inside the same animation block.
+
+This stays much smaller than the original Phase E.4.6 implementation: no separate file, no frame-collection preference key, no async-load race conditions (the drop already implies the drag completed, so the loadDataRepresentation callback is synchronous in practice). ~30 lines added in `CardsBoardView.swift`.
+
+**Files:**
+- `Features/MediaCrop/PhotoCropView.swift` — pinch + pan, handle inset, OSLog, autoreleasepool. Net ~+50 / −30 lines.
+- `Services/MediaImporter.swift` — OSLog instrumentation in import path.
+
 ### Tests (79/79 passing — +3 this round)
 - `ColorHexTests` (16) — hex initializer, every palette family in light + dark, invariant tokens, role flips
 - `FontLoaderTests` (5) — bundled font registration + variable-axis weight
@@ -1302,7 +1389,7 @@ In real use the E.5.25 / E.5.26 collection-view path had visible layout breakage
 
 ## 🚧 In flight
 
-Nothing active — Phase E.5.18a (inline-media editor polish) landed. Open follow-ups: per-block focused TextEditors (mid-paragraph image insertion — currently the model supports it but UI ships intro/attachments/outro three-zone layout), drag-to-reorder blocks, pinch-to-zoom in the crop tool, inline text formatting (bold/italic/underline/strikethrough), auto-bullet + checkboxes in text notes, auto-scroll the cards grid when dragging near a viewport edge, optional Pinned section on Timeline view, discoverability hint for the long-press → context menu, **persistence work (Supabase schema + auth + Apple Developer enrollment)**.
+Nothing active — Phase E.5.18a (inline-media editor polish) landed. Open follow-ups: per-block focused TextEditors (mid-paragraph image insertion — currently the model supports it but UI ships intro/attachments/outro three-zone layout), drag-to-reorder blocks, inline text formatting (bold/italic/underline/strikethrough), auto-bullet + checkboxes in text notes, auto-scroll the cards grid when dragging near a viewport edge, optional Pinned section on Timeline view, discoverability hint for the long-press → context menu, **persistence work (Supabase schema + auth + Apple Developer enrollment)**.
 
 ---
 
@@ -1311,7 +1398,7 @@ Nothing active — Phase E.5.18a (inline-media editor polish) landed. Open follo
 **Customization phases** (from the earlier design discussion):
 
 - **Phase B.2 polish (optional)** — extend overrides to `NoteType.softColor` so KeepCard fill tints + TypeChip icon circles match the user's chosen color, not just dots/borders/icons. ~½ round if/when the visual mismatch becomes annoying.
-- **Phase D.2.2 — Interactive crop UX for image backgrounds.** Pan/zoom inside a fixed-aspect frame; store offset+scale on `ImageBackground`; cards apply the same transform on render. Plus image downscaling on import (1024px max) so memory doesn't balloon when many notes are persisted. *1–2 rounds.*
+- ~~**Phase D.2.2 — Interactive crop UX for image backgrounds.**~~ Shipped — see Phase D.2.2 entry above. (Approach changed: unified with the existing `PhotoCropView` so backgrounds are pre-cropped bytes, not transform metadata.)
 - **Phase E.2 polish (optional)** — custom `AttributedStringKey` (`fontId` / `colorId`) so the message's per-run app metadata round-trips through the document and the toolbar's chip highlight reflects whatever run the cursor is in (not just the most recent tap). Currently the chip highlight is mirrored from `@State` and goes stale when the user moves the cursor.
 - **Phase F — Remote config pipeline.** Host `palettes.json` / `primary-palettes.json` / `fonts.json` on Supabase Storage, client fetches + caches + falls back to bundle. Enables admin panel editing without App Store release. *1 round.*
 

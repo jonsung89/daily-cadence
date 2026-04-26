@@ -1,5 +1,8 @@
 import SwiftUI
 import UIKit
+import OSLog
+
+private let cropLog = Logger(subsystem: "com.jonsung.DailyCadence", category: "PhotoCrop")
 
 /// Aspect ratio choices for the crop tool. `Free` means the user can
 /// shape the crop rectangle however they like by dragging corners.
@@ -37,54 +40,108 @@ enum PhotoCropAspect: String, CaseIterable, Identifiable {
     }
 }
 
-/// Photos.app-style crop UX (Phase E.4.2 rewrite).
+/// Photos.app-style crop UX.
 ///
-/// **Model.** The image is fixed at scale-to-fit inside the canvas. A
-/// **crop rectangle** floats on top, defined in canvas coordinates.
-/// Corner handles resize it; the central area drags it. Areas outside
-/// the crop rect are dimmed via an eo-fill `Canvas` mask. Aspect chips
-/// constrain the crop's shape.
+/// **Model.** The image lays out at scale-to-fit inside the canvas
+/// (`imageRect`) and can additionally be **scaled** (pinch) and
+/// **panned** (drag inside the rect interior) — those modify
+/// `imageScale` and `imageOffset`. The displayed image at any time is
+/// `displayedImageRect`, which is `imageRect` with the transform
+/// applied. A **crop rectangle** floats on top in canvas coordinates;
+/// corner handles resize it. Areas outside the crop are dimmed via an
+/// eo-fill `Canvas` mask. Aspect chips constrain the crop's shape.
 ///
-/// **What's deferred.** Pinch-to-zoom on the image itself is a future
-/// polish — combined with the crop rectangle it requires a coordinated
-/// gesture system (handle drags must take priority over pan, pinch must
-/// take priority over both, and the crop rect needs to track the
-/// transformed image rect). The current corner-drag + center-drag UX
-/// covers the core "crop to a chosen region" flow; pinch zoom can come
-/// in a follow-up if users want to crop smaller than scale-to-fit.
+/// **Gesture map.**
+/// - Drag a corner handle → resize the crop rect (aspect-locked when a
+///   ratio chip is active).
+/// - Drag inside the crop rect → pan the image under the rect (Apple
+///   Photos pattern — the rect doesn't move, the image does).
+/// - Pinch → zoom the image (1×–5×). At 1× the offset clamps back to
+///   center; at higher scales the offset is clamped so the displayed
+///   image always covers the base `imageRect`.
+/// - Aspect chip → resets zoom + pan and re-fits the crop to the
+///   chosen ratio.
 @Observable
 final class PhotoCropState {
     let original: UIImage
 
     var aspect: PhotoCropAspect = .free {
         didSet {
-            // When the aspect chip changes, snap the crop rect to the new
-            // shape — center-fit it inside the visible image rect.
+            // When the aspect chip changes, reset the image transform and
+            // re-center the crop rect inside the base image rect. Mixing
+            // aspect changes with stale zoom/pan state reads as a bug;
+            // resetting matches Apple Photos' behavior.
+            imageScale = 1.0
+            imageOffset = .zero
             cropRect = aspectFittedCropRect(in: imageRect)
         }
     }
 
-    /// Where the source image is laid out inside the canvas (canvas
-    /// coordinates). Set by the view via `setImageRect(_:)` once it
-    /// has a size from `GeometryReader`.
+    /// Where the source image lays out inside the canvas at scale-to-fit
+    /// (canvas coordinates). The "base" rect — `displayedImageRect`
+    /// applies the user's pinch/pan on top.
     private(set) var imageRect: CGRect = .zero
 
     /// The crop rectangle in canvas coordinates — what the dimmed
     /// overlay punches a hole through.
     var cropRect: CGRect = .zero
 
+    /// Image zoom factor. 1.0 = scale-to-fit. Range 1.0...5.0 (1× floor
+    /// keeps the source visible inside the crop area; 5× cap is enough
+    /// for any realistic crop-into-detail need without making the image
+    /// effectively unmovable).
+    var imageScale: CGFloat = 1.0
+
+    /// Image pan offset, in canvas points, applied on top of the
+    /// scale-to-fit position. Clamped on every update so the displayed
+    /// image always covers `imageRect`.
+    var imageOffset: CGSize = .zero
+
+    /// `imageRect` with the user's pinch + pan applied — the rect the
+    /// image actually occupies onscreen. `commitCrop` maps `cropRect`
+    /// back to source pixels through this rect.
+    var displayedImageRect: CGRect {
+        let w = imageRect.width * imageScale
+        let h = imageRect.height * imageScale
+        let cx = imageRect.midX + imageOffset.width
+        let cy = imageRect.midY + imageOffset.height
+        return CGRect(x: cx - w / 2, y: cy - h / 2, width: w, height: h)
+    }
+
+    /// Clamps a proposed `(scale, offset)` so the displayed image always
+    /// covers the base `imageRect` (no exposed canvas chrome behind a
+    /// panned-too-far image). Returns the clamped offset.
+    func clampedOffset(_ proposed: CGSize, for scale: CGFloat) -> CGSize {
+        let maxX = imageRect.width  * (scale - 1) / 2
+        let maxY = imageRect.height * (scale - 1) / 2
+        return CGSize(
+            width:  max(-maxX, min(proposed.width,  maxX)),
+            height: max(-maxY, min(proposed.height, maxY))
+        )
+    }
+
     init?(data: Data) {
-        guard let raw = UIImage(data: data) else { return nil }
+        cropLog.debug("PhotoCropState.init: \(data.count) bytes")
+        guard let raw = UIImage(data: data) else {
+            cropLog.error("PhotoCropState.init: UIImage(data:) returned nil for \(data.count) bytes")
+            return nil
+        }
+        let mp = (raw.size.width * raw.size.height) / 1_000_000
+        cropLog.info("PhotoCropState.init decoded: \(Int(raw.size.width))×\(Int(raw.size.height)) (\(String(format: "%.1f", mp)) MP) orientation=\(raw.imageOrientation.rawValue)")
         self.original = raw.normalizedUp()
     }
 
     /// Called by `PhotoCropView` after measuring the canvas. Recomputes
     /// the visible image rect at scale-to-fit and re-fits the crop rect
-    /// inside it.
+    /// inside it. A canvas resize also resets the image transform — the
+    /// previous zoom/pan was relative to the old rect and would be
+    /// disorienting if carried into the new layout.
     func setImageRect(_ rect: CGRect) {
         let didChange = rect != imageRect
         imageRect = rect
         if cropRect == .zero || didChange {
+            imageScale = 1.0
+            imageOffset = .zero
             cropRect = aspectFittedCropRect(in: rect)
         }
     }
@@ -122,11 +179,15 @@ final class PhotoCropState {
         let imageW = CGFloat(cg.width)
         let imageH = CGFloat(cg.height)
 
-        // Map crop rect (canvas coords) → source image pixel coords.
-        let scaleX = imageW / imageRect.width
-        let scaleY = imageH / imageRect.height
-        var x = (cropRect.minX - imageRect.minX) * scaleX
-        var y = (cropRect.minY - imageRect.minY) * scaleY
+        // Map crop rect (canvas coords) → source image pixel coords
+        // through `displayedImageRect`, which folds in the user's pinch
+        // + pan transform. At zoom = 1, offset = 0 this collapses to the
+        // original (cropRect / imageRect) mapping.
+        let displayed = displayedImageRect
+        let scaleX = imageW / displayed.width
+        let scaleY = imageH / displayed.height
+        var x = (cropRect.minX - displayed.minX) * scaleX
+        var y = (cropRect.minY - displayed.minY) * scaleY
         var w = cropRect.width * scaleX
         var h = cropRect.height * scaleY
 
@@ -150,11 +211,22 @@ final class PhotoCropState {
 struct PhotoCropView: View {
     @Bindable var state: PhotoCropState
 
-    /// Crop rect at the moment a drag began. We snapshot this so the
+    /// Crop rect at the moment a corner drag began. Snapshotted so the
     /// in-flight `DragGesture.translation` always applies to a stable
     /// starting rect rather than the live `cropRect` (which would
     /// compound the same translation every frame).
     @State private var dragStartRect: CGRect = .zero
+
+    /// Image-pan offset at the moment a pan drag began. Same compounding
+    /// concern as `dragStartRect` — we want translation applied against
+    /// a stable origin.
+    @State private var panStartOffset: CGSize? = nil
+
+    /// Image scale at the moment a pinch began. `MagnifyGesture.value`
+    /// reports the *cumulative* magnification for the gesture, so we
+    /// multiply against this snapshot rather than against the live
+    /// `imageScale`.
+    @State private var pinchStartScale: CGFloat? = nil
 
     /// Minimum crop dimension in canvas coords. Below this the crop can
     /// be hard to grab and the resulting image is too small to be useful.
@@ -163,6 +235,12 @@ struct PhotoCropView: View {
     /// Hit area for each corner handle. The visible square is smaller —
     /// this is just the touch target.
     private let handleHitSize: CGFloat = 36
+
+    /// Zoom range. 1× floor keeps the source visible inside the rect;
+    /// 5× ceiling is enough for crop-into-detail without making the
+    /// image effectively unmovable at extreme magnification.
+    private let minImageScale: CGFloat = 1.0
+    private let maxImageScale: CGFloat = 5.0
 
     var body: some View {
         VStack(spacing: 12) {
@@ -182,21 +260,29 @@ struct PhotoCropView: View {
             ZStack {
                 Color.black.opacity(0.04)
 
-                // Image scaled-to-fit at the computed rect.
+                // Image scaled-to-fit at the computed rect, then
+                // pinch-zoomed (`scaleEffect`) and panned (`offset`)
+                // around its center. `commitCrop` reads the same
+                // transform off `state.displayedImageRect`.
                 Image(uiImage: state.original)
                     .resizable()
                     .scaledToFit()
                     .frame(width: imageRect.width, height: imageRect.height)
+                    .scaleEffect(state.imageScale, anchor: .center)
+                    .offset(state.imageOffset)
                     .position(x: imageRect.midX, y: imageRect.midY)
 
                 // Dim outside the crop rect using even-odd fill.
                 dimOverlay(canvas: geo.size)
 
-                // Crop rect outline + handles + center drag.
+                // Crop rect outline + handles + image-pan area.
                 cropFrame(imageRect: imageRect)
             }
             .frame(width: geo.size.width, height: geo.size.height)
             .clipped()
+            // Pinch is two-finger; coexists naturally with the
+            // single-finger drags on handles and the rect interior.
+            .gesture(magnifyGesture())
             .onAppear { state.setImageRect(imageRect) }
             .onChange(of: imageRect) { _, new in state.setImageRect(new) }
         }
@@ -227,7 +313,7 @@ struct PhotoCropView: View {
         .allowsHitTesting(false)
     }
 
-    // MARK: - Crop frame (border + handles + center drag)
+    // MARK: - Crop frame (border + handles + image-pan area)
 
     private func cropFrame(imageRect: CGRect) -> some View {
         let r = state.cropRect
@@ -246,8 +332,11 @@ struct PhotoCropView: View {
                 .position(x: r.midX, y: r.midY)
                 .allowsHitTesting(false)
 
-            // Center drag area — invisible rectangle inside the crop rect,
-            // shrunk so it doesn't overlap the corner hit zones.
+            // Image-pan area — invisible rectangle inside the crop rect,
+            // shrunk so it doesn't overlap the corner hit zones. Single-
+            // finger drag inside this area pans the *image* under the
+            // rect (Apple Photos pattern — the rect is fixed, the image
+            // moves).
             let centerInset = handleHitSize / 2
             let centerW = max(0, r.width - centerInset * 2)
             let centerH = max(0, r.height - centerInset * 2)
@@ -257,7 +346,7 @@ struct PhotoCropView: View {
                     .frame(width: centerW, height: centerH)
                     .position(x: r.midX, y: r.midY)
                     .contentShape(Rectangle())
-                    .gesture(centerDragGesture(imageRect: imageRect))
+                    .gesture(imagePanGesture())
             }
 
             // Four corner handles.
@@ -269,13 +358,30 @@ struct PhotoCropView: View {
     }
 
     private func cornerHandle(at corner: Corner, position: CGPoint, imageRect: CGRect) -> some View {
-        ZStack {
-            // Larger transparent hit area
+        // Offset the visible glyph 9pt inward so its OUTER corner lands
+        // on the crop-rect corner with the arms pointing into the rect.
+        // Without this, the glyph centers on the corner — half the L
+        // renders outside the rect, and when the crop equals the image
+        // bounds at a canvas edge the outer half gets clipped by the
+        // canvas's `.clipped()`. Hit zone stays centered for a generous
+        // touch target.
+        let glyphInset: CGFloat = 9
+        let glyphOffset: CGSize = {
+            switch corner {
+            case .topLeft:     return CGSize(width:  glyphInset, height:  glyphInset)
+            case .topRight:    return CGSize(width: -glyphInset, height:  glyphInset)
+            case .bottomLeft:  return CGSize(width:  glyphInset, height: -glyphInset)
+            case .bottomRight: return CGSize(width: -glyphInset, height: -glyphInset)
+            }
+        }()
+        return ZStack {
+            // Larger transparent hit area, centered on the corner.
             Color.clear.frame(width: handleHitSize, height: handleHitSize)
-            // Visible glyph: an L-shape that hugs the corner
+            // Visible glyph: an L-shape that hugs the corner from inside.
             CornerGlyph(corner: corner)
                 .stroke(Color.white, style: StrokeStyle(lineWidth: 3, lineCap: .square))
                 .frame(width: 18, height: 18)
+                .offset(glyphOffset)
         }
         .contentShape(Rectangle())
         .position(position)
@@ -298,16 +404,38 @@ struct PhotoCropView: View {
             .onEnded { _ in dragStartRect = .zero }
     }
 
-    private func centerDragGesture(imageRect: CGRect) -> some Gesture {
+    /// Single-finger drag inside the crop rect interior. Pans the
+    /// *image* (not the rect) — Apple Photos pattern. Translation is
+    /// clamped so the displayed image always covers the base
+    /// `imageRect`.
+    private func imagePanGesture() -> some Gesture {
         DragGesture(minimumDistance: 0)
             .onChanged { drag in
-                if dragStartRect == .zero { dragStartRect = state.cropRect }
-                var rect = dragStartRect
-                rect.origin.x += drag.translation.width
-                rect.origin.y += drag.translation.height
-                state.cropRect = clampPosition(rect, in: imageRect)
+                if panStartOffset == nil { panStartOffset = state.imageOffset }
+                let proposed = CGSize(
+                    width:  panStartOffset!.width  + drag.translation.width,
+                    height: panStartOffset!.height + drag.translation.height
+                )
+                state.imageOffset = state.clampedOffset(proposed, for: state.imageScale)
             }
-            .onEnded { _ in dragStartRect = .zero }
+            .onEnded { _ in panStartOffset = nil }
+    }
+
+    /// Two-finger pinch on the canvas. Zooms the image in place around
+    /// its center; clamped to `[minImageScale, maxImageScale]`. The
+    /// existing offset is re-clamped against the new scale so a pinch-
+    /// out from a panned position doesn't expose canvas chrome.
+    private func magnifyGesture() -> some Gesture {
+        MagnifyGesture()
+            .onChanged { value in
+                let base = pinchStartScale ?? state.imageScale
+                if pinchStartScale == nil { pinchStartScale = base }
+                let proposed = base * value.magnification
+                let clamped = max(minImageScale, min(maxImageScale, proposed))
+                state.imageScale = clamped
+                state.imageOffset = state.clampedOffset(state.imageOffset, for: clamped)
+            }
+            .onEnded { _ in pinchStartScale = nil }
     }
 
     // MARK: - Resize math
@@ -400,13 +528,6 @@ struct PhotoCropView: View {
         rect.size.width = min(rect.size.width, container.width)
         rect.size.height = min(rect.size.height, container.height)
         // Then clamp origin so the rect stays inside container.
-        rect.origin.x = max(container.minX, min(rect.origin.x, container.maxX - rect.size.width))
-        rect.origin.y = max(container.minY, min(rect.origin.y, container.maxY - rect.size.height))
-        return rect
-    }
-
-    private func clampPosition(_ proposed: CGRect, in container: CGRect) -> CGRect {
-        var rect = proposed
         rect.origin.x = max(container.minX, min(rect.origin.x, container.maxX - rect.size.width))
         rect.origin.y = max(container.minY, min(rect.origin.y, container.maxY - rect.size.height))
         return rect
@@ -518,11 +639,27 @@ private extension UIImage {
     /// cropping uses the visible coordinate space (not the rotated raw
     /// pixel space). Without this step, a portrait photo from the camera
     /// — which `imageOrientation == .right` — crops sideways.
+    ///
+    /// The redraw is wrapped in an `autoreleasepool` so the intermediate
+    /// `UIGraphicsImageRenderer` buffers are released synchronously
+    /// rather than at the next runloop tick — without this, a 48 MP
+    /// iPhone Pro photo (8064×6048) holds two ~187 MB bitmaps live at
+    /// once and the OS jetsams the app for memory pressure on smaller
+    /// devices.
     func normalizedUp() -> UIImage {
-        guard imageOrientation != .up else { return self }
-        let renderer = UIGraphicsImageRenderer(size: size)
-        return renderer.image { _ in
-            draw(in: CGRect(origin: .zero, size: size))
+        guard imageOrientation != .up else {
+            cropLog.debug("normalizedUp: already .up — \(Int(self.size.width))×\(Int(self.size.height)), skipping redraw")
+            return self
+        }
+        let mp = (size.width * size.height) / 1_000_000
+        cropLog.info("normalizedUp redraw: \(Int(self.size.width))×\(Int(self.size.height)) (\(String(format: "%.1f", mp)) MP) orientation=\(self.imageOrientation.rawValue)")
+        return autoreleasepool {
+            let renderer = UIGraphicsImageRenderer(size: size)
+            let result = renderer.image { _ in
+                draw(in: CGRect(origin: .zero, size: size))
+            }
+            cropLog.debug("normalizedUp: redraw complete")
+            return result
         }
     }
 }

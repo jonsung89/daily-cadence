@@ -117,7 +117,8 @@ Three sub-layouts, picked from a **top-right toolbar Menu** that only appears wh
 - Each card uses its **intrinsic** height — short cards don't inflate to fill column space.
 - Card max height capped at 480pt.
 - **Drag-to-reorder:** long-press any card → drag → drop on a target card.
-  - Reorder is built on SwiftUI's `.draggable` + `.dropDestination`, which route through iOS's system drag-and-drop (`UIDragInteraction`). The system owns long-press initiation, haptic, lift animation, the floating drag preview, and cancel-on-empty-space.
+  - **Drag side:** SwiftUI's `.draggable(NoteDragPayload(id:))` — routes through iOS's system drag (`UIDragInteraction`). The system owns long-press initiation, haptic, lift animation, the floating drag preview, and cancel-on-empty-space.
+  - **Drop side:** `.onDrop(of: [.data], delegate: CardsReorderDropDelegate(...))`. The legacy delegate API is used (instead of `.dropDestination`) specifically so `dropUpdated` can return `DropProposal(operation: .move)` — that's the only way in SwiftUI to suppress the system's default green `+` "copy" badge on the drag preview. Reorder is a move, not an add.
   - Drop on a card: the dragged card lands at that card's slot — target (and anything between) shifts toward where the dragged card came from. Symmetric in both directions: backward drag (later → earlier) places source before target; forward drag (earlier → later) places source after target. Surrounding cards reflow to the new packed positions in a single animated layout pass.
   - Drop on empty space: drag is cancelled, no order change.
   - Because `.draggable` participates in UIKit's gesture arbitration (not SwiftUI's), the parent `ScrollView`'s pan recognizer continues to work from any touch start, including over a card.
@@ -257,9 +258,10 @@ Pinned via `.safeAreaInset(edge: .bottom)`. Always visible.
 
 Sheet pushed from the toolbar's `🖼` icon.
 
-- Three sections: **None** (slash-swatch), **Photo** (PhotosPicker + opacity slider when set + Replace/Remove), **Color** (palette tabs + adaptive swatch grid).
+- Three sections: **None** (slash-swatch), **Photo** (PhotosPicker + opacity slider + Replace / Edit crop / Remove when set), **Color** (palette tabs + adaptive swatch grid).
 - Photo and Color are mutually exclusive.
 - Opacity slider: 0.1 to 1.0, sage-tinted.
+- **Photo import (Phase D.2.2)** — picking a photo downscales it to 1024px max longest edge (JPEG q=0.85) so the stored bytes stay small, then auto-launches the same `PhotoCropView` media notes use for cropping (full Free / 1:1 / 4:3 / 3:4 / 16:9 / 9:16 aspect chips). Cancel from the auto-crop keeps the uncropped picked photo. **Edit crop** re-opens the same sheet against the current bytes for refinement. The cropped bytes replace `ImageBackground.imageData`; cards still render `.scaledToFill().clipped()` against those bytes — no render-time transform.
 
 ### Background row in editor (deprecated path)
 
@@ -327,18 +329,19 @@ Sheet presented from the FAB menu's **Photo or Video** path. Single-purpose — 
 
 Photos.app-style. Built into the media editor.
 
-- **Image** is fixed at scale-to-fit inside the canvas. No pinch-to-zoom yet (deferred — see "out of scope").
+- **Image** lays out at scale-to-fit inside the canvas (`imageRect`), then receives the user's pinch + pan transform → `displayedImageRect`.
 - **Crop rectangle** floats in canvas coordinates. Initially fills the visible image.
-- **Four corner handles** — white L-shapes, 18×18 visual / 36×36 hit target. Drag to resize.
+- **Four corner handles** — white L-shapes, 18×18 visual / 36×36 hit target. Visible glyph is offset 9pt inward from the corner so it stays inside the rect (and inside the canvas) even when the crop equals the image bounds. Drag to resize.
   - **Free** mode: resize freely.
   - Aspect-locked modes (1:1 / 4:3 / 3:4 / 16:9 / 9:16): resize maintains the locked aspect by anchoring on the corner opposite the dragged handle.
-- **Center drag** — invisible inset rectangle inside the crop frame, shrunk so it doesn't overlap corner hit zones. Drag to translate the frame.
-- **Aspect chips row** — Free / 1:1 / 4:3 / 3:4 / 16:9 / 9:16. Selecting one snaps the rect to that ratio centered inside the visible image.
+- **Pinch (two-finger) on the canvas** — zooms the image in place around its center. Range 1×–5×. Offset re-clamps on every scale change so the displayed image always covers the base `imageRect`.
+- **Drag (single-finger) inside the crop rect** — pans the *image* under the rect (Apple Photos pattern: the rect is fixed, the image moves). Translation is clamped against the current scale so the displayed image always covers the base rect.
+- **Aspect chips row** — Free / 1:1 / 4:3 / 3:4 / 16:9 / 9:16. Selecting one resets zoom + pan and snaps the rect to that ratio centered inside the base image rect (matches Apple Photos: changing aspect is a clean state).
 - **Dimmed exterior** — eo-fill `Canvas` paints `black @ 0.55` over the canvas with a hole punched at the crop rect.
 - **Rule-of-thirds guides** — two horizontal + two vertical white lines at 1/3 / 2/3 inside the crop rect at 0.4 opacity.
 - **Minimum crop dimension** — 60pt in canvas coords.
-- **Commit** maps the canvas-space crop rect back to image pixel coordinates via `imageSize / imageRect.size` scale factor; clamps; calls `CGImage.cropping(to:)`; encodes JPEG at 0.9 quality.
-- **Orientation normalization** — `UIImage.normalizedUp()` redraws non-`.up`-oriented inputs (iPhone portrait photos arrive as `.right`) so the cropped output lands in visible coordinates rather than raw rotated pixel space.
+- **Commit** maps the canvas-space crop rect back to image pixel coordinates via `displayedImageRect` (which folds in pinch + pan); clamps; calls `CGImage.cropping(to:)`; encodes JPEG at 0.9 quality. At zoom = 1× / offset = 0 this collapses to the original `imageSize / imageRect.size` mapping.
+- **Orientation normalization** — `UIImage.normalizedUp()` redraws non-`.up`-oriented inputs (iPhone portrait photos arrive as `.right`) so the cropped output lands in visible coordinates rather than raw rotated pixel space. Wrapped in `autoreleasepool` so the intermediate render buffer drains synchronously — without it, a 48 MP iPhone Pro photo holds two ~187 MB bitmaps live during the redraw and gets jetsamed on memory-constrained devices.
 
 ---
 
@@ -503,7 +506,6 @@ These are deferred. When porting, don't rebuild them on Android either — match
 
 - Camera capture (UIImagePickerController + `NSCameraUsageDescription`).
 - Video trim / re-encode at import.
-- Pinch-to-zoom on the photo crop tool (currently corner-resize + center-drag only).
 - Inline text formatting toggles (bold / italic / underline / strikethrough).
 - Auto-bullet on `-` and Apple-Notes-style checkboxes inside text notes.
 - Inline image attachments inside text notes (recommend Apple-Notes-style flow when this lands).

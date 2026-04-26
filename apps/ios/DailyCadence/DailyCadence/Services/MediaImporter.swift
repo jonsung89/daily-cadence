@@ -1,6 +1,8 @@
 import Foundation
 import UIKit
 import AVFoundation
+import ImageIO
+import OSLog
 import PhotosUI
 import SwiftUI
 import UniformTypeIdentifiers
@@ -17,10 +19,48 @@ import UniformTypeIdentifiers
 /// changes.
 enum MediaImporter {
 
+    private static let log = Logger(subsystem: "com.jonsung.DailyCadence", category: "MediaImporter")
+
     enum ImportError: Error {
         case loadFailed
         case unsupported
     }
+
+    /// Re-encodes `data` as JPEG (q=0.85), resizing so the longest edge is
+    /// at most `maxDimension` points.
+    ///
+    /// **Memory-efficient decode.** Uses `CGImageSourceCreateThumbnailAtIndex`,
+    /// which decodes the source *directly to the target size* without ever
+    /// holding the full-resolution decode in memory. That's the difference
+    /// between handling a 48 MP iPhone Pro ProRAW (~187 MB fully decoded,
+    /// jetsam territory) and the same image as a ~3 MB 2048-edge JPEG.
+    ///
+    /// Also applies EXIF orientation (`...WithTransform`), so the returned
+    /// JPEG is already `.up`-oriented — downstream `normalizedUp()` will
+    /// short-circuit instead of allocating another redraw buffer.
+    static func downscale(_ data: Data, maxDimension: CGFloat) -> Data? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else {
+            log.error("downscale: CGImageSourceCreateWithData failed for \(data.count) bytes")
+            return nil
+        }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxDimension,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+        ]
+        guard let thumb = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
+            log.error("downscale: CGImageSourceCreateThumbnailAtIndex failed (max=\(Int(maxDimension)))")
+            return nil
+        }
+        let img = UIImage(cgImage: thumb)
+        log.debug("downscale: \(data.count) bytes → \(Int(img.size.width))×\(Int(img.size.height)) (max=\(Int(maxDimension)))")
+        return img.jpegData(compressionQuality: 0.85)
+    }
+
+    /// Maximum longest-edge for stored media-note photos. Generous enough
+    /// for the fullscreen `MediaViewerScreen` on iPhone Pro Max
+    /// (1290×2796), still ~10× smaller than a 48 MP ProRAW.
+    static let mediaNoteMaxDimension: CGFloat = 2048
 
     /// Loads the picker item's bytes, generates a poster + aspect ratio if
     /// it's a video, and returns a fully-formed `MediaPayload` ready to be
@@ -29,10 +69,13 @@ enum MediaImporter {
         // PhotosPickerItem.supportedContentTypes signals image vs video.
         // `.image` and `.movie` are the relevant UTType ids.
         let isVideo = item.supportedContentTypes.contains { $0.conforms(to: .movie) }
+        log.debug("makePayload: isVideo=\(isVideo) types=\(item.supportedContentTypes.map(\.identifier).joined(separator: ","))")
 
         guard let data = try await item.loadTransferable(type: Data.self) else {
+            log.error("loadTransferable returned nil")
             throw ImportError.loadFailed
         }
+        log.debug("loaded \(data.count) bytes (\(String(format: "%.1f", Double(data.count) / 1_048_576.0)) MB)")
 
         if isVideo {
             return try await videoPayload(from: data)
@@ -44,11 +87,25 @@ enum MediaImporter {
     // MARK: - Image
 
     private static func imagePayload(from data: Data) throws -> MediaPayload {
-        guard let img = UIImage(data: data) else { throw ImportError.unsupported }
+        // Downscale via ImageIO BEFORE any full UIImage decode — a 48 MP
+        // ProRAW would otherwise allocate ~187 MB just to compute aspect.
+        // The thumbnail API peaks at the target size (a few MB) and also
+        // bakes in EXIF orientation, so downstream consumers get an
+        // already-`.up`-oriented JPEG.
+        guard let downscaled = downscale(data, maxDimension: mediaNoteMaxDimension) else {
+            log.error("imagePayload: downscale failed for \(data.count) bytes")
+            throw ImportError.unsupported
+        }
+        guard let img = UIImage(data: downscaled) else {
+            log.error("imagePayload: post-downscale UIImage(data:) failed")
+            throw ImportError.unsupported
+        }
+        let mp = (img.size.width * img.size.height) / 1_000_000
+        log.info("imagePayload stored: \(Int(img.size.width))×\(Int(img.size.height)) (\(String(format: "%.1f", mp)) MP) \(downscaled.count) bytes")
         let aspect = img.size.height > 0 ? img.size.width / img.size.height : 1.0
         return MediaPayload(
             kind: .image,
-            data: data,
+            data: downscaled,
             posterData: nil,
             aspectRatio: aspect
         )

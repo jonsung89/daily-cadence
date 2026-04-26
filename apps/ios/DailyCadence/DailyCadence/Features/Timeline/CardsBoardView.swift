@@ -5,11 +5,12 @@ import UniformTypeIdentifiers
 
 /// Intra-app drag payload for Cards-board reorder.
 ///
-/// Wrapping the note id in a typed `Transferable` (rather than passing
-/// `String` or raw `UUID`) keeps the drag confined to our own
-/// `.dropDestination(for: NoteDragPayload.self)` targets — text-accepting
-/// apps like Notes or Mail don't advertise as drop sites because the
-/// content type is generic `.data`.
+/// `.draggable(NoteDragPayload(...))` produces an `NSItemProvider`
+/// advertising the generic `.data` content type. The drop delegate
+/// matches on `.data` and decodes the JSON-encoded payload back. Text-
+/// accepting apps like Notes / Mail don't advertise as drop sites for
+/// `.data`, so the drag stays intra-app without registering a custom
+/// UTType in Info.plist.
 struct NoteDragPayload: Codable, Transferable {
     let id: UUID
 
@@ -18,17 +19,59 @@ struct NoteDragPayload: Codable, Transferable {
     }
 }
 
+// MARK: - Drop delegate
+
+/// Reorder drop delegate. Returns `DropProposal(operation: .move)` from
+/// `dropUpdated` so the system shows iOS's "move" cursor instead of the
+/// green `+` "copy" badge — the drag is an in-place reorder, not an add.
+///
+/// The modern `.dropDestination(for:action:)` modifier doesn't expose
+/// the drop operation, so it always defaults to `.copy` and surfaces the
+/// `+` badge. Falling back to the legacy `.onDrop(of:delegate:)` API is
+/// the only way to specify `.move` in SwiftUI. Same approach Apple uses
+/// in their own reorder flows.
+struct CardsReorderDropDelegate: DropDelegate {
+    let targetID: UUID
+    let notes: [MockNote]
+
+    func validateDrop(info: DropInfo) -> Bool {
+        info.hasItemsConforming(to: [.data])
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        DropProposal(operation: .move)
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        guard let provider = info.itemProviders(for: [.data]).first else {
+            return false
+        }
+        let target = targetID
+        let snapshot = notes
+        provider.loadDataRepresentation(forTypeIdentifier: UTType.data.identifier) { data, _ in
+            guard let data,
+                  let payload = try? JSONDecoder().decode(NoteDragPayload.self, from: data),
+                  payload.id != target else { return }
+            Task { @MainActor in
+                withAnimation(.easeInOut(duration: 0.22)) {
+                    CardsViewOrderStore.shared.move(payload.id, onto: target, in: snapshot)
+                }
+            }
+        }
+        return true
+    }
+}
+
 // MARK: - Cards board view
 
 /// Pure-SwiftUI Cards layout for the Board screen.
 ///
-/// **Reorder uses `.draggable` + `.dropDestination`.** Both route through
-/// iOS's system drag-and-drop (`UIDragInteraction` under the hood),
-/// which arbitrates with the parent `ScrollView`'s pan recognizer at
-/// the UIKit gesture layer — the page continues to scroll from any
-/// touch start, including over a card. The system handles the long-press
-/// initiation, haptic, lift, floating preview, and cancel-on-empty-space
-/// for free.
+/// **Reorder.** Drag side uses SwiftUI's `.draggable` (system drag, gets
+/// haptic + lift + floating preview + scroll arbitration for free). Drop
+/// side uses the legacy `.onDrop(of:delegate:)` + a `DropDelegate` whose
+/// `dropUpdated` returns `.move` — that's how we suppress the system's
+/// default green `+` "copy" badge on the drag preview, since the modern
+/// `.dropDestination` modifier doesn't expose operation type.
 ///
 /// `KeepCard`'s built-in `.contextMenu` (Pin / Delete) coexists naturally:
 /// tap-and-hold-without-drift triggers the menu; tap-and-hold-then-drag
@@ -46,18 +89,10 @@ struct CardsBoardView: View {
                     onRequestDelete: { onRequestDelete($0.id) }
                 )
                 .draggable(NoteDragPayload(id: note.id))
-                .dropDestination(for: NoteDragPayload.self) { payloads, _ in
-                    guard let sourceID = payloads.first?.id,
-                          sourceID != note.id else { return false }
-                    withAnimation(.easeInOut(duration: 0.22)) {
-                        CardsViewOrderStore.shared.move(
-                            sourceID,
-                            onto: note.id,
-                            in: notes
-                        )
-                    }
-                    return true
-                }
+                .onDrop(
+                    of: [.data],
+                    delegate: CardsReorderDropDelegate(targetID: note.id, notes: notes)
+                )
             }
         }
     }

@@ -11,8 +11,12 @@ import PhotosUI
 /// Photo and Color are mutually exclusive (one background per note). Tapping
 /// any option supersedes the previous selection.
 ///
-/// Phase D.2.1 ships PhotosPicker + opacity. Interactive pan/zoom crop is
-/// deferred to D.2.2; images render scaled-to-fill in the cards for now.
+/// **Phase D.2.2 — interactive crop.** Picking a photo downscales it to
+/// 1024px max longest edge, then auto-launches `PhotoCropView` (the same
+/// crop tool media notes use) so the user picks a region + aspect.
+/// Subsequent edits go through the same sheet via the "Edit crop" button.
+/// The cropped bytes replace the stored `imageData`; cards still render
+/// `.scaledToFill().clipped()` against those bytes.
 struct BackgroundPickerView: View {
     @Binding var selection: MockNote.Background?
     @Environment(\.dismiss) private var dismiss
@@ -20,6 +24,16 @@ struct BackgroundPickerView: View {
     @State private var activePaletteId: String
     @State private var photoPickerItem: PhotosPickerItem?
     @State private var isLoadingPhoto = false
+
+    /// Active `PhotoCropState` while the crop sheet is presented. Set
+    /// either by `loadPhoto` (auto-launch on first pick) or by the
+    /// "Edit crop" button. Cleared on commit / cancel.
+    @State private var cropState: PhotoCropState?
+
+    /// Maximum longest-edge size for stored background images. 1024 is
+    /// plenty for cards (which never exceed ~400pt × 480pt onscreen) and
+    /// keeps memory + future Supabase Storage costs tight.
+    private let backgroundMaxDimension: CGFloat = 1024
 
     private let palettes: [ColorPalette]
 
@@ -68,9 +82,65 @@ struct BackgroundPickerView: View {
                 guard let newItem else { return }
                 Task { await loadPhoto(newItem) }
             }
+            .sheet(isPresented: cropSheetBinding) { cropSheet }
         }
         .presentationDragIndicator(.visible)
         .presentationDetents([.large])
+    }
+
+    // MARK: - Crop sheet
+
+    private var cropSheetBinding: Binding<Bool> {
+        Binding(
+            get: { cropState != nil },
+            set: { if !$0 { cropState = nil } }
+        )
+    }
+
+    @ViewBuilder
+    private var cropSheet: some View {
+        if let cropState {
+            NavigationStack {
+                PhotoCropView(state: cropState)
+                    .padding(.top, 8)
+                    .navigationTitle("Crop photo")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Cancel") { self.cropState = nil }
+                        }
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Done", action: confirmCrop)
+                                .fontWeight(.semibold)
+                        }
+                    }
+            }
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+        }
+    }
+
+    /// User tapped "Edit crop" — re-open the crop sheet on the current
+    /// background bytes so they can refine the framing.
+    private func openCropForCurrent() {
+        guard case .image(let img) = selection else { return }
+        cropState = PhotoCropState(data: img.imageData)
+    }
+
+    /// Commit-side of the crop sheet. Replaces the stored `imageData`
+    /// with the crop result, preserves opacity. If the commit fails (e.g.
+    /// degenerate crop rect), fall through and just close the sheet —
+    /// the previous data stays intact.
+    private func confirmCrop() {
+        defer { cropState = nil }
+        guard let cropState,
+              case .image(let img) = selection,
+              let result = cropState.commitCrop()
+        else { return }
+        selection = .image(MockNote.ImageBackground(
+            imageData: result.data,
+            opacity: img.opacity
+        ))
     }
 
     // MARK: - None row
@@ -130,9 +200,13 @@ struct BackgroundPickerView: View {
 
                 opacitySlider(currentOpacity: imageBg.opacity)
 
-                HStack(spacing: 12) {
+                HStack(spacing: 16) {
                     PhotosPicker(selection: $photoPickerItem, matching: .images, photoLibrary: .shared()) {
-                        Label("Replace photo", systemImage: "photo.on.rectangle")
+                        Label("Replace", systemImage: "photo.on.rectangle")
+                            .font(.DS.label)
+                    }
+                    Button(action: openCropForCurrent) {
+                        Label("Edit crop", systemImage: "crop")
                             .font(.DS.label)
                     }
                     Spacer()
@@ -236,7 +310,10 @@ struct BackgroundPickerView: View {
         await MainActor.run { isLoadingPhoto = true }
         defer { Task { @MainActor in isLoadingPhoto = false } }
 
-        guard let data = try? await item.loadTransferable(type: Data.self) else { return }
+        guard let raw = try? await item.loadTransferable(type: Data.self) else { return }
+        // Downscale before storing so a 4032×3024 HEIC doesn't sit in the
+        // background slot — backgrounds never render larger than card-sized.
+        let downscaled = MediaImporter.downscale(raw, maxDimension: backgroundMaxDimension) ?? raw
         await MainActor.run {
             // Preserve current opacity if user is replacing an existing image,
             // otherwise default to fully opaque.
@@ -244,7 +321,11 @@ struct BackgroundPickerView: View {
                 if case .image(let existing) = selection { return existing.opacity }
                 return 1.0
             }()
-            selection = .image(MockNote.ImageBackground(imageData: data, opacity: opacity))
+            selection = .image(MockNote.ImageBackground(imageData: downscaled, opacity: opacity))
+            // Auto-launch the crop sheet on a fresh pick so the user lands
+            // straight in the framing decision (Apple Notes / Notion pattern).
+            // Cancel from the crop keeps the uncropped picked photo as-is.
+            cropState = PhotoCropState(data: downscaled)
         }
     }
 
