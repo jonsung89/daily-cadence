@@ -40,9 +40,12 @@ struct CardActionsTip: Tip {
     var rules: [Rule] {
         [
             // Disqualify the tip the moment the user has used the menu
-            // at least once. `donations.isEmpty` flips to `false` after
-            // the first pin/delete via `.contextMenu`.
-            #Rule(Self.userDidUseContextMenu) { $0.donations.isEmpty }
+            // at least once. The `#Rule` macro doesn't expand `$0`
+            // inside a closure context cleanly in current Swift —
+            // explicit `event in` form is the safe spelling.
+            #Rule(Self.userDidUseContextMenu) { event in
+                event.donations.count == 0
+            }
         ]
     }
 }
