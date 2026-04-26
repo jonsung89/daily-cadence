@@ -1,4 +1,5 @@
 import SwiftUI
+import TipKit
 
 /// A Google Keep-style card — varied content heights, type-tinted background,
 /// pigment-colored head label.
@@ -40,6 +41,14 @@ struct KeepCard: View {
     /// long-message text card or a tall portrait photo doesn't push the
     /// neighboring column off-screen.
     static let maxHeight: CGFloat = 480
+
+    /// Donates the "user has used the context menu" TipKit event so the
+    /// `CardActionsTip` discoverability hint disqualifies itself after
+    /// the user has actually tried Pin or Delete. Fire-and-forget — the
+    /// donation is async but doesn't need to block the action.
+    private static func donateContextMenuUse() {
+        Task { await CardActionsTip.userDidUseContextMenu.donate() }
+    }
 
     @State private var isMediaViewerPresented = false
     /// Phase E.5.22 — drives the scheme-aware default-tint opacity so
@@ -105,12 +114,14 @@ struct KeepCard: View {
             if showsActions {
                 Button {
                     PinStore.shared.togglePin(note.id)
+                    Self.donateContextMenuUse()
                 } label: {
                     Label(isPinned ? "Unpin" : "Pin", systemImage: isPinned ? "pin.slash" : "pin")
                 }
                 if let onRequestDelete {
                     Button(role: .destructive) {
                         onRequestDelete(note)
+                        Self.donateContextMenuUse()
                     } label: {
                         Label("Delete", systemImage: "trash")
                     }

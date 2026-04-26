@@ -1,5 +1,6 @@
 import SwiftUI
 import PhotosUI
+import TipKit
 
 /// The Daily Timeline — primary surface of DailyCadence.
 ///
@@ -29,6 +30,11 @@ struct TimelineScreen: View {
     /// `.contextMenu` Delete action sets this; user confirmation in
     /// the dialog calls `TimelineStore.shared.delete(noteId:)`.
     @State private var pendingDeleteId: UUID? = nil
+
+    /// First-launch discoverability hint for the long-press → context
+    /// menu affordance. Auto-dismisses the first time the user pins or
+    /// deletes a card via the menu (see `CardActionsTip`).
+    private let cardActionsTip = CardActionsTip()
 
     /// Read-through to `TimelineStore.shared.notes`. Reading inside `body`
     /// registers this view as an observer of the @Observable store, so any
@@ -80,6 +86,11 @@ struct TimelineScreen: View {
                     segmentedToggle
                         .padding(.horizontal, 20)
                         .padding(.bottom, cardsOrderBarVisible ? 12 : 16)
+                        // The TipKit popover anchors here — the toggle
+                        // is always visible in both modes and sits
+                        // directly above the cards, so the "long-press
+                        // any card" hint reads with the right context.
+                        .popoverTip(cardActionsTip, arrowEdge: .top)
 
                     if cardsOrderBarVisible {
                         resetOrderRow

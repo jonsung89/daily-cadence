@@ -104,6 +104,8 @@ A **Pinned section** appears at the top of every Today view whenever any note is
 
 Pinning is toggled either by **tapping the pin glyph** in the card's top-right corner (`pin` outline → `pin.fill` honey, idempotent), or via the card's **`.contextMenu`** (Pin / Unpin entry). Both surfaces flow through the same `PinStore.togglePin(_:)` call. The honey-yellow color is invariant across the design system (only token that doesn't light/dark-flip), giving the pinned state a stable universal cue regardless of theme or card tint.
 
+**Discoverability hint** — a first-launch `TipKit` popover ("Pin or delete a card · Touch and hold any card to see options.") anchors to the Timeline / Board segmented toggle, so the long-press affordance is surfaced without permanent chrome. The tip auto-dismisses the first time the user actually uses Pin or Delete via the context menu (`CardActionsTip.userDidUseContextMenu` is donated from the Pin and Delete button actions in `KeepCard.contextMenu`). No nag — once you've used it, you never see it again, on any device after iCloud syncs the TipKit datastore.
+
 ### Timeline view
 
 - Optional **Pinned section** (see above) sits above the rail when any note is pinned.

@@ -1361,6 +1361,17 @@ This stays much smaller than the original Phase E.4.6 implementation: no separat
 - `Features/MediaCrop/PhotoCropView.swift` — pinch + pan, handle inset, OSLog, autoreleasepool. Net ~+50 / −30 lines.
 - `Services/MediaImporter.swift` — OSLog instrumentation in import path.
 
+### Long-press → context menu discoverability hint (added this round)
+
+`TipKit` popover surfaces the "long-press a card" gesture for first-time users without adding permanent chrome. Apple's iOS 17+ canonical onboarding-tip pattern.
+
+- New `Features/Timeline/CardActionsTip.swift` — `Tip` conformance with title ("Pin or delete a card") + message ("Touch and hold any card to see options.") + `hand.tap.fill` glyph + an event-based rule that disqualifies the tip after first use.
+- `DailyCadenceApp.init` calls `Tips.configure([.displayFrequency(.immediate), .datastoreLocation(.applicationDefault)])` so per-tip rules drive frequency, not the global rate limiter.
+- `KeepCard.contextMenu` Pin and Delete button actions donate `CardActionsTip.userDidUseContextMenu` (fire-and-forget `Task` since donate is async). Tapping the standalone pin glyph does NOT donate — that's a separate affordance and doesn't prove the user found the menu.
+- `TimelineScreen.segmentedToggle` carries the `.popoverTip(cardActionsTip, arrowEdge: .top)` modifier. The toggle is always visible above the cards in both Timeline and Board modes, so the popover lands with the right visual context regardless of which view the user is on.
+
+The tip's lifecycle: shows on first app launch with at least one note → user long-presses a card → uses Pin or Delete → tip's `userDidUseContextMenu.donations.isEmpty` flips to false → rule fails → tip never shows again. Self-extinguishing without any "x to dismiss" button needed (TipKit shows one anyway, plus a swipe-down dismiss, in case the user wants to dismiss without using the menu).
+
 ### Pinned section now lives on Timeline too (added this round)
 
 The "Pinned" shelf was Board-only since Phase E.5.15. Extending it to Timeline gives the user one consistent affordance across both view modes.
@@ -1401,7 +1412,7 @@ The "Pinned" shelf was Board-only since Phase E.5.15. Extending it to Timeline g
 
 ## 🚧 In flight
 
-Nothing active — Phase E.5.18a (inline-media editor polish) landed. Open follow-ups: per-block focused TextEditors (mid-paragraph image insertion — currently the model supports it but UI ships intro/attachments/outro three-zone layout), drag-to-reorder blocks, inline text formatting (bold/italic/underline/strikethrough), auto-bullet + checkboxes in text notes, auto-scroll the cards grid when dragging near a viewport edge, discoverability hint for the long-press → context menu, **persistence work (Supabase schema + auth + Apple Developer enrollment)**.
+Nothing active — Phase E.5.18a (inline-media editor polish) landed. Open follow-ups: per-block focused TextEditors (mid-paragraph image insertion — currently the model supports it but UI ships intro/attachments/outro three-zone layout), drag-to-reorder blocks, inline text formatting (bold/italic/underline/strikethrough), auto-bullet + checkboxes in text notes, auto-scroll the cards grid when dragging near a viewport edge, **persistence work (Supabase schema + auth + Apple Developer enrollment)**.
 
 ---
 
