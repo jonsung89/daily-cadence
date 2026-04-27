@@ -87,10 +87,15 @@ struct TimelineScreen: View {
                         .padding(.horizontal, 20)
                         .padding(.bottom, cardsOrderBarVisible ? 12 : 16)
                         // The TipKit popover anchors here — the toggle
-                        // is always visible in both modes and sits
-                        // directly above the cards, so the "long-press
-                        // any card" hint reads with the right context.
-                        .popoverTip(cardActionsTip, arrowEdge: .top)
+                        // is always visible in both modes. `arrowEdge:
+                        // .bottom` places the arrow on the BOTTOM of the
+                        // popover (pointing down at the toggle), which
+                        // floats the popover ABOVE the toggle into the
+                        // date-header whitespace. The opposite (.top)
+                        // hangs the popover over the first card and
+                        // blocks the very content the tip is gesturing
+                        // toward.
+                        .popoverTip(cardActionsTip, arrowEdge: .bottom)
 
                     if cardsOrderBarVisible {
                         resetOrderRow
