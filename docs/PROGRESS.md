@@ -1,6 +1,6 @@
 # DailyCadence — Progress
 
-**Last updated:** 2026-04-27 (Phase F.1.1b'.camera — direct camera capture from the FAB. New `CameraPicker` (`UIViewControllerRepresentable` over `UIImagePickerController(.camera)`) + two `MediaImporter` adapters; `MediaNoteEditorScreen.init` now takes a unified `InitialMedia` enum (picker item / camera image / camera video URL) so the editor doesn't care where the asset came from. Captured videos route through the same trim pipeline as picker imports.)
+**Last updated:** 2026-04-27 (Phase F.1.2.pets — 7th system note type for pet-related logs. New `NoteType.pets` case + `pawprint.fill` icon + `Color.DS.blush`/`blushSoft` pigment pair (honey was reserved for pin status; blush was already declared as a "companion bright" and unused as a type pigment). New migration `20260427000005_add_pets_note_type.sql` seeds the system row.)
 **Current phase:** Phase 1 MVP — iOS app for Jon + wife, TestFlight distribution
 
 This is the living state of the project. Update at the end of every session.
@@ -1684,6 +1684,18 @@ Adds a third FAB menu item, **Take Photo or Video**, that presents the iOS camer
 
 **Build clean.** Camera doesn't run in the simulator (no hardware), so functional verification needs a physical device; the simulator covers the picker, editor, trim, and import paths and those stay green.
 
+### Phase F.1.2.pets — Pets note type (added this round)
+
+Adds a 7th system note type for pet-related logs (vet visits, walks, feeding, meds, weight). New `NoteType.pets` case + `pawprint.fill` SF Symbol + `Color.DS.blush` / `blushSoft` pigment pair (chosen over honey since honey is reserved for the pin status indicator and would visually collide on a pinned pets card; blush was already declared in the design system as a "companion bright" alongside periwinkle and honey, previously unused as a category pigment).
+
+**iOS** — single-file change in [NoteType.swift](apps/ios/DailyCadence/DailyCadence/Models/NoteType.swift): new case + 4 switch arms (`title` / `defaultColor` / `softColor` / `systemImage`). Every other surface auto-handles the new case because they iterate `NoteType.allCases` (NoteTypePickerScreen, SettingsScreen, TypeChip, StackedBoardView, TimelineScreen group/stack sections) or key by `rawValue` (`NoteTypeStyleStore` user overrides). The Swift compiler verified there were no other exhaustive switches over `NoteType` to update.
+
+**Database** — [supabase/migrations/20260427000005_add_pets_note_type.sql](supabase/migrations/20260427000005_add_pets_note_type.sql) (new): single `INSERT INTO note_types` row with slug=`pets` so `NotesRepository`'s slug→id cache resolves it. `color_hex = #F2C9C4` mirrors blush's light-mode value (the dark-mode value resolves client-side via the dynamic color token; the DB stores a single hex for non-iOS clients). `on conflict do nothing` keeps the migration idempotent. **Run via `supabase db push` or paste into Supabase SQL editor** — Jon's project hasn't auto-applied the new migration yet at the time of this commit.
+
+**`structured_data_schema`** is empty `{"fields": []}` for now, matching workout/meal/sleep — pet-specific fields (pet name, weight, vet info) are a future iteration via UPDATE, no migration needed.
+
+Tests: 79/79 still passing. Manual verification: type picker in Settings → Note Types now shows Pets with paw icon + blush dot; FAB → Text Note → type picker likewise.
+
 ### Phase F+ feature TODO (designed-for, not-built)
 
 Captured here so a fresh session can pick up the roadmap. Each line corresponds to schema fields that are reserved but unused.
@@ -1708,7 +1720,7 @@ Captured here so a fresh session can pick up the roadmap. Each line corresponds 
 - **Structured-data field schemas** — populate the `structured_data_schema` jsonb on system types (workout: exercises with sets/reps/weight; mood: rating slider; sleep: hours-slept + wake count). Pure UPDATE statements, no migration.
 - **`user_settings` table** — account-level preferences: default reminder offsets, default note type, theme override, etc. Migration when first preference ships.
 - **Edit caption on existing media notes** — currently captions are set inside `MediaNoteEditorScreen` at creation time only; Phase F.1.0 wired tap-to-edit for `.text` cards but media notes still go straight to `MediaViewerScreen`. UX shape: extend the card's existing `.contextMenu` (long-press) — already hosts Pin / Delete (Phase E.5.15) — with an **Edit caption** entry. Tap presents either a lightweight inline caption editor sheet (preferred — faster) or the full `MediaNoteEditorScreen` in edit mode (more surface to maintain). Update path goes through `TimelineStore` + `NotesRepository` like any text edit.
-- **`pets` note type with paw icon** — add a 7th system note type for pet-related logs (vet visits, walks, feeding, meds). New `NoteType.pets` case + a color pair in `Color.DS` (TBD swatch — likely warm earthy / amber to fit the pet theme without colliding with existing types) + the `pawprint.fill` SF Symbol. Seeded as a system row in `note_types` (`created_by_user_id IS NULL`). Same migration pattern as the existing six.
+- ~~**`pets` note type with paw icon**~~ — Shipped (Phase F.1.2.pets). See entry above.
 
 ### Tests (79/79 passing — +3 this round)
 - `ColorHexTests` (16) — hex initializer, every palette family in light + dark, invariant tokens, role flips
