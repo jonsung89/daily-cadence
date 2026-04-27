@@ -11,8 +11,13 @@ struct MediaImporterTests {
     /// Renders a solid-color image at the given pixel size and returns
     /// its PNG bytes. PNG (not JPEG) so the source bytes have predictable
     /// dimensions independent of the encoder's compression heuristics.
+    /// `scale = 1` so the logical size IS the pixel size — without this
+    /// the simulator's 3× scale would emit an 1800×1200 PNG for a
+    /// 600×400 logical request.
     private static func renderPNG(width: CGFloat, height: CGFloat) -> Data {
-        let renderer = UIGraphicsImageRenderer(size: CGSize(width: width, height: height))
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: width, height: height), format: format)
         let img = renderer.image { ctx in
             UIColor.systemTeal.setFill()
             ctx.fill(CGRect(x: 0, y: 0, width: width, height: height))

@@ -43,9 +43,18 @@ enum MediaImporter {
             log.error("downscale: CGImageSourceCreateWithData failed for \(data.count) bytes")
             return nil
         }
+        // Clamp the thumbnail target to the source's longest edge — the
+        // thumbnail API treats `maxPixelSize` as a literal target and will
+        // happily UPSCALE a small source up to it. Pixel dims bridge from
+        // CFNumber as Int, not CGFloat; falling back to `maxDimension`
+        // when properties are unreadable preserves the original behavior.
+        let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
+        let srcW = (props?[kCGImagePropertyPixelWidth] as? Int).map(CGFloat.init) ?? maxDimension
+        let srcH = (props?[kCGImagePropertyPixelHeight] as? Int).map(CGFloat.init) ?? maxDimension
+        let effectiveMax = min(maxDimension, max(srcW, srcH))
         let options: [CFString: Any] = [
             kCGImageSourceCreateThumbnailFromImageAlways: true,
-            kCGImageSourceThumbnailMaxPixelSize: maxDimension,
+            kCGImageSourceThumbnailMaxPixelSize: effectiveMax,
             kCGImageSourceCreateThumbnailWithTransform: true,
         ]
         guard let thumb = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
@@ -53,7 +62,7 @@ enum MediaImporter {
             return nil
         }
         let img = UIImage(cgImage: thumb)
-        log.debug("downscale: \(data.count) bytes → \(Int(img.size.width))×\(Int(img.size.height)) (max=\(Int(maxDimension)))")
+        log.debug("downscale: \(data.count) bytes → \(Int(img.size.width))×\(Int(img.size.height)) (max=\(Int(maxDimension)), src=\(Int(srcW))×\(Int(srcH)))")
         return img.jpegData(compressionQuality: 0.85)
     }
 
