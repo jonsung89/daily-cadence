@@ -31,6 +31,13 @@ struct MediaPayload: Hashable {
     /// populated for newly-imported video; `nil` for fetched videos
     /// (use `posterRef` instead).
     let posterData: Data?
+    /// Phase F.1.1b — small (~600px) HEIC version of the asset for
+    /// images. Cards in the timeline / Cards grid render this; the
+    /// fullscreen viewer uses `data` (or `ref`). Cuts grid-view egress
+    /// 5-10× since most user time is spent scanning cards. `nil` for
+    /// videos (use `posterData`/`posterRef` instead) and for fetched
+    /// images (use `thumbnailRef`).
+    let thumbnailData: Data?
     /// width / height. Used to lay out the media area in cards without
     /// touching the asset on every render. Clamped to a sensible range
     /// (0.4 ... 2.5) at construction so a malformed asset can't break the
@@ -49,19 +56,26 @@ struct MediaPayload: Hashable {
     /// leave this nil. Video notes fetched from server populate it so
     /// cards can render the poster without fetching the full asset.
     let posterRef: MediaRef?
+    /// Phase F.1.1b — Storage ref for the small image thumbnail. Image
+    /// notes populate this; video notes leave it nil. Cards prefer this
+    /// over `ref` to keep grid-view egress low.
+    let thumbnailRef: MediaRef?
 
     init(
         kind: Kind,
         data: Data? = nil,
         posterData: Data? = nil,
+        thumbnailData: Data? = nil,
         aspectRatio: CGFloat,
         caption: String? = nil,
         ref: MediaRef? = nil,
-        posterRef: MediaRef? = nil
+        posterRef: MediaRef? = nil,
+        thumbnailRef: MediaRef? = nil
     ) {
         self.kind = kind
         self.data = data
         self.posterData = posterData
+        self.thumbnailData = thumbnailData
         // Cards lay this out in a 2-col masonry capped at ~400pt — clamp
         // extreme aspect ratios so a panorama or a portrait asset doesn't
         // collapse the layout.
@@ -73,5 +87,6 @@ struct MediaPayload: Hashable {
         }
         self.ref = ref
         self.posterRef = posterRef
+        self.thumbnailRef = thumbnailRef
     }
 }

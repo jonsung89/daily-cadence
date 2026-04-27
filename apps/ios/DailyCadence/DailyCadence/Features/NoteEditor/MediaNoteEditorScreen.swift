@@ -303,9 +303,20 @@ struct MediaNoteEditorScreen: View {
                     ? payload.data.flatMap(PhotoCropState.init(data:))
                     : nil
             }
+        } catch let MediaImporter.ImportError.videoTooLong(seconds) {
+            // Phase F.1.1b — surface the 60s cap clearly. F.1.1b' will
+            // replace this rejection with a trim sheet that lets the
+            // user pick a 60s window from the longer video.
+            await MainActor.run {
+                let len = Int(seconds.rounded())
+                self.importError = "That video is \(len) seconds long. Videos must be 60 seconds or shorter for now — a trim tool is coming soon."
+                // Drop the picked item so the empty-state picker shows again.
+                self.pickerItem = nil
+            }
         } catch {
             await MainActor.run {
-                self.importError = "Couldn't load that file. Try another one."
+                self.importError = (error as? LocalizedError)?.errorDescription
+                    ?? "Couldn't load that file. Try another one."
             }
         }
     }

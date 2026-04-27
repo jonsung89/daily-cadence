@@ -216,27 +216,33 @@ final class NotesRepository {
     /// uploaded) and returns the body block DTO with refs filled in.
     /// Skips uploads when the payload's ref is already set (e.g., editing
     /// a previously-uploaded note re-saves the same media block).
+    /// Phase F.1.1b — also uploads image thumbnails (`thumbnailData`)
+    /// alongside the full asset; the ext + content-type derive from kind.
     private func encodeMediaBlock(
         _ payload: MediaPayload,
         userId: UUID,
         size: MediaBlockSize?
     ) async throws -> BodyBlockDTO {
         let storage = MediaStorageProvider.current
+
+        // Asset extensions / content types per kind. Images are HEIC after
+        // F.1.1b; videos are MP4 (HEVC). Falls back to JPEG/MOV labels
+        // only for legacy/edge bytes — encoding always produces HEIC/HEVC.
+        let assetExt: String = (payload.kind == .video) ? "mp4" : "heic"
+        let assetContentType: String = (payload.kind == .video) ? "video/mp4" : "image/heic"
+
         // Upload the full asset if we have inline bytes and no existing ref.
         let assetRef: MediaRef
         if let existing = payload.ref {
             assetRef = existing
         } else if let data = payload.data {
-            let ext = payload.kind == .video ? "mov" : "jpg"
-            let contentType = payload.kind == .video ? "video/quicktime" : "image/jpeg"
             assetRef = try await storage.upload(
                 data,
-                contentType: contentType,
+                contentType: assetContentType,
                 userId: userId,
-                filename: "\(UUID().uuidString.lowercased()).\(ext)"
+                filename: "\(UUID().uuidString.lowercased()).\(assetExt)"
             )
         } else {
-            // No bytes and no ref — shouldn't happen but stay defensive.
             throw NotesRepositoryError.unknownNoteTypeSlug("media payload without bytes or ref")
         }
 
@@ -255,13 +261,29 @@ final class NotesRepository {
             posterRef = nil
         }
 
+        // Upload thumbnail (images only) — Phase F.1.1b dual-size.
+        let thumbnailRef: MediaRef?
+        if let existing = payload.thumbnailRef {
+            thumbnailRef = existing
+        } else if payload.kind == .image, let thumbBytes = payload.thumbnailData {
+            thumbnailRef = try await storage.upload(
+                thumbBytes,
+                contentType: "image/heic",
+                userId: userId,
+                filename: "\(UUID().uuidString.lowercased())-thumb.heic"
+            )
+        } else {
+            thumbnailRef = nil
+        }
+
         return .media(MediaBlockDTO(
             mediaKind: payload.kind,
             aspect: Double(payload.aspectRatio),
             caption: payload.caption,
             size: size?.rawValue,
             ref: assetRef,
-            posterRef: posterRef
+            posterRef: posterRef,
+            thumbnailRef: thumbnailRef
         ))
     }
 
@@ -375,7 +397,7 @@ private enum BodyBlockDTO: Codable, Hashable {
     private enum CodingKeys: String, CodingKey {
         case kind, text
         // Media block fields (flattened into the same object as `kind`):
-        case mediaKind, aspect, caption, size, ref, posterRef
+        case mediaKind, aspect, caption, size, ref, posterRef, thumbnailRef
     }
 
     private enum Kind: String, Codable {
@@ -397,7 +419,8 @@ private enum BodyBlockDTO: Codable, Hashable {
                 caption: try c.decodeIfPresent(String.self, forKey: .caption),
                 size: try c.decodeIfPresent(String.self, forKey: .size),
                 ref: try c.decodeIfPresent(MediaRef.self, forKey: .ref),
-                posterRef: try c.decodeIfPresent(MediaRef.self, forKey: .posterRef)
+                posterRef: try c.decodeIfPresent(MediaRef.self, forKey: .posterRef),
+                thumbnailRef: try c.decodeIfPresent(MediaRef.self, forKey: .thumbnailRef)
             ))
         }
     }
@@ -416,6 +439,7 @@ private enum BodyBlockDTO: Codable, Hashable {
             try c.encodeIfPresent(m.size, forKey: .size)
             try c.encodeIfPresent(m.ref, forKey: .ref)
             try c.encodeIfPresent(m.posterRef, forKey: .posterRef)
+            try c.encodeIfPresent(m.thumbnailRef, forKey: .thumbnailRef)
         }
     }
 }
@@ -431,6 +455,9 @@ private struct MediaBlockDTO: Codable, Hashable {
     let size: String?
     let ref: MediaRef?
     let posterRef: MediaRef?
+    /// Phase F.1.1b — small image thumbnail ref. Set for image notes;
+    /// nil for video (use `posterRef`). Cards prefer this over `ref`.
+    let thumbnailRef: MediaRef?
 
     /// Reconstruct an in-memory `MediaPayload` for a fetched note. Bytes
     /// are nil; refs drive lazy resolution via `MediaResolver`.
@@ -439,10 +466,12 @@ private struct MediaBlockDTO: Codable, Hashable {
             kind: mediaKind,
             data: nil,
             posterData: nil,
+            thumbnailData: nil,
             aspectRatio: CGFloat(aspect),
             caption: caption,
             ref: ref,
-            posterRef: posterRef
+            posterRef: posterRef,
+            thumbnailRef: thumbnailRef
         )
     }
 }

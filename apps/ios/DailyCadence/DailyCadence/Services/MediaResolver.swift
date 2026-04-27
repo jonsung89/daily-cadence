@@ -70,17 +70,33 @@ final class MediaResolver {
         return try await fetchBytes(for: ref)
     }
 
-    /// Returns the bytes to display as the card preview / poster. For
-    /// images, that's the full image (we don't yet have a separate
-    /// thumbnail — F.1.1b adds it). For videos, the poster.
+    /// Returns the bytes to display as the card preview. Kind-aware:
+    /// image → thumbnail (F.1.1b dual-size), video → first-frame poster.
+    /// Inline-bytes fast-paths come first; refs are the lazy-load
+    /// fallback.
     func posterBytes(for payload: MediaPayload) async throws -> Data? {
-        if let inline = payload.posterData { return inline }
-        if payload.kind == .video, let ref = payload.posterRef {
-            return try await fetchBytes(for: ref)
+        switch payload.kind {
+        case .image:
+            // Prefer the small HEIC thumbnail (~80 KB) over the full
+            // asset (~400 KB). 5-10× egress reduction since most user
+            // time is spent scanning cards, not fullscreen viewing.
+            if let inline = payload.thumbnailData { return inline }
+            if let thumbRef = payload.thumbnailRef {
+                return try await fetchBytes(for: thumbRef)
+            }
+            // Pre-F.1.1b notes have no thumbnail — fall back to full.
+            if let inline = payload.data { return inline }
+            if let ref = payload.ref {
+                return try await fetchBytes(for: ref)
+            }
+            return nil
+        case .video:
+            if let inline = payload.posterData { return inline }
+            if let posterRef = payload.posterRef {
+                return try await fetchBytes(for: posterRef)
+            }
+            return nil
         }
-        // Image with no inline bytes (fetched) — fall back to the full
-        // asset. F.1.1b's thumbnailRef will short-circuit this path.
-        return try await bytes(for: payload)
     }
 
     /// Lower-level: fetch bytes for an arbitrary ref. Goes through

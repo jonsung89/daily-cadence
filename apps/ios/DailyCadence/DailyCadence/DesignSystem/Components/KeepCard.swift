@@ -417,14 +417,21 @@ struct KeepCard: View {
         .accessibilityAddTraits(.isButton)
     }
 
-    /// Returns the displayable poster image for a media payload — the
-    /// `posterData` if present (videos), otherwise the asset itself
-    /// decoded as a `UIImage` (images). Phase F.1.1: returns `nil` when
-    /// the payload has no inline bytes (fetched-from-server media); the
-    /// caller wraps a `MediaPosterView` that fetches via `MediaResolver`.
+    /// Returns the displayable poster image for a media payload.
+    /// Phase F.1.1b — kind-aware: image prefers `thumbnailData` (small
+    /// HEIC, ~80 KB) over `data` (full HEIC, ~400 KB); video uses
+    /// `posterData`. Returns `nil` when the payload has no inline bytes
+    /// (fetched-from-server media); the caller wraps a
+    /// `ResolvedMediaPoster` that fetches via `MediaResolver`.
     private func mediaPosterImage(_ media: MediaPayload) -> UIImage? {
-        if let poster = media.posterData, let img = UIImage(data: poster) { return img }
-        return media.data.flatMap(UIImage.init(data:))
+        switch media.kind {
+        case .image:
+            if let thumb = media.thumbnailData, let img = UIImage(data: thumb) { return img }
+            return media.data.flatMap(UIImage.init(data:))
+        case .video:
+            if let poster = media.posterData, let img = UIImage(data: poster) { return img }
+            return nil
+        }
     }
 }
 

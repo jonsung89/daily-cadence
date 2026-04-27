@@ -253,9 +253,19 @@ struct NoteCard: View {
         .accessibilityAddTraits(.isButton)
     }
 
+    /// Phase F.1.1b — kind-aware preview: image prefers `thumbnailData`
+    /// (small HEIC) over full `data`; video uses `posterData`. Nil when
+    /// payload has no inline bytes (fetched media) — caller wraps with
+    /// `ResolvedMediaPoster` for the lazy fetch.
     private func mediaPosterImage(_ media: MediaPayload) -> UIImage? {
-        if let poster = media.posterData, let img = UIImage(data: poster) { return img }
-        return media.data.flatMap(UIImage.init(data:))
+        switch media.kind {
+        case .image:
+            if let thumb = media.thumbnailData, let img = UIImage(data: thumb) { return img }
+            return media.data.flatMap(UIImage.init(data:))
+        case .video:
+            if let poster = media.posterData, let img = UIImage(data: poster) { return img }
+            return nil
+        }
     }
 
     @ViewBuilder

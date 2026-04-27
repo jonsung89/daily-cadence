@@ -1,6 +1,6 @@
 # DailyCadence — Progress
 
-**Last updated:** 2026-04-27 (Phase F.1.1a — media-note Storage upload pipeline: bytes go to Supabase Storage, refs land in `body jsonb`, fetch lazy-resolves via `MediaResolver` + URLCache. F.1.1b adds HEIC/HEVC/dual-size compression next.)
+**Last updated:** 2026-04-27 (Phase F.1.1b — compression layer: HEIC images, HEVC video, dual-size thumbnails for images, 60s video cap. ~50% smaller storage / ~80% smaller egress on grid views.)
 **Current phase:** Phase 1 MVP — iOS app for Jon + wife, TestFlight distribution
 
 This is the living state of the project. Update at the end of every session.
@@ -1576,6 +1576,37 @@ Standalone media notes serialize as a `body` with one media block + null `struct
 - **F.1.1a (this round)**: persistence end-to-end. Bytes are still JPEG (existing MediaImporter output). No 60s cap enforced. No dual-size yet.
 - **F.1.1b (next)**: HEIC + HEVC + dual-size + 60s cap. Pure optimization on top of the persistence layer.
 - **F.1.1c (later)**: NSCache decoded images + adjacent-day pre-fetch. Pure perf polish.
+
+138/138 unit tests still passing.
+
+### Phase F.1.1b — Compression layer (added this round)
+
+Pure optimization on top of F.1.1a's persistence pipeline. No schema migration needed — the body JSONB shape gained `thumbnailRef` (already optional + new clients tolerate older shapes).
+
+**Images: HEIC + dual-size.**
+- `MediaImporter.encodeHEIC(_:quality:)` — `CGImageDestination` + `UTType.heic` + `kCGImageDestinationLossyCompressionQuality`. ~50% smaller than JPEG at perceptually-equivalent quality.
+- `imagePayload(from:)` now produces both:
+  - **Full** at `mediaNoteMaxDimension: 2048px` (HEIC q=0.85, ~150-300 KB typical)
+  - **Thumbnail** at `mediaNoteThumbnailDimension: 600px` (HEIC q=0.7, ~30-60 KB)
+- Cards render the thumbnail; fullscreen viewer renders the full. **5-10× egress reduction** on grid views since most user time is spent scanning cards.
+
+**Videos: HEVC + 60s cap.**
+- `reencodeHEVC(asset:)` — `AVAssetExportSession` with `AVAssetExportPresetHEVC1920x1080` and the iOS 18+ async `export(to:as:)` API. ~50% smaller than H.264 at same perceived quality.
+- Length cap enforced at import: videos longer than `videoMaxDurationSeconds: 60` throw `ImportError.videoTooLong(seconds:)`. The editor surfaces a clear error ("That video is X seconds long. Videos must be 60 seconds or shorter for now — a trim tool is coming soon.") and drops the picked item so the empty-state picker shows again.
+- HEVC export fallback: if re-encode fails for any reason (rare codec edge cases), the original bytes ship instead of failing the import outright.
+
+**MediaPayload + schema.**
+- `MediaPayload` gained `thumbnailData: Data?` (image small bytes, in-memory) + `thumbnailRef: MediaRef?` (image small ref, post-upload). Sibling to the existing `posterData`/`posterRef` for video.
+- `BodyBlockDTO.media` schema gained an optional `thumbnailRef`. Old rows without it still decode; new rows for image notes always include it.
+- `NotesRepository.encodeMediaBlock` uploads the thumbnail too (image-only) with a `-thumb.heic` suffixed filename. Same-bucket per-user folder.
+
+**Resolver + cards.**
+- `MediaResolver.posterBytes(for:)` is now kind-aware: image dispatches to `thumbnailData` → `thumbnailRef` → fall back to full `data`/`ref`; video dispatches to `posterData` → `posterRef`.
+- `KeepCard.mediaPosterImage` and `NoteCard.mediaPosterImage` mirror the dispatch — kind-aware preference of thumbnail over full asset for images.
+
+**File extensions / content types updated** in the uploader: images now upload as `*.heic` with `image/heic`; videos upload as `*.mp4` with `video/mp4` (HEVC inside MP4 container, the standard transport). Thumbnails use `*-thumb.heic`. Posters keep `*-poster.jpg`.
+
+**Pre-F.1.1b notes still work** — fetched payloads with no `thumbnailRef` fall through to the `ref` (full asset) in the resolver. No backfill needed.
 
 138/138 unit tests still passing.
 
