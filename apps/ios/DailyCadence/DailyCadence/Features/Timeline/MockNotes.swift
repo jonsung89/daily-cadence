@@ -15,8 +15,20 @@ import Foundation
 /// — titles read better with uniform styling, and keeping it plain limits
 /// the scope of the model migration.
 struct MockNote: Identifiable, Hashable {
-    let id = UUID()
-    let time: String
+    let id: UUID
+
+    /// When this note happened (or is scheduled). Source of truth for both
+    /// the `time` display getter and the `notes.occurred_at` column server-
+    /// side. **Nullable** — NULL means evergreen (running list, no specific
+    /// date; appears in a separate "Notes" surface, not the dated timeline).
+    /// Non-NULL past = journal entry, non-NULL future = reminder/todo.
+    ///
+    /// Phase F.0.3 made this the source of truth (replacing the old
+    /// `time: String`) so the editor can stamp arbitrary date+time, the
+    /// repository round-trips a real timestamptz, and date-range filtering
+    /// for day navigation is simple.
+    let occurredAt: Date?
+
     let type: NoteType
     let content: Content
     /// Optional per-note background. `nil` means "use the default for this
@@ -84,19 +96,30 @@ struct MockNote: Identifiable, Hashable {
     }
 
     init(
-        time: String,
+        id: UUID = UUID(),
+        occurredAt: Date?,
         type: NoteType,
         content: Content,
         background: Background? = nil,
         titleStyle: TextStyle? = nil
     ) {
-        self.time = time
+        self.id = id
+        self.occurredAt = occurredAt
         self.type = type
         self.content = content
         self.background = background
         // Collapse "TextStyle with no overrides" to nil so empty styling
         // doesn't leak into persistence later.
         self.titleStyle = (titleStyle?.isEmpty ?? true) ? nil : titleStyle
+    }
+
+    /// Display string for the timeline rail's left column. Locale-aware
+    /// `h:mm a` format derived from `occurredAt`. Evergreen notes return
+    /// `"—"` (which UI surfaces filter to a separate "Notes" surface, but
+    /// fallback rendering on the dated timeline stays graceful).
+    var time: String {
+        guard let occurredAt else { return "—" }
+        return occurredAt.formatted(.dateTime.hour(.defaultDigits(amPM: .abbreviated)).minute())
     }
 
     // MARK: - Background resolution
@@ -259,6 +282,15 @@ extension MockNote.Content {
 }
 
 enum MockNotes {
+    /// Today's local-day Date at the given hour+minute. Used by sample +
+    /// skeleton seeds so they always look "current" regardless of when the
+    /// app launches (or when previews render).
+    static func todayAt(_ hour: Int, _ minute: Int) -> Date {
+        Calendar.current.date(
+            bySettingHour: hour, minute: minute, second: 0, of: .now
+        ) ?? .now
+    }
+
     /// A realistic sample day spanning the default note types and the
     /// four card-content variants. **Phase E.5.21 — reset to type-default
     /// styling.** Cards display with their type's default tint (no
@@ -268,12 +300,12 @@ enum MockNotes {
     /// to a debug menu when we want to showcase those features.
     static let today: [MockNote] = [
         MockNote(
-            time: "6:45 AM",
+            occurredAt: todayAt(6, 45),
             type: .sleep,
             content: .stat(title: "Slept", value: "7h 14m", sub: "Woke once around 3am")
         ),
         MockNote(
-            time: "7:32 AM",
+            occurredAt: todayAt(7, 32),
             type: .workout,
             content: .text(
                 title: "Easy run · 35 min",
@@ -281,37 +313,37 @@ enum MockNotes {
             )
         ),
         MockNote(
-            time: "8:30 AM",
+            occurredAt: todayAt(8, 30),
             type: .meal,
             content: .list(title: "Breakfast", items: ["Oatmeal", "Blueberries", "Coffee"])
         ),
         MockNote(
-            time: "10:05 AM",
+            occurredAt: todayAt(10, 5),
             type: .mood,
             content: .text(title: "Focused")
         ),
         MockNote(
-            time: "12:40 PM",
+            occurredAt: todayAt(12, 40),
             type: .meal,
             content: .text(title: "Lunch", message: AttributedString("Grain bowl, salmon, greens, tahini."))
         ),
         MockNote(
-            time: "3:15 PM",
+            occurredAt: todayAt(15, 15),
             type: .activity,
             content: .text(title: "Walk · 2.3 mi", message: AttributedString("Park loop with a podcast."))
         ),
         MockNote(
-            time: "6:20 PM",
+            occurredAt: todayAt(18, 20),
             type: .mood,
             content: .quote(text: "Noticed I'm less anxious on running days.")
         ),
         MockNote(
-            time: "9:30 PM",
+            occurredAt: todayAt(21, 30),
             type: .mood,
             content: .text(title: "Wound down easy", message: AttributedString("Read a few chapters. Early bedtime."))
         ),
         MockNote(
-            time: "10:02 PM",
+            occurredAt: todayAt(22, 2),
             type: .sleep,
             content: .text(title: "Lights out", message: AttributedString("Planning 7h again."))
         ),
@@ -328,7 +360,7 @@ extension MockNotes {
     /// build for Jon's wife doesn't ship a synthetic-looking demo card.
     static func inlineMediaDemo(payload: MediaPayload, size: MediaBlockSize = .medium) -> MockNote {
         MockNote(
-            time: "8:15 AM",
+            occurredAt: todayAt(8, 15),
             type: .workout,
             content: .text(title: "Morning run", body: [
                 .paragraph(AttributedString("Felt strong this morning, sun was just over the trees.")),

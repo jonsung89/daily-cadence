@@ -20,6 +20,21 @@ struct RootView: View {
             // observe `ThemeStore.shared.primary`; any theme change triggers
             // a re-render and the tint updates everywhere at once.
             .tint(Color.DS.sage)
+            // Refetch the timeline on either auth changes (anon sign-in
+            // completes asynchronously) or day changes (user navigates to
+            // a different date via the header / swipe / picker). The id
+            // tuple combines both; SwiftUI restarts the task when either
+            // value changes. `hasLoaded` is the idempotency guard so the
+            // task body bails out when a re-render fires the same id.
+            .task(id: TimelineLoadKey(
+                userId: AuthStore.shared.currentUserId,
+                date: TimelineStore.shared.selectedDate
+            )) {
+                guard let userId = AuthStore.shared.currentUserId,
+                      !TimelineStore.shared.hasLoaded
+                else { return }
+                await TimelineStore.shared.load(userId: userId)
+            }
     }
 
     @ViewBuilder
@@ -58,6 +73,15 @@ struct RootView: View {
             }
         }
     }
+}
+
+/// Composite id for the timeline's load `.task`. SwiftUI restarts the task
+/// whenever any field changes, so the timeline re-fetches on either auth
+/// transitions or selected-day changes — exactly the two events that
+/// invalidate the currently-displayed list.
+private struct TimelineLoadKey: Equatable {
+    let userId: UUID?
+    let date: Date
 }
 
 #Preview("Light") {

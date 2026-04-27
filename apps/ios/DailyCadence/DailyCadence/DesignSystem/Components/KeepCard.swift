@@ -417,26 +417,26 @@ struct KeepCard: View {
     ScrollView {
         VStack(alignment: .leading, spacing: 10) {
             KeepCard(note: MockNote(
-                time: "6:45 AM", type: .sleep,
+                occurredAt: MockNotes.todayAt(6, 45), type: .sleep,
                 content: .stat(title: "Slept", value: "7h 14m", sub: "Woke once around 3am")
             ))
             KeepCard(note: MockNote(
-                time: "7:32 AM", type: .workout,
+                occurredAt: MockNotes.todayAt(7, 32), type: .workout,
                 content: .text(
                     title: "Easy run · 35 min",
                     message: AttributedString("Felt strong. Legs tight early on.")
                 )
             ))
             KeepCard(note: MockNote(
-                time: "8:30 AM", type: .meal,
+                occurredAt: MockNotes.todayAt(8, 30), type: .meal,
                 content: .list(title: "Breakfast", items: ["Oatmeal", "Blueberries", "Coffee"])
             ))
             KeepCard(note: MockNote(
-                time: "10:05 AM", type: .mood,
+                occurredAt: MockNotes.todayAt(10, 5), type: .mood,
                 content: .text(title: "Focused")
             ))
             KeepCard(note: MockNote(
-                time: "6:20 PM", type: .mood,
+                occurredAt: MockNotes.todayAt(18, 20), type: .mood,
                 content: .quote(text: "Noticed I'm less anxious on running days.")
             ))
         }
@@ -449,15 +449,15 @@ struct KeepCard: View {
     ScrollView {
         VStack(alignment: .leading, spacing: 10) {
             KeepCard(note: MockNote(
-                time: "6:45 AM", type: .sleep,
+                occurredAt: MockNotes.todayAt(6, 45), type: .sleep,
                 content: .stat(title: "Slept", value: "7h 14m", sub: "Woke once around 3am")
             ))
             KeepCard(note: MockNote(
-                time: "8:30 AM", type: .meal,
+                occurredAt: MockNotes.todayAt(8, 30), type: .meal,
                 content: .list(title: "Breakfast", items: ["Oatmeal", "Blueberries", "Coffee"])
             ))
             KeepCard(note: MockNote(
-                time: "6:20 PM", type: .mood,
+                occurredAt: MockNotes.todayAt(18, 20), type: .mood,
                 content: .quote(text: "Noticed I'm less anxious on running days.")
             ))
         }

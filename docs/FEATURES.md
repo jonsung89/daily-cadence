@@ -81,9 +81,23 @@ The day's notes, viewable as a Timeline rail or a Board grid.
 
 ### Header
 
-- Day-of-week label: 11pt sans-bold uppercase, tracked, `fg2` color.
-- Date title: 28pt serif-bold, `-0.02em` tracking. Format: full month + day.
-- Top-right gear icon: settings shortcut (currently no-op; placeholder).
+Two-row layout introduced in Phase F.0.3:
+
+**Top row** — small caption + right-side controls.
+- Day-of-week label: 11pt sans-bold uppercase, tracked, `fg2` color. Resolves to `TODAY` / `YESTERDAY` / `TOMORROW` for those three days; otherwise the full weekday name (`MONDAY`, etc.).
+- Board sub-mode menu icon (Board view only) + gear icon (Settings shortcut) sit on the trailing edge.
+
+**Bottom row** — date navigator.
+- Left chevron (`chevron.left`) = previous day. Right chevron (`chevron.right`) = next day. 32×44pt hit targets, `fg2` ink.
+- Date title between them: 28pt serif-bold, `-0.02em` tracking. Format: full month + day. Reflects `TimelineStore.shared.selectedDate`. Tappable — opens a **graphical `DatePicker` sheet** at `.medium` detent for jumping to any date (past or future; future-dated notes are reminders/todos per the schema design).
+
+**"Today" pill**: appears below the navigator when `selectedDate` is not today's local-calendar day. Sage-tinted capsule with `arrow.uturn.backward` glyph + "Today" label. Tap returns to today.
+
+**Swipe gesture**: a horizontal drag on the content area (≥60pt translation, dominant-horizontal motion: `|dx| > |dy| × 1.5`) advances/rewinds one day. Vertical scroll keeps working — the gesture only fires when motion is decisively horizontal.
+
+### Loading state
+
+While the day's notes are being fetched (initial app launch or any day-switch), a thin 2pt indeterminate progress bar overlays the very top of the screen. Sage-tinted, segment slides left → right, animated linearly with `.repeatForever`. The rest of the layout doesn't change — empty days show the same `emptyState` they show after a confirmed-empty load. Replaces the prior redacted-skeleton approach (which flashed in/out on every short fetch and felt noisy).
 
 ### View mode toggle
 
@@ -277,6 +291,15 @@ Sheet pushed from the toolbar's `🖼` icon.
 ### Background row in editor (deprecated path)
 
 The dedicated "Background" row was removed when the toolbar got a `🖼` icon (Phase E.2.2). The icon is the only entry point now.
+
+### Date + time row (Phase F.0.3)
+
+A compact `DatePicker(.compact)` row sits at the bottom of the form, between the body content and the toolbar. Layout: `🕐 Time ........ [picker]`. Tapping the picker opens iOS's standard popover with a calendar grid + time wheels.
+
+- **Default value:** `TimelineStore.selectedDate` spliced with the current wall-clock time-of-day. So when you tap FAB while viewing today, it defaults to right-now; when you've navigated to a past day and tap FAB, it defaults to that day at the current time-of-day so the new note lands at a believable position in that day's chronology.
+- **User picks override the default** — once the picker is touched, `draft.occurredAt` is the source of truth on save. `draft.clear()` resets it to `nil` so the next session re-defaults.
+- **Range:** unbounded. Future dates are valid (those notes appear in the timeline as reminders/todos per the schema). If/when the timeline gains a "Today" filter or there's UX to distinguish "what happened" vs "what's planned," the picker may grow a constraint.
+- **Same row in `MediaNoteEditorScreen`** — visually identical, except its `occurredAt` lives in local `@State` rather than the shared draft store (media notes don't persist drafts).
 
 ### Live preview
 

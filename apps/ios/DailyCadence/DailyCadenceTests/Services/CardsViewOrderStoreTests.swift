@@ -9,7 +9,7 @@ import Testing
 struct CardsViewOrderStoreTests {
 
     private static func note(_ title: String) -> MockNote {
-        MockNote(time: "9:00 AM", type: .general, content: .text(title: title))
+        MockNote(occurredAt: .now, type: .general, content: .text(title: title))
     }
 
     @Test func emptyStoreReturnsInputOrder() {
@@ -171,8 +171,8 @@ struct CardsViewOrderStoreTests {
         // AND clears it from PinStore so pinned ids don't outlive their
         // notes as ghost references.
         let pinStore = PinStore()
-        let a = MockNote(time: "9:00 AM", type: .general, content: .text(title: "a"))
-        let b = MockNote(time: "10:00 AM", type: .general, content: .text(title: "b"))
+        let a = MockNote(occurredAt: .now, type: .general, content: .text(title: "a"))
+        let b = MockNote(occurredAt: .now, type: .general, content: .text(title: "b"))
         let store = TimelineStore(initialNotes: [a, b])
 
         // Pin both, then delete a — pin state for a should disappear,
@@ -189,7 +189,7 @@ struct CardsViewOrderStoreTests {
     }
 
     @Test func deleteNonExistentIdIsNoOp() {
-        let a = MockNote(time: "9:00 AM", type: .general, content: .text(title: "a"))
+        let a = MockNote(occurredAt: .now, type: .general, content: .text(title: "a"))
         let store = TimelineStore(initialNotes: [a])
         store.delete(noteId: UUID())  // id never seen
         #expect(store.notes.count == 1)

@@ -44,6 +44,12 @@ struct MediaNoteEditorScreen: View {
     @State private var isLoading = false
     @State private var importError: String?
 
+    /// Phase F.0.3 — user-overridable timestamp. `nil` until the user
+    /// touches the picker; reads default via `defaultOccurredAt` (selected
+    /// day + current time-of-day). Lives as @State here rather than in a
+    /// shared draft store because media-note editor doesn't persist drafts.
+    @State private var occurredAt: Date?
+
     init(initialItem: PhotosPickerItem? = nil) {
         self.initialItem = initialItem
         self._pickerItem = State(initialValue: initialItem)
@@ -56,6 +62,8 @@ struct MediaNoteEditorScreen: View {
                     previewArea
                         .padding(.horizontal, 16)
                     captionField
+                        .padding(.horizontal, 20)
+                    occurredAtRow
                         .padding(.horizontal, 20)
                 }
                 .padding(.top, 16)
@@ -314,12 +322,45 @@ struct MediaNoteEditorScreen: View {
             caption: trimmedCaption.isEmpty ? nil : trimmedCaption
         )
         let note = MockNote(
-            time: Date.now.formatted(.dateTime.hour(.defaultDigits(amPM: .abbreviated)).minute()),
+            occurredAt: occurredAt ?? defaultOccurredAt,
             type: .media,  // Phase E.5.10 — media notes auto-tag as Media
             content: .media(finalPayload)
         )
         TimelineStore.shared.add(note)
         dismiss()
+    }
+
+    /// "Selected day, current time-of-day" — the picker's default.
+    private var defaultOccurredAt: Date {
+        NoteEditorScreen.combine(
+            day: TimelineStore.shared.selectedDate,
+            timeOfDay: .now
+        )
+    }
+
+    /// Date+time row at the bottom of the editor. Same pattern as
+    /// `NoteEditorScreen.occurredAtRow` so the two editors stay
+    /// visually consistent.
+    private var occurredAtRow: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "clock")
+                .font(.system(size: 14, weight: .regular))
+                .foregroundStyle(Color.DS.fg2)
+            Text("Time")
+                .font(.DS.body)
+                .foregroundStyle(Color.DS.ink)
+            Spacer(minLength: 8)
+            DatePicker(
+                "Time",
+                selection: Binding(
+                    get: { occurredAt ?? defaultOccurredAt },
+                    set: { occurredAt = $0 }
+                ),
+                displayedComponents: [.date, .hourAndMinute]
+            )
+            .datePickerStyle(.compact)
+            .labelsHidden()
+        }
     }
 }
 

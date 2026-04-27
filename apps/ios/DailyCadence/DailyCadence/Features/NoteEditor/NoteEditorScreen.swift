@@ -305,6 +305,8 @@ struct NoteEditorScreen: View {
             if draft.hasMedia {
                 trailerEditor
             }
+
+            occurredAtRow
         }
         .padding(.horizontal, 20)
         .padding(.top, 20)
@@ -737,7 +739,7 @@ struct NoteEditorScreen: View {
 
         let content: MockNote.Content = .text(title: trimmedTitle, body: savedBlocks)
         let note = MockNote(
-            time: currentTimeString,
+            occurredAt: occurredAtForSave,
             type: draft.selectedType,
             content: content,
             background: draft.background,
@@ -748,8 +750,62 @@ struct NoteEditorScreen: View {
         dismiss()
     }
 
-    private var currentTimeString: String {
-        Date.now.formatted(.dateTime.hour(.defaultDigits(amPM: .abbreviated)).minute())
+    /// The timestamp stamped on `MockNote.occurredAt` when the user saves.
+    /// Reads the user's date+time picker selection if they touched it,
+    /// otherwise defaults to `defaultOccurredAt`.
+    private var occurredAtForSave: Date {
+        draft.occurredAt ?? defaultOccurredAt
+    }
+
+    /// "The day the user is viewing, at the current wall-clock time" —
+    /// the editor's picker defaults to this. When the user is viewing
+    /// today, that resolves to `Date.now`. When they're viewing a past
+    /// day from the timeline, it splices the current time-of-day onto
+    /// that day so the backdated entry lands at a believable position
+    /// in that day's chronology.
+    private var defaultOccurredAt: Date {
+        Self.combine(day: TimelineStore.shared.selectedDate, timeOfDay: .now)
+    }
+
+    /// Splices the time-of-day from `timeOfDay` onto `day`'s calendar date.
+    static func combine(day: Date, timeOfDay: Date) -> Date {
+        let cal = Calendar.current
+        let timeComps = cal.dateComponents([.hour, .minute, .second], from: timeOfDay)
+        return cal.date(
+            bySettingHour: timeComps.hour ?? 0,
+            minute: timeComps.minute ?? 0,
+            second: timeComps.second ?? 0,
+            of: day
+        ) ?? day
+    }
+
+    /// Phase F.0.3 — date + time picker row at the bottom of the form.
+    /// Bound to `draft.occurredAt` via a computed binding that falls back
+    /// to `defaultOccurredAt`. SwiftUI's `.compact` style renders as a
+    /// single line that opens a popover with a calendar grid + time
+    /// wheels — Apple-standard daily picker.
+    private var occurredAtRow: some View {
+        @Bindable var draft = draft
+        return HStack(spacing: 10) {
+            Image(systemName: "clock")
+                .font(.system(size: 14, weight: .regular))
+                .foregroundStyle(Color.DS.fg2)
+            Text("Time")
+                .font(.DS.body)
+                .foregroundStyle(Color.DS.ink)
+            Spacer(minLength: 8)
+            DatePicker(
+                "Time",
+                selection: Binding(
+                    get: { draft.occurredAt ?? defaultOccurredAt },
+                    set: { draft.occurredAt = $0 }
+                ),
+                displayedComponents: [.date, .hourAndMinute]
+            )
+            .datePickerStyle(.compact)
+            .labelsHidden()
+        }
+        .padding(.top, 8)
     }
 }
 

@@ -9,7 +9,7 @@ struct MockNoteBackgroundTests {
 
     @Test func noteWithoutBackgroundResolvesToNil() {
         let note = MockNote(
-            time: "9:00 AM",
+            occurredAt: .now,
             type: .mood,
             content: .text(title: "Plain")
         )
@@ -19,7 +19,7 @@ struct MockNoteBackgroundTests {
 
     @Test func validSwatchIdResolvesToSwatch() {
         let note = MockNote(
-            time: "9:00 AM",
+            occurredAt: .now,
             type: .mood,
             content: .text(title: "Tinted"),
             background: .color(swatchId: "pastel.mint")
@@ -34,7 +34,7 @@ struct MockNoteBackgroundTests {
         // Stale id (e.g., palette JSON updated remotely after the note was
         // saved) should not crash — the note simply loses its background.
         let note = MockNote(
-            time: "9:00 AM",
+            occurredAt: .now,
             type: .mood,
             content: .text(title: "Stale"),
             background: .color(swatchId: "neutral.was-removed")
@@ -55,7 +55,7 @@ struct MockNoteBackgroundTests {
         ]
         for id in samples {
             let note = MockNote(
-                time: "9:00 AM",
+                occurredAt: .now,
                 type: .mood,
                 content: .text(title: "Sample"),
                 background: .color(swatchId: id)
@@ -67,7 +67,7 @@ struct MockNoteBackgroundTests {
     @Test func backgroundSurvivesStoreRoundTrip() {
         let store = TimelineStore(initialNotes: [])
         let note = MockNote(
-            time: "9:00 AM",
+            occurredAt: .now,
             type: .workout,
             content: .text(title: "PR day"),
             background: .color(swatchId: "bold.rust")
@@ -84,7 +84,7 @@ struct MockNoteBackgroundTests {
         let bytes = Data([0x89, 0x50, 0x4E, 0x47])  // PNG signature; not a real image, just bytes
         let imageBg = MockNote.ImageBackground(imageData: bytes, opacity: 0.6)
         let note = MockNote(
-            time: "8:00 PM",
+            occurredAt: .now,
             type: .mood,
             content: .text(title: "With photo"),
             background: .image(imageBg)
@@ -113,7 +113,7 @@ struct MockNoteBackgroundTests {
     @Test func resolvedBackgroundStyleForImage() {
         let bytes = Data([0x01, 0x02, 0x03, 0x04])
         let note = MockNote(
-            time: "8:00 PM",
+            occurredAt: .now,
             type: .mood,
             content: .text(title: "Resolves"),
             background: .image(MockNote.ImageBackground(imageData: bytes, opacity: 0.4))
@@ -128,7 +128,7 @@ struct MockNoteBackgroundTests {
 
     @Test func resolvedBackgroundStyleForColor() {
         let note = MockNote(
-            time: "9:00 AM",
+            occurredAt: .now,
             type: .workout,
             content: .text(title: "Color"),
             background: .color(swatchId: "neutral.clay")
@@ -142,7 +142,7 @@ struct MockNoteBackgroundTests {
 
     @Test func resolvedBackgroundStyleStaleSwatchFallsBackToNone() {
         let note = MockNote(
-            time: "9:00 AM",
+            occurredAt: .now,
             type: .workout,
             content: .text(title: "Stale"),
             background: .color(swatchId: "neutral.was-removed")
@@ -152,7 +152,7 @@ struct MockNoteBackgroundTests {
     }
 
     @Test func resolvedBackgroundStyleNilBackgroundIsNone() {
-        let note = MockNote(time: "9:00 AM", type: .mood, content: .text(title: "Plain"))
+        let note = MockNote(occurredAt: .now, type: .mood, content: .text(title: "Plain"))
         #expect(note.resolvedBackgroundStyle == .none)
     }
 }

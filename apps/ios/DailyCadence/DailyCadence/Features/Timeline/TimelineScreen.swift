@@ -36,10 +36,18 @@ struct TimelineScreen: View {
     /// deletes a card via the menu (see `CardActionsTip`).
     private let cardActionsTip = CardActionsTip()
 
+    /// Date picker sheet presentation. Tapping the header date column
+    /// opens a graphical `DatePicker` so the user can jump to any day.
+    @State private var isDatePickerPresented = false
+
     /// Read-through to `TimelineStore.shared.notes`. Reading inside `body`
     /// registers this view as an observer of the @Observable store, so any
     /// `add(_:)` call re-renders the timeline automatically.
     private var notes: [MockNote] { TimelineStore.shared.notes }
+
+    /// `true` while the initial / day-switch fetch is in flight. Drives
+    /// the thin `LoadingBar` overlay at the top of the timeline.
+    private var isLoadingNotes: Bool { !TimelineStore.shared.hasLoaded }
 
     /// Notes the user has pinned (Phase E.5.15). Reading
     /// `PinStore.shared.pinnedIds` inside `body` registers this view as
@@ -121,8 +129,34 @@ struct TimelineScreen: View {
             .contentMargins(.bottom, 120, for: .scrollContent)
             .background(Color.DS.bg1)
             .toolbar(.hidden, for: .navigationBar)
+            // Phase F.0.3 — thin animated indeterminate progress bar at
+            // the very top of the timeline while the day fetch is in
+            // flight. Replaces the prior redacted-skeleton approach,
+            // which flashed in/out on every short day-switch and felt
+            // noisy. The bar transitions opacity smoothly and doesn't
+            // reorganize the layout when it appears or disappears.
+            .overlay(alignment: .top) {
+                if isLoadingNotes {
+                    LoadingBar()
+                        .transition(.opacity)
+                }
+            }
+            .animation(.easeOut(duration: 0.2), value: isLoadingNotes)
             .animation(.easeOut(duration: 0.18), value: viewMode)
             .animation(.easeOut(duration: 0.18), value: boardLayout)
+            // Phase F.0.3 — horizontal swipe between days. `simultaneous`
+            // so vertical scroll keeps working; the strict horizontal-
+            // dominance guard (1.5× the vertical translation, plus a
+            // 60pt minimum) ensures only intentional swipes register.
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 30, coordinateSpace: .local)
+                    .onEnded { value in
+                        let dx = value.translation.width
+                        let dy = value.translation.height
+                        guard abs(dx) > abs(dy) * 1.5, abs(dx) > 60 else { return }
+                        TimelineStore.shared.shiftSelectedDate(byDays: dx > 0 ? -1 : 1)
+                    }
+            )
         }
         .overlay(alignment: .bottomTrailing) {
             // Menu attached directly to the FAB — popup anchors to the
@@ -182,6 +216,22 @@ struct TimelineScreen: View {
         ) {
             MediaNoteEditorScreen(initialItem: mediaPickerItem)
         }
+        // Phase F.0.3 — graphical date picker for "jump to any date."
+        // Tapping the header date column opens this. `.medium` detent
+        // keeps the calendar comfortably sized without taking the whole
+        // screen.
+        .sheet(isPresented: $isDatePickerPresented) {
+            DatePickerSheet(
+                selection: TimelineStore.shared.selectedDate,
+                onSelect: { picked in
+                    TimelineStore.shared.selectDate(picked)
+                    isDatePickerPresented = false
+                },
+                onDismiss: { isDatePickerPresented = false }
+            )
+            .presentationDetents([.medium])
+            .presentationDragIndicator(.visible)
+        }
         // Phase E.5.17 — delete confirmation uses `.alert` (centered
         // modal) instead of `.confirmationDialog` (bottom action sheet).
         // For irreversible single-item destruction Apple consistently
@@ -208,39 +258,114 @@ struct TimelineScreen: View {
 
     // MARK: - Header
 
+    /// Phase F.0.3 — date navigator header. Layered affordances:
+    /// 1. Chevron buttons flanking the date title = previous / next day.
+    /// 2. Tap the date title = open a graphical `DatePicker` sheet.
+    /// 3. "Today" pill below the row when not on today = jump back.
+    /// 4. Swipe gesture on the content area (wired separately) = prev/next.
+    ///
+    /// Layout: a small `TODAY` / weekday caption sits in its own top row
+    /// alongside the right-side controls (Board sub-mode + gear). The
+    /// chevrons flank only the big serif date title in the row below, so
+    /// the 44pt-tall chevron tap targets center cleanly against the 28pt
+    /// title (rather than floating mid-column when the caption was
+    /// stacked above the title inside the same chevron HStack).
     private var header: some View {
-        HStack(alignment: .top, spacing: 8) {
-            VStack(alignment: .leading, spacing: 4) {
+        // Spacing 0 + a 40pt chevron tap target (down from 44pt) tightens
+        // the caption-to-title gap to ~6pt — close to the 4pt the prior
+        // single-VStack-button layout had, while keeping a comfortable
+        // tap area for previous/next-day navigation.
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .center, spacing: 8) {
                 Text(dayOfWeek)
                     .font(.DS.sans(size: 11, weight: .bold))
                     .tracking(0.88)
                     .textCase(.uppercase)
                     .foregroundStyle(Color.DS.fg2)
-                Text(dateTitle)
-                    .font(.DS.serif(size: 28, weight: .bold))
-                    .tracking(-0.56)  // -0.02em at 28pt
-                    .foregroundStyle(Color.DS.ink)
+                Spacer(minLength: 8)
+                if viewMode == .board {
+                    boardSubModeMenu
+                        .transition(.opacity.combined(with: .scale(scale: 0.85)))
+                }
+                Button(action: openSettings) {
+                    Image(systemName: "gearshape")
+                        .font(.system(size: 20, weight: .regular))
+                        .foregroundStyle(Color.DS.ink)
+                        .frame(width: 40, height: 40)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Settings")
             }
-            Spacer(minLength: 12)
-            // Phase E.5.13 — Board sub-mode picker moved from an inline
-            // segmented row into a top-right toolbar Menu (Apple Files /
-            // Photos pattern). Hidden in Timeline view (no sub-modes).
-            // Icon reflects the active sub-mode so the user has a visual
-            // cue at a glance without opening the menu.
-            if viewMode == .board {
-                boardSubModeMenu
-                    .transition(.opacity.combined(with: .scale(scale: 0.85)))
+
+            HStack(alignment: .center, spacing: 4) {
+                chevronButton(.left)
+
+                Button {
+                    isDatePickerPresented = true
+                } label: {
+                    Text(dateTitle)
+                        .font(.DS.serif(size: 28, weight: .bold))
+                        .tracking(-0.56)  // -0.02em at 28pt
+                        .foregroundStyle(Color.DS.ink)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Pick a date")
+
+                chevronButton(.right)
+
+                Spacer(minLength: 0)
             }
-            Button(action: openSettings) {
-                Image(systemName: "gearshape")
-                    .font(.system(size: 20, weight: .regular))
-                    .foregroundStyle(Color.DS.ink)
-                    .frame(width: 40, height: 40)
-                    .contentShape(Rectangle())
+
+            if !TimelineStore.shared.isViewingToday {
+                todayPill
+                    .padding(.top, 4)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Settings")
         }
+        .animation(.easeOut(duration: 0.18), value: TimelineStore.shared.selectedDate)
+    }
+
+    private enum ChevronDirection { case left, right }
+
+    @ViewBuilder
+    private func chevronButton(_ direction: ChevronDirection) -> some View {
+        Button {
+            TimelineStore.shared.shiftSelectedDate(byDays: direction == .left ? -1 : 1)
+        } label: {
+            Image(systemName: direction == .left ? "chevron.left" : "chevron.right")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(Color.DS.fg2)
+                .frame(width: 32, height: 40)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(direction == .left ? "Previous day" : "Next day")
+    }
+
+    /// "Today" pill — reset-to-today affordance shown only when viewing a
+    /// non-today date. Compact, sage-tinted, hugs the leading edge.
+    private var todayPill: some View {
+        Button {
+            TimelineStore.shared.goToToday()
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "arrow.uturn.backward")
+                    .font(.system(size: 11, weight: .semibold))
+                Text("Today")
+                    .font(.DS.sans(size: 13, weight: .semibold))
+            }
+            .foregroundStyle(Color.DS.sageDeep)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(
+                Capsule()
+                    .fill(Color.DS.sageSoft)
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Jump to today")
     }
 
     /// Top-right Menu picker for the Board sub-mode (Cards / Stack /
@@ -265,11 +390,21 @@ struct TimelineScreen: View {
     }
 
     private var dayOfWeek: String {
-        Date.now.formatted(.dateTime.weekday(.wide))
+        let date = TimelineStore.shared.selectedDate
+        let weekday = date.formatted(.dateTime.weekday(.wide))
+        let cal = Calendar.current
+        // Render as "Today · Monday" / "Yesterday · Sunday" / etc. so the
+        // user keeps the weekday context for the relative-day labels.
+        // `.textCase(.uppercase)` on the Text view uppercases at render
+        // time; the strings here use mixed-case for readability.
+        if cal.isDateInToday(date)     { return "Today · \(weekday)" }
+        if cal.isDateInYesterday(date) { return "Yesterday · \(weekday)" }
+        if cal.isDateInTomorrow(date)  { return "Tomorrow · \(weekday)" }
+        return weekday
     }
 
     private var dateTitle: String {
-        Date.now.formatted(.dateTime.month(.wide).day())
+        TimelineStore.shared.selectedDate.formatted(.dateTime.month(.wide).day())
     }
 
     // MARK: - Segmented toggles
@@ -297,6 +432,10 @@ struct TimelineScreen: View {
 
     @ViewBuilder
     private var content: some View {
+        // Empty state shows when there are zero notes — same UI whether
+        // we're still loading (in which case `LoadingBar` overlays it
+        // from the top) or actually empty for the day. Less jarring
+        // than swapping the layout in/out around the brief load.
         if notes.isEmpty {
             emptyState
         } else {

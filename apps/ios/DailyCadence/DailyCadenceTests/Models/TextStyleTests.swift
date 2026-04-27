@@ -18,7 +18,7 @@ struct TextStyleTests {
     @Test func mockNoteCollapsesEmptyStyleToNil() {
         // Empty TextStyles must not leak into persistence — the init nil-erases them.
         let note = MockNote(
-            time: "9:00 AM",
+            occurredAt: .now,
             type: .mood,
             content: .text(title: "x"),
             titleStyle: TextStyle()  // empty
@@ -28,7 +28,7 @@ struct TextStyleTests {
 
     @Test func mockNotePreservesNonEmptyStyle() {
         let note = MockNote(
-            time: "9:00 AM",
+            occurredAt: .now,
             type: .mood,
             content: .text(title: "x"),
             titleStyle: TextStyle(fontId: "playfair", colorId: "bold.cobalt")
@@ -80,7 +80,7 @@ struct TextStyleTests {
     @Test func styleSurvivesStoreRoundTrip() {
         let store = TimelineStore(initialNotes: [])
         let note = MockNote(
-            time: "9:00 AM",
+            occurredAt: .now,
             type: .meal,
             content: .text(title: "Styled"),
             titleStyle: TextStyle(fontId: "baskerville", colorId: "bright.coral")

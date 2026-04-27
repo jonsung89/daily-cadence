@@ -1,6 +1,6 @@
 # DailyCadence — Progress
 
-**Last updated:** 2026-04-27 (Phase F.0.1 — `AuthStore` with anonymous bootstrap + Settings → Account row; auth state observable end-to-end)
+**Last updated:** 2026-04-27 (Phase F.0.3 — date navigation: per-day `notes` fetch, header chevrons + tap-to-pick + Today pill + swipe gesture; editor date+time picker; `MockNote.occurredAt: Date?` is now the source of truth; redacted-skeleton replaced with thin top `LoadingBar`)
 **Current phase:** Phase 1 MVP — iOS app for Jon + wife, TestFlight distribution
 
 This is the living state of the project. Update at the end of every session.
@@ -1452,10 +1452,78 @@ Also handles `.signedOut` / `.userDeleted` by re-running `signInAnonymously()` s
 
 **Verified by build (138/138 unit tests still pass).** Live anon sign-in tested manually by Jon — confirm via Settings → Account showing a UUID.
 
+### Phase F.0.2 — NotesRepository + live TimelineStore (added this round)
+
+The data half of Phase F's iOS layer. The Today timeline now reads from Supabase on launch, and the editor's Save button persists in the background.
+
+**`Services/NotesRepository.swift`.** A new singleton repository over the `notes` and `note_types` tables. Surface: `fetchAll(userId:) async throws -> [MockNote]`, `insert(_:userId:) async throws -> UUID?` (returns the server-canonical id), `delete(id:) async throws` (soft-delete via `deleted_at = now()`). Internally caches `note_types` slug↔id lookups (loaded once on first call) so notes can store the right `type_id` FK while iOS keeps using its `NoteType` slug enum at the call site.
+
+**Body + structured_data JSON shapes.** Three private DTO types — `BodyBlockDTO` (paragraph + media block kinds, `kind` discriminator per the schema vocab), `StructuredDataDTO` (stat/list/quote variants), `TitleStyleDTO` (`fontId` / `colorId`). The `body` JSONB array is `[{"kind":"paragraph","text":"..."},...]`; `structured_data` is `null` for `.text` and `.media` content, populated for `.stat` / `.list` / `.quote`. Unknown `body` block kinds default to `paragraph` on decode so admin-panel-added kinds don't crash old clients.
+
+**`TimelineStore` is now live.** New shape:
+- `load(userId:) async` — fetch + replace `notes`. Idempotent; flips `hasLoaded` on success. Keeps the existing in-memory list on failure (better cold-start UX offline).
+- `add(_:)` and `delete(noteId:)` stay synchronous to callers — they update the in-memory list immediately and spawn an internal `Task` to persist. On insert success the optimistic UUID is swapped for the server-canonical one. On insert failure the optimistic row is reverted; on delete failure we don't revert (user already saw the note disappear) but `lastError` surfaces for diagnostics.
+- `lastError: String?` exposed for future toast UI.
+
+**Load trigger.** `RootView` adds `.task(id: AuthStore.shared.currentUserId)` — fires when the anon-auth bootstrap settles `currentUserId` from nil → uuid, guarded by `hasLoaded` so it's once-per-launch.
+
+**MockNote tweak.** Added `id: UUID = UUID()` as the first init param so the repository can construct `MockNote` values with server-supplied UUIDs. Existing call sites unchanged (default param). Same-build callers required a clean rebuild because the init's symbol mangling changed even though source-level call shape didn't.
+
+**Design system note: discriminator vocab in code now matches the schema.** `kind` for JSONB shape discriminators (block kinds, structured-data variants); `type` reserved for note category (`NoteType`). DTOs follow.
+
+### Phase F.0.3a — MockNote.occurredAt as source of truth (added this round)
+
+Pure refactor — invisible in the UI, foundational for date navigation. Replaced `MockNote.time: String` (display string like "8:00 AM") with `occurredAt: Date?` as the stored property. `time` becomes a computed display getter (`h:mm a` formatted from `occurredAt`, or `"—"` when nil/evergreen).
+
+**Why now.** Phase F.0.3b's day filtering needs a real `Date` to compute `[startOfDay, startOfNextDay)` ranges and compare against `notes.occurred_at: timestamptz`. The previous parse/format hack (parse "8:00 AM" + splice today's date) only worked for today and was locale-fragile. With `occurredAt` as a real Date, encode/decode through `NotesRepository` becomes trivial — pass the Date through unchanged.
+
+**Ripples.**
+- `MockNotes.today` seed + `MockNotes.skeletonPlaceholders` use a new `todayAt(_:_:)` helper that constructs today's local-day Date at given hour+minute (so previews and skeletons always look "current" regardless of when the app launches).
+- Both editors (`NoteEditorScreen`, `MediaNoteEditorScreen`) stamp `Date.now` directly instead of formatting + parsing display strings.
+- `NotesRepository.encodeForInsert` / `decode` use the Date directly. Removed `parseDisplayTime` / `formatDisplayTime` + the shared `displayTimeStyle` formatter.
+- `TimelineStore.persistAdd` constructs the canonical-id swap MockNote with `occurredAt: note.occurredAt`.
+- ~30 test sites batch-replaced via `sed s/time: "[^"]*"/occurredAt: .now/`. Component-level previews (`KeepCard`, `KeepGrid`) updated to use `MockNotes.todayAt(h, m)` so the visual rhythm of "varied times across a day" survives.
+
+138/138 tests still green after the refactor.
+
+### Phase F.0.3b — Date navigation on Today (added this round)
+
+The user-visible feature. The Today screen is now per-day: chevrons / tap / swipe / "Today" pill all work, both editors honor the selected day, and the fetch is scoped to the day's `[startOfDay, startOfNextDay)` window.
+
+**`NotesRepository.fetchForDay(userId:, day:)`** replaces `fetchAll`. Filters by `occurred_at >= startOfDay AND occurred_at < startOfNextDay` in the user's local calendar (`Calendar.current`). Evergreen notes (`occurred_at IS NULL`) are excluded — they live in a separate "Notes" surface (Phase F+).
+
+**`TimelineStore.selectedDate`** is the new source of truth for "which day is showing." Defaults to today's `startOfDay`. Mutations:
+- `selectDate(_:)` — switch to a normalized day; clears `notes` immediately + flips `hasLoaded` to `false` (skeleton shows on day-switch, matching cold-launch behavior).
+- `goToToday()` — convenience for the "Today" pill.
+- `shiftSelectedDate(byDays:)` — used by chevrons + swipe.
+- `isViewingToday` — computed; drives the "Today" pill's visibility.
+
+**`RootView` load trigger** got a composite `TimelineLoadKey` id (`{userId, selectedDate}`). SwiftUI restarts the `.task` whenever either changes, so the timeline re-fetches on auth transitions AND day changes. `hasLoaded` still guards same-id re-fires.
+
+**Header redesign in `TimelineScreen`.** Two-row layout:
+- **Top row:** TODAY / YESTERDAY / TOMORROW / weekday caption on the leading edge; Board sub-mode menu (Board view only) + gear on the trailing edge.
+- **Bottom row:** chevron + big serif date title + chevron. Chevrons (32×44 hit targets, `fg2` ink) center cleanly on the 28pt title now that the small caption isn't stacked above the title inside the same HStack. Tap the date title → `DatePickerSheet` (graphical, `.medium` detent).
+- "Today" pill below the navigator when not on today (sage capsule with `arrow.uturn.backward` glyph). Animated entry/exit with `.opacity.combined(.move(.top))`.
+
+**Loading state — thin top progress bar (`DesignSystem/Components/LoadingBar.swift`).** While `TimelineStore.load(...)` is in flight, a 2pt sage indeterminate bar overlays the top of the screen. The custom slide animation (a 35%-width segment travelling left→right with `.linear` `.repeatForever`) gives the modern Safari/Mail loading affordance without taking layout space. Replaces the prior redacted-skeleton approach, which flashed in/out on every short day-switch fetch and felt distracting. Empty days still show `emptyState` — same UI whether loading or confirmed-empty — so the layout doesn't reorganize when the bar appears or disappears. `MockNotes.skeletonPlaceholders` and the `.redacted(.placeholder)` wiring were removed.
+
+**`DatePickerSheet`** (new file) — wraps `DatePicker(.graphical)`, sage tint, Cancel + Done toolbar, `.medium` detent. Future dates unbounded.
+
+**Swipe gesture on the ScrollView** — `simultaneousGesture(DragGesture)` with strict horizontal-dominance guard (`abs(dx) > abs(dy) * 1.5 && abs(dx) > 60`) so vertical scroll keeps working. Direction maps to `shiftSelectedDate(byDays: ±1)`.
+
+**Editor date+time picker.** `DatePicker(.compact)` row at the bottom of `NoteEditorScreen` form (and the same shape in `MediaNoteEditorScreen`). Bound to `draft.occurredAt` (text editor) or local `@State` (media editor). Default value: `TimelineStore.selectedDate` spliced with the current wall-clock time-of-day — so notes saved while viewing a past day land at a believable position in that day's chronology. User picks override the default.
+
+**`Calendar` tab unchanged** — it stays the surface for browsing by month/year. The Today date nav is for adjacent-day navigation; the Calendar tab is for the archive.
+
 ### Phase F+ feature TODO (designed-for, not-built)
 
 Captured here so a fresh session can pick up the roadmap. Each line corresponds to schema fields that are reserved but unused.
 
+- **Media-note Storage upload pipeline** — Phase F.0.2 ships text/stat/list/quote round-trip but skips media notes (`if case .media = note.content { return nil }` in `NotesRepository.insert`). The upload flow needs: bytes → `note-media` Storage bucket via `client.storage.from("note-media").upload(...)`; URL stored as a body media block (`{"kind":"media","url":"https://.../signed","aspect":1.5,"caption":"..."}`); on fetch, signed-URL refresh on view. Same shape works for video posters. Until this lands, media notes appear in the timeline session-only and disappear on relaunch (matching pre-F.0.2 behavior).
+- **Image-background Storage upload + library** — same pattern as media-note bytes, with `note-backgrounds` Storage bucket. Each upload also INSERTs a `backgrounds` row that the user's library carries forward. Phase F.0.2 always writes `notes.background_id = NULL` and image-bg state is session-only.
+- **Swatch-background `background_id` resolution** — the migration seeds 7 `backgrounds` rows for common palette swatches (linen / sand / taupe / mint / sky / lavender / lilac). Phase F.0.2 doesn't link to them; notes carry no persistent swatch background. Resolver: load `backgrounds` rows once into a `swatchId → backgroundId` cache, set `background_id` on insert when the note's swatch matches a seeded entry. For non-seeded swatches, INSERT a new `backgrounds` row inline (system-owned for design-system swatches; user-owned for custom).
+- **AttributedString per-run styling round-trip** — gated on the Phase E.2 polish (custom `fontId` / `colorId` AttributedStringKeys). Phase F.0.2 paragraphs serialize as plain text (`String(attr.characters)`), losing per-run font + color choices on save. The body JSONB schema accommodates extension via a `runs: [...]` array on each paragraph block — no DB migration needed when E.2 polish lands.
+- **MockNote → Note rename + `occurredAt: Date` refactor** — replace `time: String` with `occurredAt: Date?` as the source of truth, with `time` as a computed display getter. Eliminates the locale-symmetric round-trip in `NotesRepository.parseDisplayTime`, makes evergreen notes (NULL occurred_at) representable, and aligns the iOS model name with the persisted entity.
 - **Recently Deleted UI** — list soft-deleted notes; per-note Restore / Delete forever; bulk "Empty Recently Deleted." Schedule-driven hard-delete via `pg_cron` after 30 days.
 - **Reschedule action menu + indicator** — "Push to..." date picker on uncompleted notes; creates new note with `rescheduled_from_id` set, marks original `cancelled_at = now()`. Indicator: small SF Symbol (`arrow.uturn.forward.circle` candidate) on cancelled rows; tap reveals "Moved to [date]" with link to successor.
 - **Evergreen toggle in editor** — date/time picker gains a "Clear" / "No date" option; clearing sets `occurred_at = NULL`. Notes display "No date" in time column. Evergreen notes appear in a separate "Notes" surface (not the dated timeline).
@@ -1499,9 +1567,9 @@ Captured here so a fresh session can pick up the roadmap. Each line corresponds 
 
 ## 🚧 In flight
 
-**Phase F (Supabase persistence) — auth layer landed, data layer next.** `AppSupabase.client` + `AuthStore` are wired; the app signs in anonymously on first launch and the user_id surfaces in Settings → Account. Next concrete step: `NotesRepository` (CRUD against `notes` table) → swap `TimelineStore.notes` from `MockNotes.today` to a live fetch keyed off `AuthStore.shared.currentUserId`.
+**Phase F (Supabase persistence) — text/stat/list/quote round-trip live; media + backgrounds + run-styling deferred.** `AppSupabase.client` + `AuthStore` + `NotesRepository` + the wired `TimelineStore` are all in place. The app signs in anonymously on launch, fetches the user's notes once `AuthStore.currentUserId` settles, and persists subsequent adds/deletes optimistically. Open Phase F+ persistence work captured in the Phase F+ TODO section: media-note Storage upload pipeline, image-background uploads, swatch-background-id resolution, AttributedString per-run styling round-trip (gated on Phase E.2 polish).
 
-Other open follow-ups (unchanged from prior round): per-block focused TextEditors (mid-paragraph image insertion — currently the model supports it but UI ships intro/attachments/outro three-zone layout), drag-to-reorder blocks, inline text formatting (bold/italic/underline/strikethrough), auto-bullet + checkboxes in text notes, auto-scroll the cards grid when dragging near a viewport edge.
+Other open follow-ups (unchanged from prior rounds): per-block focused TextEditors (mid-paragraph image insertion — currently the model supports it but UI ships intro/attachments/outro three-zone layout), drag-to-reorder blocks, inline text formatting (bold/italic/underline/strikethrough), auto-bullet + checkboxes in text notes, auto-scroll the cards grid when dragging near a viewport edge.
 
 ---
 

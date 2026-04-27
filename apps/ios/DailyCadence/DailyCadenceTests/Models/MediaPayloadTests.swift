@@ -56,7 +56,7 @@ struct MediaPayloadTests {
         )
         let store = TimelineStore(initialNotes: [])
         store.add(MockNote(
-            time: "6:00 AM",
+            occurredAt: .now,
             type: .activity,
             content: .media(payload)
         ))
@@ -80,7 +80,7 @@ struct MediaPayloadTests {
             caption: nil
         )
         let imageNote = MockNote(
-            time: "9:00 AM",
+            occurredAt: .now,
             type: .general,
             content: .media(captionless)
         )
@@ -88,7 +88,7 @@ struct MediaPayloadTests {
                 "A captionless image note's timeline title should default to 'Photo'")
 
         let videoNote = MockNote(
-            time: "9:30 AM",
+            occurredAt: .now,
             type: .general,
             content: .media(MediaPayload(kind: .video, data: Self.stubBytes, aspectRatio: 1.0))
         )
@@ -98,10 +98,10 @@ struct MediaPayloadTests {
 
     @Test func mediaPayloadAccessor() {
         let payload = MediaPayload(kind: .image, data: Self.stubBytes, aspectRatio: 1.0)
-        let note = MockNote(time: "9:00 AM", type: .general, content: .media(payload))
+        let note = MockNote(occurredAt: .now, type: .general, content: .media(payload))
         #expect(note.mediaPayload != nil)
 
-        let textNote = MockNote(time: "9:00 AM", type: .general, content: .text(title: "x"))
+        let textNote = MockNote(occurredAt: .now, type: .general, content: .text(title: "x"))
         #expect(textNote.mediaPayload == nil)
     }
 
@@ -109,7 +109,7 @@ struct MediaPayloadTests {
         // Phase E.4 — `Kind` derives from Content + media kind. Cards use
         // `isMediaNote` to pick between the text and full-bleed scaffolds.
         let imageNote = MockNote(
-            time: "9:00 AM",
+            occurredAt: .now,
             type: .general,
             content: .media(MediaPayload(kind: .image, data: Self.stubBytes, aspectRatio: 1.0))
         )
@@ -117,19 +117,19 @@ struct MediaPayloadTests {
         #expect(imageNote.isMediaNote)
 
         let videoNote = MockNote(
-            time: "9:00 AM",
+            occurredAt: .now,
             type: .general,
             content: .media(MediaPayload(kind: .video, data: Self.stubBytes, aspectRatio: 1.0))
         )
         #expect(videoNote.kind == .video)
         #expect(videoNote.isMediaNote)
 
-        let textNote = MockNote(time: "9:00 AM", type: .general, content: .text(title: "x"))
+        let textNote = MockNote(occurredAt: .now, type: .general, content: .text(title: "x"))
         #expect(textNote.kind == .text)
         #expect(!textNote.isMediaNote)
 
         let listNote = MockNote(
-            time: "9:00 AM",
+            occurredAt: .now,
             type: .general,
             content: .list(title: "x", items: ["a", "b"])
         )

@@ -10,7 +10,7 @@ struct TimelineStoreTests {
 
     @Test func initialNotesMatchInjectedSeed() {
         let seed = [
-            MockNote(time: "9:00 AM", type: .mood, content: .text(title: "Test")),
+            MockNote(occurredAt: .now, type: .mood, content: .text(title: "Test")),
         ]
         let store = TimelineStore(initialNotes: seed)
         #expect(store.notes.count == 1)
@@ -24,8 +24,8 @@ struct TimelineStoreTests {
 
     @Test func addAppendsToTheEnd() {
         let store = TimelineStore(initialNotes: [])
-        store.add(MockNote(time: "9:00 AM", type: .workout, content: .text(title: "First")))
-        store.add(MockNote(time: "9:15 AM", type: .meal,    content: .text(title: "Second")))
+        store.add(MockNote(occurredAt: .now, type: .workout, content: .text(title: "First")))
+        store.add(MockNote(occurredAt: .now, type: .meal,    content: .text(title: "Second")))
         #expect(store.notes.count == 2)
         #expect(store.notes[0].timelineTitle == "First")
         #expect(store.notes[1].timelineTitle == "Second")
@@ -37,7 +37,7 @@ struct TimelineStoreTests {
         // stat/list/quote shapes too.
         let store = TimelineStore(initialNotes: [])
         store.add(MockNote(
-            time: "7:00 AM",
+            occurredAt: .now,
             type: .sleep,
             content: .stat(title: "Slept", value: "7h 30m", sub: nil)
         ))
@@ -48,12 +48,15 @@ struct TimelineStoreTests {
         #expect(value == "7h 30m")
     }
 
-    @Test func defaultInitUsesMockNotesSeed() {
-        // The shared singleton seeds with MockNotes.today; this verifies
-        // a fresh non-shared instance does the same when no override given.
+    @Test func defaultInitYieldsEmptyAtRuntime() {
+        // Phase F.0.2: production launches start empty so a fresh anon user
+        // doesn't see other people's mock-seed notes flash on the timeline
+        // before NotesRepository.load completes. SwiftUI Previews still seed
+        // MockNotes.today via the XCODE_RUNNING_FOR_PREVIEWS env var, but
+        // this test runs in xctest, not previews — so the default is empty.
         let store = TimelineStore()
-        #expect(store.notes.count == MockNotes.today.count,
-                "Default seed must match MockNotes.today so the simulator launch shows the curated sample day")
+        #expect(store.notes.isEmpty,
+                "Default seed at runtime must be empty so first-launch users don't see fake notes flash")
     }
 
     @Test func attributedMessagePreservesPerRunAttributes() {
@@ -68,7 +71,7 @@ struct TimelineStoreTests {
         }
         let store = TimelineStore(initialNotes: [])
         store.add(MockNote(
-            time: "9:00 AM",
+            occurredAt: .now,
             type: .mood,
             content: .text(title: "Rich", message: attributed)
         ))

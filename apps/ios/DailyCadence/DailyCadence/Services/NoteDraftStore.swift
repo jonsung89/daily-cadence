@@ -75,6 +75,12 @@ final class NoteDraftStore {
     /// Optional per-note background (color swatch or photo).
     var background: MockNote.Background? = nil
 
+    /// Phase F.0.3 — when set, overrides the editor's default save
+    /// timestamp ("selected day, current time-of-day"). Bound to the
+    /// editor's date+time picker. Cleared between editor sessions
+    /// (the picker re-defaults from `TimelineStore.selectedDate` on open).
+    var occurredAt: Date? = nil
+
     init() {}
 
     /// True when the user has typed nothing and made no styling choices.
@@ -109,6 +115,7 @@ final class NoteDraftStore {
         titleStyle = nil
         selectedType = .general
         background = nil
+        occurredAt = nil
     }
 
     // MARK: - Single-paragraph compatibility bridge

@@ -45,7 +45,7 @@ struct TextBlockTests {
         let m  = TextBlock.media(Self.samplePayload(), size: .large)
         let p2 = TextBlock.paragraph(AttributedString("Hit a PR"))
         let note = MockNote(
-            time: "9:00 AM",
+            occurredAt: .now,
             type: .workout,
             content: .text(title: "Workout", body: [p1, m, p2])
         )
@@ -73,7 +73,7 @@ struct TextBlockTests {
         // produces a single-paragraph body — keeps existing seed data
         // and tests working unchanged.
         let note = MockNote(
-            time: "9:00 AM",
+            occurredAt: .now,
             type: .general,
             content: .text(title: "x", message: AttributedString("hello"))
         )
@@ -91,7 +91,7 @@ struct TextBlockTests {
 
     @Test func backwardCompatConstructorWithoutMessageProducesEmptyBody() {
         let note = MockNote(
-            time: "9:00 AM",
+            occurredAt: .now,
             type: .general,
             content: .text(title: "x")
         )
@@ -109,7 +109,7 @@ struct TextBlockTests {
         // (separated by spaces). Inline media blocks are skipped — the
         // rail is dense, full inline rendering happens on the Board card.
         let note = MockNote(
-            time: "9:00 AM",
+            occurredAt: .now,
             type: .workout,
             content: .text(title: "x", body: [
                 .paragraph(AttributedString("First")),
@@ -124,11 +124,11 @@ struct TextBlockTests {
 
     @Test func timelineMessageReturnsNilForBodyWithOnlyMediaOrEmpty() {
         let onlyMedia = MockNote(
-            time: "9:00 AM",
+            occurredAt: .now,
             type: .workout,
             content: .text(title: "x", body: [.media(Self.samplePayload(), size: .medium)])
         )
-        let empty = MockNote(time: "9:00 AM", type: .general, content: .text(title: "x"))
+        let empty = MockNote(occurredAt: .now, type: .general, content: .text(title: "x"))
         #expect(onlyMedia.timelineMessage == nil)
         #expect(empty.timelineMessage == nil)
     }
