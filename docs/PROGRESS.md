@@ -1,6 +1,6 @@
 # DailyCadence — Progress
 
-**Last updated:** 2026-04-27 (Phase F.0.3 — date navigation: per-day `notes` fetch, header chevrons + tap-to-pick + Today pill + swipe gesture; editor date+time picker; `MockNote.occurredAt: Date?` is now the source of truth; redacted-skeleton replaced with thin top `LoadingBar`)
+**Last updated:** 2026-04-27 (Phase F.1.0 — tap-to-edit: card tap opens `NoteEditorScreen` in edit mode pre-populated from the note. Apple Notes pattern: drag-to-dismiss autosaves; Cancel confirms-discard. Toolbar gains pin toggle + delete in edit mode.)
 **Current phase:** Phase 1 MVP — iOS app for Jon + wife, TestFlight distribution
 
 This is the living state of the project. Update at the end of every session.
@@ -1514,6 +1514,34 @@ The user-visible feature. The Today screen is now per-day: chevrons / tap / swip
 **Editor date+time picker.** `DatePicker(.compact)` row at the bottom of `NoteEditorScreen` form (and the same shape in `MediaNoteEditorScreen`). Bound to `draft.occurredAt` (text editor) or local `@State` (media editor). Default value: `TimelineStore.selectedDate` spliced with the current wall-clock time-of-day — so notes saved while viewing a past day land at a believable position in that day's chronology. User picks override the default.
 
 **`Calendar` tab unchanged** — it stays the surface for browsing by month/year. The Today date nav is for adjacent-day navigation; the Calendar tab is for the archive.
+
+### Phase F.1.0 — Tap-to-edit (added this round)
+
+The "view + edit a note" milestone. Modern instant-edit pattern (Apple Notes / Keep / Bear / Notion / Drafts) — no separate view-only mode; the timeline cards already serve the read-back use case.
+
+**Card tap**: text cards (`.text` content variant) gain an `onTap: (() -> Void)?` callback wired through `NoteCard`, `KeepCard`, `CardsBoardView`, and `StackedBoardView` (collapsed + expanded sections). The TimelineScreen passes `tapHandler(for:)` which returns nil for non-text variants, leaving them non-tappable for now. Media-card taps still go to `MediaViewerScreen` via the existing internal `mediaScaffold` gesture.
+
+**Editor in edit mode**: `NoteEditorScreen(editing: MockNote? = nil)`. New behaviors when `editing != nil`:
+- Pre-populates a **per-instance `NoteDraftStore`** from the note (so opening a note for edit doesn't trample the singleton's in-progress new-note draft, and vice versa).
+- Type picker collapses to the chip — the user already committed to a type.
+- Save button reads "Done" instead of "Save".
+- Save calls `TimelineStore.shared.update(_:)` instead of `add(_:)`.
+- Nav title shows the note's date (`Apr 27` style) — Apple Notes pattern.
+- **Per-mode dismissal** via `didCommit` / `didDiscard` flags + `.onDisappear`: drag-to-dismiss in edit mode autosaves; in create mode it preserves the recoverable draft (existing behavior).
+- **Cancel-with-confirmation**: dirty-vs-editing check compares title / body / type / background / titleStyle / occurredAt against the original note. Confirmation alert reads "Discard changes?" instead of "Discard draft?".
+
+**Toolbar actions menu** (edit mode only): an `ellipsis.circle` button next to Done opens a Menu with **Pin/Unpin** (toggles `PinStore`) and **Delete** (arms a confirmation alert — same Apple-pattern centered alert as the timeline's long-press Delete). Pin status reads through `PinStore.shared.isPinned(_:)` so the label flips live without re-rendering.
+
+**Optimistic update path**:
+- `NotesRepository.update(_:userId:)` — UPDATE query with the same encoder as insert; skips media notes pending Storage upload (Phase F+).
+- `TimelineStore.update(_:)` — replaces the in-memory note immediately; spawns a background Task to persist; on failure, reverts to the previous version and surfaces `lastError`.
+
+**`NoteDraftStore.populate(from:)`** — clears + re-populates draft state from a note's content. Today only `.text` content fully round-trips (title, body blocks, type, background, titleStyle, occurredAt). `.stat` / `.list` / `.quote` populate the title only as a fallback so the user can at least re-type or re-categorize; the structured fields aren't editable yet (no editor for those variants today either). `.media` is filtered out at `requestEdit` so populate is never called for it.
+
+**Where we lead the pack vs Apple Notes / Keep:**
+- Type re-categorization in the same edit (chip row).
+- Per-note photo background + opacity editable in same surface.
+- `occurredAt` picker for re-timing — most apps only show created/modified passively.
 
 ### Phase F+ feature TODO (designed-for, not-built)
 

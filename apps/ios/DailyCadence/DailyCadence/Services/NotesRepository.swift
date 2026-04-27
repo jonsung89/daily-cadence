@@ -106,6 +106,28 @@ final class NotesRepository {
         return row.id
     }
 
+    /// Updates an existing note's mutable fields. The `id` and `user_id`
+    /// stay fixed (RLS scopes the update to rows the user owns); we
+    /// re-encode the rest from the in-memory `MockNote`. Media notes are
+    /// skipped same as `insert(_:userId:)` — Storage upload pipeline first.
+    func update(_ note: MockNote, userId: UUID) async throws {
+        if case .media = note.content {
+            log.notice("Skipping update: media notes need Storage upload (Phase F+)")
+            return
+        }
+        try await ensureNoteTypesLoaded()
+        guard let typeId = noteTypeIdBySlug[note.type.rawValue] else {
+            throw NotesRepositoryError.unknownNoteTypeSlug(note.type.rawValue)
+        }
+        let payload = encodeForInsert(note, userId: userId, typeId: typeId)
+        try await AppSupabase.client
+            .from("notes")
+            .update(payload)
+            .eq("id", value: note.id)
+            .execute()
+        log.info("Updated note: id=\(note.id) type=\(note.type.rawValue)")
+    }
+
     /// Soft-delete: sets `deleted_at = now()`. The 30-day hard-delete sweep
     /// is server-side (a future `pg_cron` job).
     func delete(id: UUID) async throws {

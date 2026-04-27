@@ -31,6 +31,13 @@ struct TimelineScreen: View {
     /// the dialog calls `TimelineStore.shared.delete(noteId:)`.
     @State private var pendingDeleteId: UUID? = nil
 
+    /// Phase F.1.0 — note the user has tapped to view+edit. When
+    /// non-nil, presents `NoteEditorScreen(editing:)` as a sheet.
+    /// Tapped from `NoteCard` / `KeepCard`'s `onTap` closures via
+    /// `requestEdit(_:)`, which also filters out non-text variants
+    /// (their editing flow isn't built yet).
+    @State private var editingNote: MockNote? = nil
+
     /// First-launch discoverability hint for the long-press → context
     /// menu affordance. Auto-dismisses the first time the user pins or
     /// deletes a card via the menu (see `CardActionsTip`).
@@ -80,6 +87,28 @@ struct TimelineScreen: View {
     /// arms the confirmation dialog.
     private func requestDelete(_ noteId: UUID) {
         pendingDeleteId = noteId
+    }
+
+    /// Phase F.1.0 — closure passed to text cards' `onTap:` parameter.
+    /// Looks up the tapped note by id and arms the editor sheet for
+    /// edit mode. Filters to `.text` content only — `.stat` / `.list` /
+    /// `.quote` aren't authored by the current editor and `.media` will
+    /// open `MediaViewerScreen` separately when wired (today, media-card
+    /// taps still go through `NoteCard`'s internal viewer presenter).
+    private func requestEdit(_ noteId: UUID) {
+        guard let note = TimelineStore.shared.notes.first(where: { $0.id == noteId }) else { return }
+        if case .text = note.content {
+            editingNote = note
+        }
+    }
+
+    /// Convenience: only fire `requestEdit` for text-shaped notes. Cards
+    /// with non-text content (stat/list/quote/media) get `nil` here so
+    /// `onTapGesture` on their text scaffold no-ops. Media cards retain
+    /// their internal media-viewer tap.
+    private func tapHandler(for note: MockNote) -> (() -> Void)? {
+        guard case .text = note.content else { return nil }
+        return { requestEdit(note.id) }
     }
 
     var body: some View {
@@ -207,6 +236,13 @@ struct TimelineScreen: View {
             isPresented: $isEditorPresented
         ) {
             NoteEditorScreen()
+        }
+        // Phase F.1.0 — edit-mode editor, presented when the user taps a
+        // text card. Uses `.sheet(item:)` so the binding clears when the
+        // user dismisses, which is also our autosave trigger via
+        // `NoteEditorScreen.onDisappear`.
+        .sheet(item: $editingNote) { note in
+            NoteEditorScreen(editing: note)
         }
         .sheet(
             isPresented: $isMediaEditorPresented,
@@ -487,7 +523,8 @@ struct TimelineScreen: View {
             case .stacked:
                 StackedBoardView(
                     groups: groupedNotes,
-                    onRequestDelete: { requestDelete($0) }
+                    onRequestDelete: { requestDelete($0) },
+                    onRequestEdit: { requestEdit($0) }
                 )
             }
         }
@@ -547,7 +584,11 @@ struct TimelineScreen: View {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(alignment: .top, spacing: 10) {
                         ForEach(pinnedNotes) { note in
-                            KeepCard(note: note, onRequestDelete: { requestDelete($0.id) })
+                            KeepCard(
+                                note: note,
+                                onRequestDelete: { requestDelete($0.id) },
+                                onTap: tapHandler(for: note)
+                            )
                                 .containerRelativeFrame(.horizontal, alignment: .leading) { width, _ in
                                     width * 0.55
                                 }
@@ -558,7 +599,11 @@ struct TimelineScreen: View {
                 .scrollTargetBehavior(.viewAligned)
             } else {
                 KeepGrid(items: pinnedNotes) { note in
-                    KeepCard(note: note, onRequestDelete: { requestDelete($0.id) })
+                    KeepCard(
+                                note: note,
+                                onRequestDelete: { requestDelete($0.id) },
+                                onTap: tapHandler(for: note)
+                            )
                 }
             }
         }
@@ -575,7 +620,8 @@ struct TimelineScreen: View {
     private var cardsBoardGrid: some View {
         CardsBoardView(
             notes: CardsViewOrderStore.shared.sorted(unpinnedNotes),
-            onRequestDelete: requestDelete
+            onRequestDelete: requestDelete,
+            onRequestEdit: requestEdit
         )
     }
 
@@ -654,7 +700,11 @@ struct TimelineScreen: View {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(alignment: .top, spacing: 10) {
                             ForEach(group.notes) { note in
-                                KeepCard(note: note, onRequestDelete: { requestDelete($0.id) })
+                                KeepCard(
+                                note: note,
+                                onRequestDelete: { requestDelete($0.id) },
+                                onTap: tapHandler(for: note)
+                            )
                                     // ~55% of the visible scroll width:
                                     // shows ~2 cards with a peek of the
                                     // next so the user knows the rail
@@ -723,7 +773,8 @@ struct TimelineScreen: View {
                         titleStyle: note.titleStyle,
                         media: note.mediaPayload,
                         noteId: note.id,
-                        onRequestDelete: requestDelete
+                        onRequestDelete: requestDelete,
+                        onTap: tapHandler(for: note)
                     )
                 }
             }

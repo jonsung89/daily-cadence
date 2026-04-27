@@ -35,9 +35,43 @@ struct NoteEditorScreen: View {
     /// dark-mode treatment.
     @Environment(\.colorScheme) private var colorScheme
 
-    /// Source of truth for every editable field — survives accidental
-    /// dismissals during the same app session (see `NoteDraftStore`).
-    private let draft = NoteDraftStore.shared
+    /// When non-nil, the editor is opened in **edit mode** — pre-populated
+    /// with this note's data on appear, and Save calls `TimelineStore.update`
+    /// instead of `add`. Drag-to-dismiss in edit mode autosaves (Apple
+    /// Notes pattern). When nil, the editor is in **create mode** — backed
+    /// by `NoteDraftStore.shared` for cross-session draft recovery, and
+    /// drag-to-dismiss preserves the draft (no save).
+    let editing: MockNote?
+
+    /// Source of truth for every editable field. **Create mode** uses the
+    /// shared singleton so drafts survive accidental dismissals across
+    /// sessions. **Edit mode** uses a per-instance store populated from
+    /// `editing` so opening a note for edit doesn't trample any
+    /// in-progress new-note draft (and vice versa).
+    @State private var draft: NoteDraftStore
+
+    /// Tracks whether the user explicitly committed (Save) or discarded
+    /// (Cancel) before dismiss. If neither fired by the time the sheet
+    /// goes away, we infer drag-to-dismiss and apply per-mode semantics
+    /// (edit → autosave; create → keep draft).
+    @State private var didCommit = false
+    @State private var didDiscard = false
+
+    init(editing: MockNote? = nil) {
+        self.editing = editing
+        let initialDraft: NoteDraftStore
+        if let editing {
+            let store = NoteDraftStore()
+            store.populate(from: editing)
+            initialDraft = store
+        } else {
+            initialDraft = .shared
+        }
+        self._draft = State(wrappedValue: initialDraft)
+        self._typePickerExpanded = State(
+            wrappedValue: editing == nil && initialDraft.isEmpty
+        )
+    }
 
     @State private var isBackgroundPickerPresented = false
     /// Which of the toolbar's three styling panels is currently expanded
@@ -59,11 +93,20 @@ struct NoteEditorScreen: View {
     /// categories are immediately discoverable. When they're resuming a
     /// retained draft (drag-dismissed earlier and re-opened) we collapse
     /// to the chosen chip — they've already committed.
-    @State private var typePickerExpanded: Bool = NoteDraftStore.shared.isEmpty
+    /// Edit mode collapses to the chip (the user already committed to a
+    /// type). Create mode expands when the draft is empty (discoverability)
+    /// and collapses when resuming a draft (the user already chose).
+    @State private var typePickerExpanded: Bool
 
     /// Drives the Cancel-button confirmation dialog. Skipped entirely
     /// when there's nothing to lose (draft is empty).
     @State private var isCancelConfirmationPresented = false
+
+    /// Phase F.1.0 — drives the Delete-from-edit confirmation alert.
+    /// Tapping Delete in the toolbar's actions menu sets this; the
+    /// alert's destructive action calls `TimelineStore.delete` and
+    /// dismisses the editor.
+    @State private var isDeleteConfirmationPresented = false
 
     /// Phase E.5.18 — drives the inline-attachment PhotosPicker. Tap the
     /// `+image` icon in the StyleToolbar → `isImagePickerPresented = true`.
@@ -118,7 +161,7 @@ struct NoteEditorScreen: View {
                 }
             }
             .animation(.easeOut(duration: 0.18), value: expandedPanel)
-            .navigationTitle(draft.isEmpty ? "New note" : "Resume draft")
+            .navigationTitle(navTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { toolbarContent }
             .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -153,28 +196,61 @@ struct NoteEditorScreen: View {
             .sheet(isPresented: cropSheetPresented) {
                 cropSheet
             }
-            // Phase E.5.18c — discard-draft confirmation is `.alert`,
-            // not `.confirmationDialog`. Matches the same Apple-pattern
+            // Phase E.5.18c — discard confirmation is `.alert`, not
+            // `.confirmationDialog`. Matches the same Apple-pattern
             // alignment we did in E.5.17 for delete: irreversible
             // single-item destruction → centered alert (Notes / Photos
             // / Calendar / Reminders), not bottom action sheet.
             .alert(
-                "Discard draft?",
+                editing == nil ? "Discard draft?" : "Discard changes?",
                 isPresented: $isCancelConfirmationPresented
             ) {
-                Button("Discard Draft", role: .destructive) {
+                Button(
+                    editing == nil ? "Discard Draft" : "Discard Changes",
+                    role: .destructive
+                ) {
                     draft.clear()
+                    didDiscard = true
                     dismiss()
                 }
                 Button("Keep Editing", role: .cancel) {}
             } message: {
-                Text("Your in-progress note will be lost.")
+                Text(editing == nil
+                     ? "Your in-progress note will be lost."
+                     : "Your edits to this note will be lost.")
             }
         }
         .presentationDragIndicator(.visible)
         .onAppear { focusedField = .title }
         .onChange(of: focusedField) { _, newValue in
             if let newValue { lastEditedField = newValue }
+        }
+        // Phase F.1.0 — per-mode drag-to-dismiss semantics. Edit mode
+        // autosaves (Apple Notes pattern); create mode keeps the draft
+        // for cross-session recovery (the existing behavior).
+        .onDisappear {
+            if editing != nil, !didCommit, !didDiscard {
+                save()
+            }
+        }
+        // Phase F.1.0 — Delete confirmation when fired from the edit
+        // toolbar's actions menu. Same Apple-pattern alignment as the
+        // timeline's long-press Delete (centered alert for irreversible
+        // single-item destruction).
+        .alert(
+            "Delete this note?",
+            isPresented: $isDeleteConfirmationPresented,
+            presenting: editing?.id
+        ) { id in
+            Button("Delete", role: .destructive) {
+                TimelineStore.shared.delete(noteId: id)
+                draft.clear()
+                didDiscard = true
+                dismiss()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { _ in
+            Text("This can't be undone.")
         }
     }
 
@@ -578,25 +654,89 @@ struct NoteEditorScreen: View {
         ToolbarItem(placement: .cancellationAction) {
             Button("Cancel", action: handleCancelTap)
         }
+        // Phase F.1.0 — edit mode adds a per-note actions menu next to
+        // Save: Pin (togglable) and Delete. Surfaced here so the user
+        // doesn't have to back out + long-press the card to do these.
+        if editing != nil {
+            ToolbarItem(placement: .topBarTrailing) {
+                editActionsMenu
+            }
+        }
         ToolbarItem(placement: .confirmationAction) {
-            Button("Save", action: save)
+            Button(editing == nil ? "Save" : "Done", action: save)
                 .fontWeight(.semibold)
                 .disabled(!isSaveEnabled)
         }
     }
 
-    /// Cancel is the *intentional* discard path: it wipes the draft so the
-    /// next open starts fresh. We only show the confirmation dialog when
-    /// there's actually something to lose — an empty editor dismisses
-    /// immediately. Drag-to-dismiss is the soft path and stays untouched
-    /// (preserves the draft for accidental cases).
+    /// Per-note actions menu shown in edit mode only — Pin/Unpin toggle
+    /// + Delete. Pin reads through `PinStore.shared` so the label
+    /// reflects the current state and tapping toggles + persists.
+    /// Delete arms the same confirmation alert the timeline's long-press
+    /// menu does.
+    @ViewBuilder
+    private var editActionsMenu: some View {
+        let isPinned = editing.map { PinStore.shared.isPinned($0.id) } ?? false
+        Menu {
+            Button {
+                if let id = editing?.id { PinStore.shared.togglePin(id) }
+            } label: {
+                Label(
+                    isPinned ? "Unpin" : "Pin",
+                    systemImage: isPinned ? "pin.slash" : "pin"
+                )
+            }
+            Divider()
+            Button(role: .destructive) {
+                isDeleteConfirmationPresented = true
+            } label: {
+                Label("Delete", systemImage: "trash")
+            }
+        } label: {
+            Image(systemName: "ellipsis.circle")
+                .font(.system(size: 18, weight: .regular))
+        }
+        .accessibilityLabel("Note actions")
+    }
+
+    /// Cancel is the *intentional* discard path: in create mode it wipes
+    /// the draft so the next open starts fresh; in edit mode it discards
+    /// the user's pending changes (the underlying note stays as it was).
+    /// We only show the confirmation dialog when there's actually
+    /// something to lose. Drag-to-dismiss is the soft path: in create
+    /// mode it preserves the draft for accidental cases; in edit mode it
+    /// autosaves (Apple Notes pattern) — see `.onDisappear`.
     private func handleCancelTap() {
-        if draft.isEmpty {
+        let isClean = (editing == nil && draft.isEmpty)
+            || (editing != nil && !isDirtyVsEditing)
+        if isClean {
             draft.clear()
+            didDiscard = true
             dismiss()
         } else {
             isCancelConfirmationPresented = true
         }
+    }
+
+    /// Has the user changed any field versus the note we opened? Used
+    /// to skip the confirmation dialog when Cancel is tapped on an
+    /// untouched edit session. Compares the editable surface only —
+    /// title text, body blocks, type, background, titleStyle,
+    /// occurredAt. Pin state lives in `PinStore` and isn't part of
+    /// the dirty check (toggling pin auto-persists separately).
+    private var isDirtyVsEditing: Bool {
+        guard let editing else { return false }
+        if draft.selectedType != editing.type { return true }
+        if draft.background != editing.background { return true }
+        if draft.titleStyle != editing.titleStyle { return true }
+        if draft.occurredAt != editing.occurredAt { return true }
+        if case .text(let t, let blocks) = editing.content {
+            if draft.title != t { return true }
+            if draft.body != blocks { return true }
+            return false
+        }
+        // Non-.text variants: any change to title/body counts as dirty.
+        return draft.title != editing.timelineTitle || !draft.bodyIsEmpty
     }
 
     // MARK: - StyleToolbar plumbing
@@ -738,6 +878,26 @@ struct NoteEditorScreen: View {
         }
 
         let content: MockNote.Content = .text(title: trimmedTitle, body: savedBlocks)
+        if let editing {
+            // Edit mode — preserve the original UUID so the server-side
+            // UPDATE targets the right row. Background / titleStyle /
+            // type / occurredAt / content all come from the (possibly
+            // modified) draft; pin state lives separately in PinStore
+            // and isn't part of the MockNote shape.
+            let updated = MockNote(
+                id: editing.id,
+                occurredAt: occurredAtForSave,
+                type: draft.selectedType,
+                content: content,
+                background: draft.background,
+                titleStyle: draft.titleStyle
+            )
+            TimelineStore.shared.update(updated)
+            draft.clear()
+            didCommit = true
+            dismiss()
+            return
+        }
         let note = MockNote(
             occurredAt: occurredAtForSave,
             type: draft.selectedType,
@@ -747,7 +907,18 @@ struct NoteEditorScreen: View {
         )
         TimelineStore.shared.add(note)
         draft.clear()
+        didCommit = true
         dismiss()
+    }
+
+    /// Edit mode shows the note's date in the nav title (Apple Notes
+    /// pattern). Create mode keeps the existing "New note" / "Resume
+    /// draft" labels.
+    private var navTitle: String {
+        if let editing {
+            return editing.occurredAt?.formatted(.dateTime.month().day()) ?? "Note"
+        }
+        return draft.isEmpty ? "New note" : "Resume draft"
     }
 
     /// The timestamp stamped on `MockNote.occurredAt` when the user saves.

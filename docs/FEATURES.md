@@ -292,6 +292,20 @@ Sheet pushed from the toolbar's `🖼` icon.
 
 The dedicated "Background" row was removed when the toolbar got a `🖼` icon (Phase E.2.2). The icon is the only entry point now.
 
+### Edit existing note (Phase F.1.0)
+
+Tapping a text card on the timeline opens `NoteEditorScreen` in **edit mode**, pre-populated with the note's data. Modern instant-edit pattern — no separate view-only mode (the cards already are the read view). Mode-specific behaviors:
+
+- **Save button** reads "Done"; calls `TimelineStore.update(_:)` (optimistic in-memory swap + background `NotesRepository.update`; reverts on failure).
+- **Drag-to-dismiss autosaves** — Apple Notes pattern. Different from create mode, where drag-to-dismiss preserves the draft for cross-session recovery.
+- **Cancel** triggers a "Discard changes?" alert when any of title / body / type / background / titleStyle / occurredAt differ from the original note; otherwise dismisses immediately.
+- **Toolbar actions menu** (`ellipsis.circle`): Pin/Unpin toggle + Delete (arms the standard centered-alert delete confirmation).
+- **Per-instance `NoteDraftStore`** so opening a note for edit doesn't trample any in-progress new-note draft (and vice versa). The shared singleton remains the create-mode store.
+- **Nav title** shows the note's `occurredAt` formatted as `Apr 27`.
+- **Type picker** opens collapsed (the user already committed); user can still expand to re-categorize.
+
+**Tap targets**: only text-content cards (`.text` variant). Stat / list / quote / media notes are non-tappable for now (no editor for stat/list/quote variants exists yet; media uses a different flow). Media cards retain their existing tap-to-fullscreen via `MediaViewerScreen`.
+
 ### Date + time row (Phase F.0.3)
 
 A compact `DatePicker(.compact)` row sits at the bottom of the form, between the body content and the toolbar. Layout: `🕐 Time ........ [picker]`. Tapping the picker opens iOS's standard popover with a calendar grid + time wheels.

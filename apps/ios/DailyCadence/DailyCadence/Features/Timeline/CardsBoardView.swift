@@ -80,13 +80,17 @@ struct CardsReorderDropDelegate: DropDelegate {
 struct CardsBoardView: View {
     let notes: [MockNote]
     let onRequestDelete: (UUID) -> Void
+    /// Phase F.1.0 — forwarded to each text card's `onTap` callback so
+    /// tapping opens the editor. Optional so previews don't have to wire it.
+    var onRequestEdit: ((UUID) -> Void)? = nil
 
     var body: some View {
         MasonryLayout(columns: 2, spacing: 12) {
             ForEach(notes) { note in
                 KeepCard(
                     note: note,
-                    onRequestDelete: { onRequestDelete($0.id) }
+                    onRequestDelete: { onRequestDelete($0.id) },
+                    onTap: onRequestEdit.map { cb in { cb(note.id) } }
                 )
                 .draggable(NoteDragPayload(id: note.id))
                 .onDrop(

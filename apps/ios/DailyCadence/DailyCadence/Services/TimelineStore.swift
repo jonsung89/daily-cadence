@@ -137,6 +137,21 @@ final class TimelineStore {
         Task { await self.persistAdd(note) }
     }
 
+    /// Replaces the note with the given id with `updated`. Optimistic —
+    /// the in-memory swap happens immediately; the repository call runs
+    /// in the background. On failure, reverts to the previous version
+    /// and surfaces `lastError`. No-op if the id isn't present.
+    ///
+    /// Phase F.1.0 — invoked from `NoteEditorScreen` Save when the screen
+    /// was opened in edit mode (`editing: MockNote?` non-nil).
+    func update(_ updated: MockNote) {
+        guard let index = notes.firstIndex(where: { $0.id == updated.id }) else { return }
+        let previous = notes[index]
+        notes[index] = updated
+        log.info("Updated note locally: id=\(updated.id) type=\(updated.type.rawValue)")
+        Task { await self.persistUpdate(updated, fallback: previous) }
+    }
+
     /// Removes the note locally (and forgets its pin state) and soft-deletes
     /// on the server in the background. No-op if the id isn't present.
     /// Phase E.5.15 — invoked from the per-card `.contextMenu` Delete action
@@ -179,6 +194,25 @@ final class TimelineStore {
             }
             lastError = error.localizedDescription
             log.error("add failed, reverted: \(error.localizedDescription)")
+        }
+    }
+
+    private func persistUpdate(_ updated: MockNote, fallback previous: MockNote) async {
+        guard let userId = AuthStore.shared.currentUserId else {
+            log.warning("Skipping persist for updated note: auth not ready (in-memory edit only)")
+            return
+        }
+        do {
+            try await repository.update(updated, userId: userId)
+            lastError = nil
+        } catch {
+            // Revert to the previous version so the timeline stays
+            // consistent with what's actually persisted server-side.
+            if let idx = notes.firstIndex(where: { $0.id == updated.id }) {
+                notes[idx] = previous
+            }
+            lastError = error.localizedDescription
+            log.error("update failed, reverted: \(error.localizedDescription)")
         }
     }
 

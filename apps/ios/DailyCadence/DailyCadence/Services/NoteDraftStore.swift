@@ -97,8 +97,9 @@ final class NoteDraftStore {
 
     /// True when every block in `body` is an empty paragraph (no media,
     /// no text). Lets `isEmpty` distinguish "fresh draft" from "user
-    /// typed something / attached a photo."
-    private var bodyIsEmpty: Bool {
+    /// typed something / attached a photo." Phase F.1.0 widened to
+    /// internal so `NoteEditorScreen`'s edit-mode dirty-check can read it.
+    var bodyIsEmpty: Bool {
         body.allSatisfy { $0.isEmptyParagraph }
     }
 
@@ -116,6 +117,44 @@ final class NoteDraftStore {
         selectedType = .general
         background = nil
         occurredAt = nil
+    }
+
+    /// Phase F.1.0 — pre-populates the draft from an existing note for
+    /// the edit-mode flow. Only `.text` content is supported; other
+    /// variants are out of scope until those editors exist (today the
+    /// editor only creates `.text` notes, so existing notes from the
+    /// editor are always `.text`).
+    ///
+    /// Wipes any prior draft state — the user explicitly tapped a
+    /// note to edit, so prior new-note in-progress state is discarded.
+    /// (If draft recovery for new notes ever needs to coexist with
+    /// edits, swap to a per-instance store; right now only one editor
+    /// is presented at a time so the singleton works.)
+    func populate(from note: MockNote) {
+        clear()
+        selectedType = note.type
+        background = note.background
+        titleStyle = note.titleStyle
+        occurredAt = note.occurredAt
+
+        switch note.content {
+        case .text(let title, let blocks):
+            self.title = title
+            // Empty body → leave the default empty paragraph so the
+            // user has something to type into.
+            self.body = blocks.isEmpty ? [.paragraph()] : blocks
+        case .stat(let title, _, _),
+             .list(let title, _):
+            // Other variants aren't authored by the current editor;
+            // reading them in lets the user re-categorize even if the
+            // structured fields aren't editable yet.
+            self.title = title
+        case .quote(let text):
+            self.title = text
+        case .media:
+            // Caller filters this out — see TimelineScreen.requestEdit.
+            break
+        }
     }
 
     // MARK: - Single-paragraph compatibility bridge

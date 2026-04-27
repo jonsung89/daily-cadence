@@ -32,6 +32,11 @@ struct KeepCard: View {
     /// The parent screen owns the actual deletion + confirmation dialog
     /// (Phase E.5.15). When `nil`, no Delete item appears in the menu.
     var onRequestDelete: ((MockNote) -> Void)? = nil
+    /// Optional tap callback (Phase F.1.0). Fires on tap of the text
+    /// scaffold; the media scaffold keeps its own
+    /// "tap → open `MediaViewerScreen`" behavior. Parent screens pass
+    /// this to open the editor in edit mode for the tapped note.
+    var onTap: (() -> Void)? = nil
     /// When false, suppresses the pin overlay and the card-owned
     /// `.contextMenu`. Used by previews and other surfaces that want a
     /// purely presentational card.
@@ -68,6 +73,10 @@ struct KeepCard: View {
                 mediaScaffold(media)
             } else {
                 textScaffold
+                    // Phase F.1.0 — tap a text card to edit. Media cards
+                    // keep their existing tap → MediaViewerScreen.
+                    .contentShape(Rectangle())
+                    .onTapGesture { onTap?() }
             }
         }
         // Phase E.4.4 — `fixedSize(vertical: true)` forces the card to

@@ -46,6 +46,13 @@ struct NoteCard: View {
     /// "user asked to delete" notification.
     let onRequestDelete: ((UUID) -> Void)?
 
+    /// Optional tap callback (Phase F.1.0). Fires on tap of the text
+    /// scaffold; the media scaffold keeps its existing
+    /// "tap → open `MediaViewerScreen`" behavior. Parent screens pass
+    /// this to open the editor in edit mode for the tapped note. Nil
+    /// = card is non-tappable (preview / static usage).
+    let onTap: (() -> Void)?
+
     /// Maximum rendered height for any timeline card. Tall portrait media
     /// or long messages are clipped to this. Slightly higher than `KeepCard`
     /// since the timeline is single-column and cards can afford more height.
@@ -62,7 +69,8 @@ struct NoteCard: View {
         titleStyle: TextStyle? = nil,
         media: MediaPayload? = nil,
         noteId: UUID? = nil,
-        onRequestDelete: ((UUID) -> Void)? = nil
+        onRequestDelete: ((UUID) -> Void)? = nil,
+        onTap: (() -> Void)? = nil
     ) {
         self.type = type
         self.title = title
@@ -73,6 +81,7 @@ struct NoteCard: View {
         self.media = media
         self.noteId = noteId
         self.onRequestDelete = onRequestDelete
+        self.onTap = onTap
     }
 
     /// Reads pin state through `PinStore.shared` inside `body` so the card
@@ -88,6 +97,10 @@ struct NoteCard: View {
                 mediaScaffold(media)
             } else {
                 textScaffold
+                    // Phase F.1.0 — tap a text card to edit. The media
+                    // scaffold keeps its own tap → MediaViewerScreen.
+                    .contentShape(Rectangle())
+                    .onTapGesture { onTap?() }
             }
         }
         // See `KeepCard` for the rationale — `fixedSize(vertical: true)`

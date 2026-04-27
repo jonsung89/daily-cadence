@@ -27,6 +27,11 @@ struct StackedBoardView: View {
     /// Forwarded to each `KeepCard`'s `.contextMenu` Delete action
     /// (Phase E.5.15). Optional so previews don't have to wire it.
     var onRequestDelete: ((UUID) -> Void)? = nil
+    /// Phase F.1.0 — forwarded to each `KeepCard`'s `onTap` callback,
+    /// which fires when the user taps a text card to view+edit. The
+    /// caller filters non-text content to nil so non-text cards
+    /// remain non-tappable.
+    var onRequestEdit: ((UUID) -> Void)? = nil
 
     @State private var expandedType: NoteType? = nil
     @Namespace private var stackNamespace
@@ -58,14 +63,16 @@ struct StackedBoardView: View {
                         group: group,
                         namespace: stackNamespace,
                         onCollapse: { toggle(group.type) },
-                        onRequestDelete: onRequestDelete
+                        onRequestDelete: onRequestDelete,
+                        onRequestEdit: onRequestEdit
                     )
                 } else {
                     CollapsedStackCell(
                         group: group,
                         namespace: stackNamespace,
                         onTap: { toggle(group.type) },
-                        onRequestDelete: onRequestDelete
+                        onRequestDelete: onRequestDelete,
+                        onRequestEdit: onRequestEdit
                     )
                 }
             }
@@ -89,6 +96,7 @@ private struct CollapsedStackCell: View {
     let namespace: Namespace.ID
     let onTap: () -> Void
     var onRequestDelete: ((UUID) -> Void)? = nil
+    var onRequestEdit: ((UUID) -> Void)? = nil
 
     /// Up to 3 most-recent notes — the visible layers when collapsed.
     /// Stored newest-first; index 0 = top of stack.
@@ -151,7 +159,11 @@ private struct CollapsedStackCell: View {
                 // depth: how far behind the top card. 0 = oldest visible
                 // layer (highest in y), count-1 = newest (lowest in y).
                 let depth = topNotes.count - 1 - index
-                KeepCard(note: note, onRequestDelete: onRequestDelete.map { cb in { cb($0.id) } })
+                KeepCard(
+                    note: note,
+                    onRequestDelete: onRequestDelete.map { cb in { cb($0.id) } },
+                    onTap: onRequestEdit.map { cb in { cb(note.id) } }
+                )
                     .fixedSize(horizontal: false, vertical: true)
                     .scaleEffect(1 - CGFloat(index) * 0.04)
                     .padding(.top, CGFloat(depth) * peek)
@@ -205,11 +217,16 @@ private struct ExpandedColumnSection: View {
     let namespace: Namespace.ID
     let onCollapse: () -> Void
     var onRequestDelete: ((UUID) -> Void)? = nil
+    var onRequestEdit: ((UUID) -> Void)? = nil
 
     var body: some View {
         VStack(spacing: 8) {
             ForEach(group.notes) { note in
-                KeepCard(note: note, onRequestDelete: onRequestDelete.map { cb in { cb($0.id) } })
+                KeepCard(
+                    note: note,
+                    onRequestDelete: onRequestDelete.map { cb in { cb($0.id) } },
+                    onTap: onRequestEdit.map { cb in { cb(note.id) } }
+                )
                     // `fixedSize(vertical: true)` forces the card to use
                     // its intrinsic height regardless of any frame
                     // propagated by `matchedGeometryEffect`. Without it,
