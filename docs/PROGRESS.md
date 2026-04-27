@@ -1696,6 +1696,13 @@ Adds a 7th system note type for pet-related logs (vet visits, walks, feeding, me
 
 Tests: 79/79 still passing. Manual verification: type picker in Settings → Note Types now shows Pets with paw icon + blush dot; FAB → Text Note → type picker likewise.
 
+### Known bugs / polish TODO
+
+Quality issues to address — separate from the feature roadmap below.
+
+- **Past-event note doesn't insert in correct timeline position until app refresh.** Repro: open editor, set `occurredAt` to a past time, save. The note appears at the bottom of the day's list (insertion order) instead of slotting into chronological position. Refreshing the app re-fetches and renders correctly. **Likely root cause:** `TimelineStore.add(_:)` appends to the in-memory `notes` array without re-sorting by `occurredAt`. The fetch-on-load path goes through `NotesRepository` which presumably sorts server-side, masking the bug after a refresh. Fix: re-sort on insert, OR use binary-search insertion to keep the array sorted. Verify the sort key matches the fetch order so the insert and the next refresh produce the same layout.
+- **Timeline time label wraps for "10:38 AM"-style times.** Repro: any timeline note with a 5-character time + " AM"/" PM" suffix (8 chars total). The time column appears to use a fixed width sized for shorter examples like "9:02 AM" (7 chars). Screenshot shows "10:38 A" then "M" on the next line. **Likely fix:** in [Features/Timeline/NoteCard.swift](apps/ios/DailyCadence/DailyCadence/Features/Timeline/NoteCard.swift) (or the timeline rail composer), bump the time column's `.frame(width:)` or remove the trailing padding constraining it. Use a width that fits the longest possible time (`"12:59 PM"` = 8 chars). If using `.frame(minWidth:)` already, check the `.lineLimit(1)` + `.fixedSize(horizontal: true, vertical: false)` combo — without one of those, SwiftUI will wrap rather than expand.
+
 ### Phase F+ feature TODO (designed-for, not-built)
 
 Captured here so a fresh session can pick up the roadmap. Each line corresponds to schema fields that are reserved but unused.
