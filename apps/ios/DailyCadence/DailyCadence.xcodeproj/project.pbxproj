@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		2FA2F5122F9F53C900D03C04 /* Supabase in Frameworks */ = {isa = PBXBuildFile; productRef = 2FA2F5112F9F53C900D03C04 /* Supabase */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		2FA2F2B62F9BD7B900D03C04 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -52,6 +56,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				2FA2F5122F9F53C900D03C04 /* Supabase in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -112,6 +117,7 @@
 			);
 			name = DailyCadence;
 			packageProductDependencies = (
+				2FA2F5112F9F53C900D03C04 /* Supabase */,
 			);
 			productName = DailyCadence;
 			productReference = 2FA2F2A82F9BD7B800D03C04 /* DailyCadence.app */;
@@ -195,6 +201,9 @@
 			);
 			mainGroup = 2FA2F29F2F9BD7B800D03C04;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				2FA2F5102F9F53C900D03C04 /* XCRemoteSwiftPackageReference "supabase-swift" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 2FA2F2A92F9BD7B800D03C04 /* Products */;
 			projectDirPath = "";
@@ -580,6 +589,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		2FA2F5102F9F53C900D03C04 /* XCRemoteSwiftPackageReference "supabase-swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/supabase/supabase-swift";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.5.1;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		2FA2F5112F9F53C900D03C04 /* Supabase */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 2FA2F5102F9F53C900D03C04 /* XCRemoteSwiftPackageReference "supabase-swift" */;
+			productName = Supabase;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 2FA2F2A02F9BD7B800D03C04 /* Project object */;
 }
