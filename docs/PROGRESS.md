@@ -1,6 +1,6 @@
 # DailyCadence — Progress
 
-**Last updated:** 2026-04-27 (Phase F prep — schema designed + Supabase Swift SDK installed; Apple Developer enrollment in review; Phase F+ feature TODO captured at the bottom of "✅ Shipped" so a fresh session can resume)
+**Last updated:** 2026-04-27 (Phase F.0 wiring — `Config.xcconfig` + static `Info.plist` + `AppSupabase` singleton; in-memory cache strategy chosen; `MediaImporter.downscale` upscale-guard fix)
 **Current phase:** Phase 1 MVP — iOS app for Jon + wife, TestFlight distribution
 
 This is the living state of the project. Update at the end of every session.
@@ -1409,6 +1409,29 @@ The pre-enrollment prep work for Phase F (Supabase persistence). Schema is draft
 
 **Dev-mode plan (interim, while enrollment is pending):** anonymous auth. Supabase's `signInAnonymously()` creates real sessions with generated user_ids; RLS works identically. Wires the data layer + tests CRUD/Storage/Realtime end-to-end without depending on Apple. When enrollment clears, add Apple + Google providers and link the anonymous user to the new identity. Anonymous Sign-Ins toggle has been enabled in the Supabase dashboard; migrations have been applied to the live project.
 
+### Phase F.0 — Supabase client wiring (added this round)
+
+The first iOS-side step of Phase F. Schema and SDK already in place from the prior round; this round wires the Swift app to actually talk to the Supabase project.
+
+**Cache strategy decision: in-memory.** Three options weighed (pure online / in-memory / SwiftData). Picked **in-memory** for Phase 1: `TimelineStore` keeps its `@Observable` shape and gets a `repository` dependency + `load()` method. Trade-off: cold launch shows ~200ms loading state and offline writes fail with a toast — both acceptable for two TestFlight users who are almost always online. SwiftData stays parked until offline pain becomes real (one repository abstraction is the seam to swap behind later).
+
+**`Config.xcconfig` pattern.** `apps/ios/DailyCadence/Config.xcconfig` (gitignored) holds `SUPABASE_URL` + `SUPABASE_ANON_KEY`. `Config.example.xcconfig` is committed as a template for fresh clones. Note the `https:/$()/...` escape — xcconfig treats `//` as a comment, so URLs need the empty-interpolation trick. `.gitignore` extended with the explicit path.
+
+**Static `Info.plist`.** Discovered that `INFOPLIST_KEY_<custom>` only injects Apple-recognized keys when `GENERATE_INFOPLIST_FILE = YES` (custom keys silently get dropped). Switched the app target to a real `apps/ios/DailyCadence/DailyCadence/Info.plist` containing `$(SUPABASE_URL)` / `$(SUPABASE_ANON_KEY)` placeholders that interpolate at build time, alongside the standard `CFBundle*` keys. Added a `PBXFileSystemSynchronizedBuildFileExceptionSet` so the synchronized root group doesn't double-add `Info.plist` to the Resources phase (which would conflict with `INFOPLIST_FILE`).
+
+**`Services/AppSupabase.swift`.** Singleton enum exposing `AppSupabase.client: SupabaseClient`. Reads `SupabaseURL` + `SupabaseAnonKey` from `Bundle.main.infoDictionary`, fails fast with a clear "copy Config.example.xcconfig → Config.xcconfig" error if missing.
+
+**Verified at runtime:** `Bundle.main` reports `SupabaseURL = https://zmlxnujheofgtrkrogdq.supabase.co` and a 208-char `SupabaseAnonKey` (legacy anon JWT shape). Build clean. Either the legacy `eyJ...` JWT or the newer `sb_publishable_...` key works — both flow through the same `apikey` header.
+
+### Bug fix — `MediaImporter.downscale` no longer upscales (added this round)
+
+Caught while validating the test suite was green after the Phase F.0 wiring. Two related issues, one in source and one in test:
+
+- **Source:** `CGImageSourceCreateThumbnailAtIndex` with `kCGImageSourceCreateThumbnailFromImageAlways: true` and `kCGImageSourceThumbnailMaxPixelSize: 1024` will UPSCALE a smaller source up to 1024 — the thumbnail API treats `maxPixelSize` as a literal target, not a ceiling. The doc-comment claimed "never upscaled" but the code didn't enforce it. Fix: read source pixel dims via `CGImageSourceCopyPropertiesAtIndex` and clamp `maxPixelSize` to `min(maxDimension, max(srcW, srcH))`. Falls back to original behavior when properties are unreadable. Real-world impact is small (callers always pass `maxDimension = 2048` and iPhone photos are always larger), but it matches the documented contract and protects future Phase F+ Storage thumbnail flows.
+- **Test:** `MediaImporterTests.renderPNG(width:height:)` was using `UIGraphicsImageRenderer` at the simulator's natural 3× scale, so a "600×400" logical request emitted an 1800×1200 pixel PNG. Fixed by passing `UIGraphicsImageRendererFormat()` with `scale = 1` so logical = pixel.
+
+Without the test fix the upscale-guard test was a false positive (the 1800×1200 source legitimately needed downscaling); without the source fix the contract was unenforced. Both went together.
+
 ### Phase F+ feature TODO (designed-for, not-built)
 
 Captured here so a fresh session can pick up the roadmap. Each line corresponds to schema fields that are reserved but unused.
@@ -1456,7 +1479,9 @@ Captured here so a fresh session can pick up the roadmap. Each line corresponds 
 
 ## 🚧 In flight
 
-Nothing active — Phase E.5.18a (inline-media editor polish) landed. Open follow-ups: per-block focused TextEditors (mid-paragraph image insertion — currently the model supports it but UI ships intro/attachments/outro three-zone layout), drag-to-reorder blocks, inline text formatting (bold/italic/underline/strikethrough), auto-bullet + checkboxes in text notes, auto-scroll the cards grid when dragging near a viewport edge, **persistence work (Supabase schema + auth + Apple Developer enrollment)**.
+**Phase F (Supabase persistence) — wiring landed, auth/data layer next.** Config + client are in place. Next concrete step: `AuthStore` (anonymous auth for now while Apple Developer enrollment is in review) → `NotesRepository` → swap `TimelineStore` from `MockNotes.today` to live fetch.
+
+Other open follow-ups (unchanged from prior round): per-block focused TextEditors (mid-paragraph image insertion — currently the model supports it but UI ships intro/attachments/outro three-zone layout), drag-to-reorder blocks, inline text formatting (bold/italic/underline/strikethrough), auto-bullet + checkboxes in text notes, auto-scroll the cards grid when dragging near a viewport edge.
 
 ---
 

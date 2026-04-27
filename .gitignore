@@ -5,6 +5,7 @@ Thumbs.db
 # Secrets — local config with API keys, etc.
 *.xcconfig.local
 Config.local.xcconfig
+apps/ios/DailyCadence/Config.xcconfig
 .env
 .env.local
 

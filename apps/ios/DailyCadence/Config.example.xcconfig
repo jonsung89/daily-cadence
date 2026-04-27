@@ -1,0 +1,14 @@
+// DailyCadence — Supabase configuration template.
+//
+// Copy this file to Config.xcconfig and fill in real values.
+// Config.xcconfig is gitignored.
+//
+// Get values from: https:/$()/supabase.com/dashboard/project/<ref>/settings/api
+//   - SUPABASE_URL: "Project URL"
+//   - SUPABASE_ANON_KEY: "Project API keys" → "anon / public" (or new "publishable" key)
+//
+// NOTE the "/$()/" — xcconfig treats "//" as a comment, so a literal URL needs
+// the empty $() interpolation between the slashes to escape. The runtime sees "https://...".
+
+SUPABASE_URL = https:/$()/YOUR_PROJECT_REF.supabase.co
+SUPABASE_ANON_KEY = YOUR_ANON_OR_PUBLISHABLE_KEY

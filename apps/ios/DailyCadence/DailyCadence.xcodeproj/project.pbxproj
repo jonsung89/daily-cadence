@@ -31,11 +31,26 @@
 		2FA2F2A82F9BD7B800D03C04 /* DailyCadence.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = DailyCadence.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		2FA2F2B52F9BD7B900D03C04 /* DailyCadenceTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = DailyCadenceTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		2FA2F2BF2F9BD7B900D03C04 /* DailyCadenceUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = DailyCadenceUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		2FA2F6002FAA000000D03C04 /* Config.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Config.xcconfig; sourceTree = "<group>"; };
+		2FA2F6012FAA000000D03C04 /* Config.example.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Config.example.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		2FA2F6022FAA000000D03C04 /* Exceptions for "DailyCadence" folder in "DailyCadence" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 2FA2F2A72F9BD7B800D03C04 /* DailyCadence */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		2FA2F2AA2F9BD7B800D03C04 /* DailyCadence */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				2FA2F6022FAA000000D03C04 /* Exceptions for "DailyCadence" folder in "DailyCadence" target */,
+			);
 			path = DailyCadence;
 			sourceTree = "<group>";
 		};
@@ -80,6 +95,8 @@
 		2FA2F29F2F9BD7B800D03C04 = {
 			isa = PBXGroup;
 			children = (
+				2FA2F6002FAA000000D03C04 /* Config.xcconfig */,
+				2FA2F6012FAA000000D03C04 /* Config.example.xcconfig */,
 				2FA2F2AA2F9BD7B800D03C04 /* DailyCadence */,
 				2FA2F2B82F9BD7B900D03C04 /* DailyCadenceTests */,
 				2FA2F2C22F9BD7B900D03C04 /* DailyCadenceUITests */,
@@ -401,6 +418,7 @@
 		};
 		2FA2F2CA2F9BD7B900D03C04 /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 2FA2F6002FAA000000D03C04 /* Config.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -408,12 +426,8 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 287K48KM52;
 				ENABLE_PREVIEWS = YES;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
-				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
-				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = DailyCadence/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -434,6 +448,7 @@
 		};
 		2FA2F2CB2F9BD7B900D03C04 /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 2FA2F6002FAA000000D03C04 /* Config.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -441,12 +456,8 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 287K48KM52;
 				ENABLE_PREVIEWS = YES;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
-				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
-				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = DailyCadence/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
