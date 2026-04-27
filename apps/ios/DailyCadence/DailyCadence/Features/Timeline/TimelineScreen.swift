@@ -86,16 +86,18 @@ struct TimelineScreen: View {
                     segmentedToggle
                         .padding(.horizontal, 20)
                         .padding(.bottom, cardsOrderBarVisible ? 12 : 16)
-                        // The TipKit popover anchors here — the toggle
-                        // is always visible in both modes. `arrowEdge:
-                        // .bottom` places the arrow on the BOTTOM of the
-                        // popover (pointing down at the toggle), which
-                        // floats the popover ABOVE the toggle into the
-                        // date-header whitespace. The opposite (.top)
-                        // hangs the popover over the first card and
-                        // blocks the very content the tip is gesturing
-                        // toward.
-                        .popoverTip(cardActionsTip, arrowEdge: .bottom)
+
+                    // Inline banner-style discoverability tip. `TipView`
+                    // (vs `.popoverTip`) avoids the popover-placement
+                    // squeeze — there's no good spot for a floating
+                    // arrow here: above the toggle clips into the safe
+                    // area, below it covers the first card. As an
+                    // inline row the tip takes its own dedicated slice
+                    // of the layout and auto-disappears when its rules
+                    // invalidate (after the user pins/deletes once).
+                    TipView(cardActionsTip)
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 12)
 
                     if cardsOrderBarVisible {
                         resetOrderRow
