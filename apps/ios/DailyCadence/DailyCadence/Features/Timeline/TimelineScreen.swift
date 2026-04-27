@@ -225,6 +225,7 @@ struct TimelineScreen: View {
             isPresented: $isMediaPickerPresented,
             selection: $mediaPickerItem,
             matching: .any(of: [.images, .videos]),
+            preferredItemEncoding: .current,
             photoLibrary: .shared()
         )
         .onChange(of: mediaPickerItem) { _, newItem in

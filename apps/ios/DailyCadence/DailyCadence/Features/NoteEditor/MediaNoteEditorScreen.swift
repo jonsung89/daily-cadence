@@ -1,5 +1,6 @@
 import SwiftUI
 import PhotosUI
+import AVFoundation
 
 /// Editor flow for a photo or video note (Phase E.3 → E.4.1 → E.5.10).
 ///
@@ -44,6 +45,11 @@ struct MediaNoteEditorScreen: View {
     @State private var isLoading = false
     @State private var importError: String?
 
+    /// Phase F.1.1b' — video over the duration cap. When non-nil, drives
+    /// the `.sheet(item:)` that hosts `VideoTrimSheet`. Cleared on
+    /// confirm or cancel.
+    @State private var trimSource: MediaImporter.VideoTrimSource?
+
     /// Phase F.0.3 — user-overridable timestamp. `nil` until the user
     /// touches the picker; reads default via `defaultOccurredAt` (selected
     /// day + current time-of-day). Lives as @State here rather than in a
@@ -87,6 +93,14 @@ struct MediaNoteEditorScreen: View {
             .onChange(of: pickerItem) { _, newItem in
                 guard let newItem else { return }
                 Task { await importItem(newItem) }
+            }
+            .sheet(item: $trimSource) { source in
+                VideoTrimSheet(
+                    source: source,
+                    maxDurationSeconds: MediaImporter.videoMaxDurationSeconds,
+                    onCancel: { cancelTrim(source) },
+                    onConfirm: { range in confirmTrim(source: source, range: range) }
+                )
             }
         }
         .presentationDragIndicator(.visible)
@@ -190,6 +204,7 @@ struct MediaNoteEditorScreen: View {
             PhotosPicker(
                 selection: $pickerItem,
                 matching: .any(of: [.images, .videos]),
+                preferredItemEncoding: .current,
                 photoLibrary: .shared()
             ) {
                 Label("Replace", systemImage: "photo.on.rectangle")
@@ -216,6 +231,7 @@ struct MediaNoteEditorScreen: View {
         PhotosPicker(
             selection: $pickerItem,
             matching: .any(of: [.images, .videos]),
+            preferredItemEncoding: .current,
             photoLibrary: .shared()
         ) {
             VStack(spacing: 10) {
@@ -296,27 +312,61 @@ struct MediaNoteEditorScreen: View {
             Task { @MainActor in isLoading = false }
         }
         do {
-            let payload = try await MediaImporter.makePayload(from: item)
+            let result = try await MediaImporter.makePayload(from: item)
             await MainActor.run {
-                self.payload = payload
-                self.cropState = payload.kind == .image
-                    ? payload.data.flatMap(PhotoCropState.init(data:))
-                    : nil
-            }
-        } catch let MediaImporter.ImportError.videoTooLong(seconds) {
-            // Phase F.1.1b — surface the 60s cap clearly. F.1.1b' will
-            // replace this rejection with a trim sheet that lets the
-            // user pick a 60s window from the longer video.
-            await MainActor.run {
-                let len = Int(seconds.rounded())
-                self.importError = "That video is \(len) seconds long. Videos must be 60 seconds or shorter for now — a trim tool is coming soon."
-                // Drop the picked item so the empty-state picker shows again.
-                self.pickerItem = nil
+                switch result {
+                case .payload(let payload):
+                    self.payload = payload
+                    self.cropState = payload.kind == .image
+                        ? payload.data.flatMap(PhotoCropState.init(data:))
+                        : nil
+                case .needsTrim(let source):
+                    // Hand off to VideoTrimSheet. Picker item is consumed —
+                    // clear it so a re-pick of the same asset re-fires.
+                    self.trimSource = source
+                    self.pickerItem = nil
+                }
             }
         } catch {
             await MainActor.run {
                 self.importError = (error as? LocalizedError)?.errorDescription
                     ?? "Couldn't load that file. Try another one."
+            }
+        }
+    }
+
+    private func cancelTrim(_ source: MediaImporter.VideoTrimSource) {
+        MediaImporter.discardTrimSource(source)
+        trimSource = nil
+    }
+
+    private func confirmTrim(source: MediaImporter.VideoTrimSource, range: CMTimeRange) {
+        // Dismiss trim sheet immediately, then run the export with a
+        // loading placeholder in the editor's preview area. Export is
+        // typically <2s for a 60s clip on modern hardware.
+        trimSource = nil
+        Task {
+            await MainActor.run {
+                isLoading = true
+                importError = nil
+            }
+            defer {
+                Task { @MainActor in isLoading = false }
+            }
+            do {
+                let payload = try await MediaImporter.makeTrimmedVideoPayload(
+                    source: source,
+                    range: range
+                )
+                await MainActor.run {
+                    self.payload = payload
+                    self.cropState = nil
+                }
+            } catch {
+                await MainActor.run {
+                    self.importError = (error as? LocalizedError)?.errorDescription
+                        ?? "Couldn't trim that video. Try a different clip."
+                }
             }
         }
     }

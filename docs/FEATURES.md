@@ -356,9 +356,35 @@ Sheet presented from the FAB menu's **Photo or Video** path. Single-purpose — 
 
 ### Video flow
 
-- Selected video is read via `MediaImporter.videoPayload` — writes bytes to a temp file, opens an `AVURLAsset`, loads first track's `naturalSize` + `preferredTransform` for aspect ratio, generates a first-frame poster JPEG via `AVAssetImageGenerator.image(at: .zero)`. Cleans up the temp file.
-- Preview is read-only (no trim UX in Phase 1) — poster image with `.ultraThinMaterial` play button overlay.
-- Save attaches caption + saves with the original video bytes + generated poster.
+- All video-capable `PhotosPicker` / `.photosPicker` call sites use **`preferredItemEncoding: .current`**. The default `.automatic` policy transcodes ProRes / ProRAW to H.264 before handoff (multi-minute server-side render); `.current` returns raw bytes — picker → ready typically <2 s for a 1 GB+ ProRes clip.
+- The picker hands back a `VideoFile: Transferable` (file-based, copies via `FileRepresentation`) — never `Data`. ProRes assets can be 1+ GB and the `Data` path materializes the whole thing in RAM.
+- `MediaImporter.videoImportResult(from url:)` opens an `AVURLAsset`, loads `.duration` + first track's `naturalSize` + `preferredTransform` for aspect ratio.
+- **Under-cap clips** (≤ 60 s): generates a first-frame poster JPEG, re-encodes to **HEVC 1080p** via `AVAssetExportSession` (~50% smaller than H.264), cleans up the temp file, returns `.payload(MediaPayload)`.
+- **Over-cap clips** (> 60 s): skips the upfront poster (saves a ProRes frame decode), returns `.needsTrim(VideoTrimSource)` — the [Video trim sheet](#video-trim-sheet) takes over.
+- Preview is read-only — poster image with `.ultraThinMaterial` play button overlay; tap opens the same `MediaViewerScreen` used from the timeline.
+- Save attaches caption + saves with the encoded video bytes + generated poster.
+
+### Video trim sheet
+
+**Owns:** `Features/MediaTrim/VideoTrimSheet.swift`
+
+Shown automatically when the user picks a video longer than `MediaImporter.videoMaxDurationSeconds` (60 s). Apple Photos pattern adapted to DailyCadence's sage palette.
+
+- **Preview**: `AVPlayerLayer` (bare — no `AVKit.VideoPlayer` chrome). Tap to play / pause; preview audio is muted by default. Playback loops within the trim window — a boundary observer at the end seeks back to start and resumes.
+- **Filmstrip**: 14 evenly-spaced frames generated via `AVAssetImageGenerator` across the full source duration. Empty `bg2` block while frames generate (decorative; trim still works without them).
+- **Range selection**: dual sage handles + sage border around the trim window. **Three drag zones**:
+  - Left handle: shrinks the window from the start (1 s minimum, 60 s maximum — past the cap, the right handle is pulled in).
+  - Right handle: shrinks the window from the end (same constraints, mirrored).
+  - Middle band: slides the window as a unit (essential when the desired slice is in the middle of a long clip).
+- **Playhead**: 2 pt white bar inside the window, animated via a 30 Hz periodic time observer during playback; snaps to the dragged handle's time during scrubs.
+- **Duration label**: "0:43 of 1:00 max" plus current `start – end` timestamps (mm:ss, monospaced digits).
+- **Toolbar**: Cancel / Save. Save disabled if window is shorter than 1 s.
+- **Export**: confirm calls `MediaImporter.makeTrimmedVideoPayload(source:range:)` — sets `AVAssetExportSession.timeRange` and re-runs the same HEVC 1080p export, plus regenerates the poster from the new start frame. Cancel calls `MediaImporter.discardTrimSource(_:)` which removes the temp source file.
+
+### MediaImporter return shape
+
+- `MediaImporter.makePayload(from:)` returns an `ImportResult` enum: `.payload(MediaPayload)` for normal flow, or `.needsTrim(VideoTrimSource)` for over-cap videos. Both editor surfaces (`MediaNoteEditorScreen`, `NoteEditorScreen`) handle both cases.
+- `VideoTrimSource` carries the temp file URL + duration + aspect + first-frame poster — the trim sheet's input. Cleanup is owned by the trim path: `makeTrimmedVideoPayload` cleans up on success, `discardTrimSource` on cancel.
 
 ### Caption
 
@@ -553,7 +579,6 @@ Repository services (read-only) for JSON-backed catalogs:
 These are deferred. When porting, don't rebuild them on Android either — match the Phase-1 surface so we keep platforms in step.
 
 - Camera capture (UIImagePickerController + `NSCameraUsageDescription`).
-- Video trim / re-encode at import.
 - Inline text formatting toggles (bold / italic / underline / strikethrough).
 - Auto-bullet on `-` and Apple-Notes-style checkboxes inside text notes.
 - Inline image attachments inside text notes (recommend Apple-Notes-style flow when this lands).

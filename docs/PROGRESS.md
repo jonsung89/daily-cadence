@@ -1,6 +1,6 @@
 # DailyCadence — Progress
 
-**Last updated:** 2026-04-27 (Phase F.1.1b — compression layer: HEIC images, HEVC video, dual-size thumbnails for images, 60s video cap. ~50% smaller storage / ~80% smaller egress on grid views.)
+**Last updated:** 2026-04-27 (Phase F.1.1b' — video trim sheet shipped + load-time / gesture fixes. ProRes import dropped from ~60 s to ~1.8 s via `preferredItemEncoding: .current` + `VideoFile: Transferable`. Drag-gesture cumulative-translation bug fixed; AVPlayer scrub seeks no longer queue past finger lift.)
 **Current phase:** Phase 1 MVP — iOS app for Jon + wife, TestFlight distribution
 
 This is the living state of the project. Update at the end of every session.
@@ -1610,6 +1610,38 @@ Pure optimization on top of F.1.1a's persistence pipeline. No schema migration n
 
 138/138 unit tests still passing.
 
+### Phase F.1.1b' — Video trim sheet (added this round)
+
+Replaces the over-60s rejection path with a proper Apple Photos-style trim flow. Picked clips longer than `videoMaxDurationSeconds` (60 s) now route through `VideoTrimSheet` instead of failing the import.
+
+**`MediaImporter` reshape.** `makePayload(from:)` no longer returns a bare `MediaPayload` — it returns `ImportResult` (`.payload(MediaPayload)` or `.needsTrim(VideoTrimSource)`). The over-cap branch writes the picker bytes to a temp file and hands the URL to the caller via `VideoTrimSource` (Identifiable, drives `.sheet(item:)`). Confirm runs a new `makeTrimmedVideoPayload(source:range:)` which reuses the existing HEVC 1080p export with `AVAssetExportSession.timeRange = range`, regenerates the poster from the trim's start frame, and unlinks the temp file. Cancel calls `discardTrimSource(_:)` for the same cleanup. `ImportError.videoTooLong` is gone — its only remaining sibling, `.exportFailed`, surfaces if the trimmed export itself fails.
+
+**`Features/MediaTrim/VideoTrimSheet.swift`** (new, ~430 LOC). Apple Photos pattern adapted to DailyCadence's sage palette:
+- **Bare `AVPlayerLayer`** wrapped via `UIViewRepresentable` (we don't want `AVKit.VideoPlayer`'s built-in chrome during trim). Muted by default — preview audio in public would be a surprise.
+- **Filmstrip**: 14 evenly-spaced frames generated via `AVAssetImageGenerator` across the source's full duration; `bg2` placeholder while frames generate (decorative; trim still works).
+- **Three drag zones** over the bar: left handle (shrinks from start), right handle (shrinks from end), middle band (slides the window as a unit — essential when the desired slice is in the middle of a long clip). 1 s minimum, 60 s maximum.
+- **Looping playback** within the trim window: a boundary observer at `endSeconds` seeks back to `startSeconds` and resumes. Re-registered on each play so handle drags during pause are honored.
+- **Playhead**: 2 pt white bar inside the window, 30 Hz periodic time observer during playback; snaps to the dragged handle's time during scrubs.
+- **Duration label**: "0:43 of 1:00 max" + monospaced "0:12 – 0:55" timestamps.
+- **Cancel / Save toolbar**. Save fires `onConfirm(CMTimeRange)`; the editor catches it and runs `makeTrimmedVideoPayload`.
+
+**Both editor surfaces wired.** `MediaNoteEditorScreen` (standalone media-note flow) and `NoteEditorScreen` (inline attachment flow inside text notes) both:
+- Switch on `ImportResult` after `MediaImporter.makePayload(from:)`.
+- Drive a `.sheet(item: $trimSource)` that presents `VideoTrimSheet`.
+- Run the trimmed export off the main task; show the loading placeholder during export (typically <2 s on modern hardware for a 60 s clip).
+- Surface `.exportFailed` errors inline below the picker / strip.
+
+**Build + tests still green.**
+
+**Load-time + gesture fixes (round 2, same session):** initial test surfaced two real issues — a 1:10 ProRes clip took ~60 s to reach the trim sheet and the handles were "very sensitive." Three fixes:
+
+1. **`PhotosPicker(preferredItemEncoding: .current)`** at all four video-capable call sites ([MediaNoteEditorScreen.swift](apps/ios/DailyCadence/DailyCadence/Features/NoteEditor/MediaNoteEditorScreen.swift), [NoteEditorScreen.swift](apps/ios/DailyCadence/DailyCadence/Features/NoteEditor/NoteEditorScreen.swift), [TimelineScreen.swift](apps/ios/DailyCadence/DailyCadence/Features/Timeline/TimelineScreen.swift)). The default `.automatic` policy transcodes ProRes / ProRAW to H.264 before handoff — multi-minute server-side render. `.current` returns the original bytes. **Single biggest win — picker → trim sheet went from ~60 s to ~1.8 s on a 475 MB ProRes clip.**
+2. **`VideoFile: Transferable` with `FileRepresentation`** instead of `loadTransferable(type: Data.self)`. The `Data` path materializes the whole asset in RAM; for a 1+ GB ProRes that's minutes of stall (or jetsam). The file path is a fast disk-to-disk copy.
+3. **Drag-gesture sensitivity bug.** `DragGesture.value.translation` is *cumulative since drag start*, not delta-since-last-tick. v1 did `start = start + translation/pps` every onChanged, so the handle accelerated at 2× finger speed. Fix: capture `dragInitialStart` on first tick, compute `start = dragInitialStart + translation/pps`. Same for end handle and middle-band slide.
+4. **"Doesn't stop when I stop" bug.** v1 wrapped each scrub-seek in `Task { await player.seek(...) }`. Tasks queued, awaited sequentially, kept resolving long after the finger lifted. Fix: fire-and-forget `player.seek(...)` — AVPlayer dedups internally. Scrub uses `toleranceAfter: .positiveInfinity` (snap to nearest keyframe, fast); precise seeks (drag end, play boundary) keep `toleranceAfter: .zero`.
+
+Filmstrip also got smaller `maximumSize` (200 → 120 px) and `tolerance: .positiveInfinity` (snap to keyframe). Frames now publish to UI as they generate (~30 ms each on ProRes after the fix), and the strip renders fixed slots so per-frame width stays stable while loading.
+
 ### Phase F+ feature TODO (designed-for, not-built)
 
 Captured here so a fresh session can pick up the roadmap. Each line corresponds to schema fields that are reserved but unused.
@@ -1661,6 +1693,8 @@ Captured here so a fresh session can pick up the roadmap. Each line corresponds 
 ---
 
 ## 🚧 In flight
+
+**Phase F.1.1b' (media UX polish) — first item shipped.** Video trim sheet replaces the over-60s rejection. Remaining bundle items per `project_media_storage.md`: inline video playback in cards, camera capture from FAB, Apple-Photos zoom transition + interactive swipe-down dismiss, timeline media-width design call. None are ordered — pick any next.
 
 **Phase F (Supabase persistence) — text/stat/list/quote round-trip live; media + backgrounds + run-styling deferred.** `AppSupabase.client` + `AuthStore` + `NotesRepository` + the wired `TimelineStore` are all in place. The app signs in anonymously on launch, fetches the user's notes once `AuthStore.currentUserId` settles, and persists subsequent adds/deletes optimistically. Open Phase F+ persistence work captured in the Phase F+ TODO section: media-note Storage upload pipeline, image-background uploads, swatch-background-id resolution, AttributedString per-run styling round-trip (gated on Phase E.2 polish).
 

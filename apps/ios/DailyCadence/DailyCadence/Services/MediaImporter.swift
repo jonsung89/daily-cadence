@@ -1,22 +1,47 @@
 import Foundation
 import UIKit
 import AVFoundation
+import CoreTransferable
 import ImageIO
 import OSLog
 import PhotosUI
 import SwiftUI
 import UniformTypeIdentifiers
 
+/// File-based handoff for video imports. The PhotosPicker hands us a
+/// scoped URL to the original asset; we copy it to our own temp
+/// location during the importing closure (fast disk-to-disk on iPhone
+/// NVMe) and then own that copy.
+///
+/// **Why not `Data`.** `loadTransferable(type: Data.self)` materializes
+/// the full asset in RAM before returning. For a ~70s ProRes / ProRAW
+/// video that can be 1+ GB — minutes of stall on real hardware, OOM on
+/// older devices. The file path stays on disk the whole time.
+struct VideoFile: Transferable {
+    let url: URL
+
+    static var transferRepresentation: some TransferRepresentation {
+        FileRepresentation(contentType: .movie) { movie in
+            SentTransferredFile(movie.url)
+        } importing: { received in
+            let copy = FileManager.default.temporaryDirectory
+                .appendingPathComponent("dc-import-\(UUID().uuidString).mov")
+            try FileManager.default.copyItem(at: received.file, to: copy)
+            return Self(url: copy)
+        }
+    }
+}
+
 /// Turns a `PhotosPickerItem` into a `MediaPayload` — handles the photo
 /// vs video divergence (poster generation, aspect-ratio extraction, temp
 /// file cleanup) so callers like `MediaNoteEditorScreen` can stay focused
 /// on UI.
 ///
-/// Phase E.3 ships an in-memory MVP — we hold the full asset's bytes in
-/// the `MediaPayload`. Phase F+ swaps this for a Supabase Storage upload
-/// pipeline; the importer's signature stays the same (caller still
-/// receives a `MediaPayload`-shaped result), only the storage backing
-/// changes.
+/// Phase F.1.1b' replaces the 60s "reject too-long videos" path with a
+/// trim handoff: `makePayload(from:)` returns `ImportResult` — either a
+/// finished `MediaPayload`, or a `VideoTrimSource` the caller hands to
+/// `VideoTrimSheet`. After the user picks a range, the caller calls
+/// `makeTrimmedVideoPayload(source:range:)` to finish the import.
 enum MediaImporter {
 
     private static let log = Logger(subsystem: "com.jonsung.DailyCadence", category: "MediaImporter")
@@ -24,27 +49,43 @@ enum MediaImporter {
     enum ImportError: Error, LocalizedError {
         case loadFailed
         case unsupported
-        /// Phase F.1.1b — picked video exceeds the 60s cap. F.1.1b' will
-        /// add a trim sheet; for now we surface this so the editor can
-        /// show a clear error rather than silently chopping the video.
-        case videoTooLong(seconds: Double)
-        /// HEVC re-encode failed. Falls back to the original bytes.
+        /// HEVC re-encode failed. Surfaced when the trim export fails;
+        /// callers should show an error and let the user try again.
         case exportFailed
 
         var errorDescription: String? {
             switch self {
-            case .loadFailed:               return "Couldn't load that file."
-            case .unsupported:              return "That file isn't supported."
-            case .videoTooLong(let s):
-                return "Videos must be 60 seconds or shorter (yours is \(Int(s.rounded()))s). A trim tool is coming soon."
-            case .exportFailed:             return "Couldn't process that video."
+            case .loadFailed:   return "Couldn't load that file."
+            case .unsupported:  return "That file isn't supported."
+            case .exportFailed: return "Couldn't process that video."
             }
         }
     }
 
-    /// Maximum video duration in seconds. Beyond this we reject the import
-    /// (F.1.1b' will add a trim sheet that offers to slice to the first
-    /// `videoMaxDurationSeconds` instead of rejecting outright).
+    /// Outcome of `makePayload(from:)`. `.needsTrim` carries a temp file
+    /// URL the caller must either pass to `makeTrimmedVideoPayload` or
+    /// discard via `discardTrimSource(_:)` if the user cancels.
+    enum ImportResult {
+        case payload(MediaPayload)
+        case needsTrim(VideoTrimSource)
+    }
+
+    /// Hand-off to `VideoTrimSheet` for a video longer than the cap.
+    /// Owns the temp file written from the picker bytes; either
+    /// `makeTrimmedVideoPayload` (success path) or `discardTrimSource`
+    /// (cancel path) cleans it up. `Identifiable` so it can drive
+    /// `.sheet(item:)`.
+    struct VideoTrimSource: Identifiable {
+        let id = UUID()
+        let sourceURL: URL
+        let duration: Double
+        let aspectRatio: CGFloat
+        let posterData: Data?
+    }
+
+    /// Maximum trimmed-video duration. Picked clips longer than this go
+    /// through `VideoTrimSheet`, which initialises the trim window to
+    /// the first `videoMaxDurationSeconds` of the source.
     static let videoMaxDurationSeconds: Double = 60
 
     /// Re-encodes `data` as JPEG (q=0.85), resizing so the longest edge is
@@ -119,26 +160,46 @@ enum MediaImporter {
         return data as Data
     }
 
-    /// Loads the picker item's bytes, generates a poster + aspect ratio if
-    /// it's a video, and returns a fully-formed `MediaPayload` ready to be
-    /// stored on a `MockNote.Content.media`.
-    static func makePayload(from item: PhotosPickerItem) async throws -> MediaPayload {
+    /// Loads the picker item and returns either a finished payload or a
+    /// `VideoTrimSource` the caller must route through `VideoTrimSheet`
+    /// for clips over the duration cap.
+    ///
+    /// **Video path uses `VideoFile`** (file-based transferable), not
+    /// `Data` — for ProRes / ProRAW assets that can run 1+ GB, the
+    /// `Data` path stalls minutes on RAM materialization. File-based
+    /// is a fast disk-to-disk copy.
+    static func makePayload(from item: PhotosPickerItem) async throws -> ImportResult {
         // PhotosPickerItem.supportedContentTypes signals image vs video.
-        // `.image` and `.movie` are the relevant UTType ids.
         let isVideo = item.supportedContentTypes.contains { $0.conforms(to: .movie) }
-        log.debug("makePayload: isVideo=\(isVideo) types=\(item.supportedContentTypes.map(\.identifier).joined(separator: ","))")
-
-        guard let data = try await item.loadTransferable(type: Data.self) else {
-            log.error("loadTransferable returned nil")
-            throw ImportError.loadFailed
-        }
-        log.debug("loaded \(data.count) bytes (\(String(format: "%.1f", Double(data.count) / 1_048_576.0)) MB)")
+        let t0 = Date()
 
         if isVideo {
-            return try await videoPayload(from: data)
+            guard let movie = try await item.loadTransferable(type: VideoFile.self) else {
+                log.error("loadTransferable(VideoFile) returned nil")
+                throw ImportError.loadFailed
+            }
+            // File size + transferable elapsed give us a clear signal on
+            // user devices: big elapsed + small file = transcoding;
+            // big elapsed + big file = iCloud download; small elapsed = local.
+            // `preferredItemEncoding: .current` at picker call sites
+            // skips Apple's default H.264 transcode for ProRes / ProRAW.
+            let bytes = (try? FileManager.default.attributesOfItem(atPath: movie.url.path)[.size] as? Int) ?? 0
+            log.info("video import: \(String(format: "%.1f", Double(bytes) / 1_048_576.0))MB in \(String(format: "%.2f", Date().timeIntervalSince(t0)))s")
+            return try await videoImportResult(from: movie.url)
         } else {
-            return try imagePayload(from: data)
+            guard let data = try await item.loadTransferable(type: Data.self) else {
+                log.error("loadTransferable(Data) returned nil")
+                throw ImportError.loadFailed
+            }
+            log.debug("image import: \(String(format: "%.1f", Double(data.count) / 1_048_576.0))MB in \(String(format: "%.2f", Date().timeIntervalSince(t0)))s")
+            return .payload(try imagePayload(from: data))
         }
+    }
+
+    /// Caller-side cleanup for the cancel path. Idempotent — safe to call
+    /// even if the file was already removed by a successful trim export.
+    static func discardTrimSource(_ source: VideoTrimSource) {
+        try? FileManager.default.removeItem(at: source.sourceURL)
     }
 
     // MARK: - Image
@@ -176,49 +237,88 @@ enum MediaImporter {
 
     // MARK: - Video
 
-    private static func videoPayload(from data: Data) async throws -> MediaPayload {
-        // Phase F.1.1b — re-encode source to HEVC 1080p (~50% smaller than
-        // H.264 at same perceived quality). Reject videos longer than the
-        // 60s cap (F.1.1b' will add a trim sheet). Fallback strategy: if
-        // re-encode fails for any reason, ship the original bytes.
-        let tempInputURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("dc-import-\(UUID().uuidString).mov")
-        defer { try? FileManager.default.removeItem(at: tempInputURL) }
-        try data.write(to: tempInputURL)
-        let asset = AVURLAsset(url: tempInputURL)
+    private static func videoImportResult(from sourceURL: URL) async throws -> ImportResult {
+        // sourceURL is a temp file we own (copied by VideoFile's
+        // FileRepresentation). Two outcomes:
+        //   - duration ≤ cap: re-encode HEVC inline, generate poster,
+        //     clean up source URL, return payload.
+        //   - duration > cap: hand the URL to VideoTrimSheet via
+        //     VideoTrimSource — the sheet's confirm/cancel path owns
+        //     cleanup. **Skip upfront poster generation** in this
+        //     branch — `makeTrimmedVideoPayload` regenerates from the
+        //     new start frame, and a full ProRes frame decode here
+        //     would just slow the trim sheet's appearance.
+        let asset = AVURLAsset(url: sourceURL)
 
-        // Length cap. Reject early so we don't waste CPU on the export.
         let duration = try? await asset.load(.duration)
         let seconds = duration?.seconds ?? 0
-        guard seconds <= videoMaxDurationSeconds else {
-            log.notice("Rejecting video: \(seconds)s exceeds \(videoMaxDurationSeconds)s cap")
-            throw ImportError.videoTooLong(seconds: seconds)
+        let aspect = await videoAspectRatio(asset: asset) ?? (16.0 / 9.0)
+
+        if seconds > videoMaxDurationSeconds {
+            log.info("video > cap (\(String(format: "%.1f", seconds))s) — handing off to trim sheet")
+            return .needsTrim(VideoTrimSource(
+                sourceURL: sourceURL,
+                duration: seconds,
+                aspectRatio: aspect,
+                posterData: nil
+            ))
         }
 
-        let aspect = await videoAspectRatio(asset: asset) ?? (16.0 / 9.0)
+        defer { try? FileManager.default.removeItem(at: sourceURL) }
+
         let posterData = await firstFramePosterData(asset: asset)
+        let encodedData: Data? = await reencodeHEVC(asset: asset, range: nil)
 
-        // Re-encode to HEVC 1080p. The 1920x1080 preset adapts the
-        // source to fit within those bounds (no upscaling).
-        let encodedData: Data = await reencodeHEVC(asset: asset) ?? {
-            log.warning("HEVC re-encode failed, shipping original bytes (\(data.count) bytes)")
-            return data
-        }()
+        guard let encodedData else {
+            log.error("HEVC re-encode failed for under-cap video")
+            throw ImportError.exportFailed
+        }
 
-        log.info("videoPayload: \(seconds)s aspect=\(String(format: "%.2f", aspect)) original=\(data.count) hevc=\(encodedData.count)")
+        log.info("videoImportResult: \(seconds)s aspect=\(String(format: "%.2f", aspect)) hevc=\(encodedData.count)")
 
-        return MediaPayload(
+        return .payload(MediaPayload(
             kind: .video,
             data: encodedData,
             posterData: posterData,
             thumbnailData: nil,
             aspectRatio: aspect
+        ))
+    }
+
+    /// Trim-sheet success path. Re-encodes the source HEVC restricted to
+    /// `range`, regenerates the poster from the new start frame, and
+    /// cleans up the temp source URL. Throws `.exportFailed` if the
+    /// trimmed export doesn't produce bytes — for trim there's no honest
+    /// fallback (the original would still be too long).
+    static func makeTrimmedVideoPayload(
+        source: VideoTrimSource,
+        range: CMTimeRange
+    ) async throws -> MediaPayload {
+        defer { try? FileManager.default.removeItem(at: source.sourceURL) }
+
+        let asset = AVURLAsset(url: source.sourceURL)
+        let trimmedPoster = await frameJPEGData(asset: asset, at: range.start) ?? source.posterData
+
+        guard let encodedData = await reencodeHEVC(asset: asset, range: range) else {
+            log.error("Trimmed HEVC re-encode failed")
+            throw ImportError.exportFailed
+        }
+
+        let trimmedSeconds = range.duration.seconds
+        log.info("makeTrimmedVideoPayload: trimmed=\(trimmedSeconds)s hevc=\(encodedData.count)")
+
+        return MediaPayload(
+            kind: .video,
+            data: encodedData,
+            posterData: trimmedPoster,
+            thumbnailData: nil,
+            aspectRatio: source.aspectRatio
         )
     }
 
-    /// Re-encodes the asset to HEVC at 1080p max. Returns the encoded
-    /// bytes, or `nil` if export failed.
-    private static func reencodeHEVC(asset: AVURLAsset) async -> Data? {
+    /// Re-encodes the asset to HEVC at 1080p max, optionally restricted
+    /// to `range`. Returns the encoded bytes, or `nil` if export failed.
+    private static func reencodeHEVC(asset: AVURLAsset, range: CMTimeRange?) async -> Data? {
         guard let session = AVAssetExportSession(
             asset: asset,
             presetName: AVAssetExportPresetHEVC1920x1080
@@ -232,6 +332,7 @@ enum MediaImporter {
         session.outputURL = outputURL
         session.outputFileType = .mp4
         session.shouldOptimizeForNetworkUse = true
+        if let range { session.timeRange = range }
 
         do {
             // iOS 18+ async export API.
@@ -260,12 +361,19 @@ enum MediaImporter {
     }
 
     private static func firstFramePosterData(asset: AVAsset) async -> Data? {
+        await frameJPEGData(asset: asset, at: .zero)
+    }
+
+    /// Returns a JPEG-encoded poster for the frame nearest `time`. Used
+    /// by `firstFramePosterData` and by the trim path to refresh the
+    /// poster after the user picks a non-zero start.
+    static func frameJPEGData(asset: AVAsset, at time: CMTime) async -> Data? {
         let generator = AVAssetImageGenerator(asset: asset)
         generator.appliesPreferredTrackTransform = true
         generator.maximumSize = CGSize(width: 1024, height: 1024)
         do {
             // iOS 16+ async image API.
-            let (cgImage, _) = try await generator.image(at: .zero)
+            let (cgImage, _) = try await generator.image(at: time)
             return UIImage(cgImage: cgImage).jpegData(compressionQuality: 0.85)
         } catch {
             return nil

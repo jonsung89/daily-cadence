@@ -1,5 +1,6 @@
 import SwiftUI
 import PhotosUI
+import AVFoundation
 
 /// The Create / Edit Note sheet — Phases C through E.2.2.
 ///
@@ -123,6 +124,10 @@ struct NoteEditorScreen: View {
     @State private var pendingCropPayload: MediaPayload?
     @State private var pendingCropState: PhotoCropState?
 
+    /// Phase F.1.1b' — video over the duration cap. When non-nil, drives
+    /// the trim sheet. Cleared on confirm or cancel.
+    @State private var trimSource: MediaImporter.VideoTrimSource?
+
     var body: some View {
         @Bindable var draft = draft
         NavigationStack {
@@ -184,6 +189,7 @@ struct NoteEditorScreen: View {
                 isPresented: $isImagePickerPresented,
                 selection: $attachmentPickerItem,
                 matching: .any(of: [.images, .videos]),
+                preferredItemEncoding: .current,
                 photoLibrary: .shared()
             )
             .onChange(of: attachmentPickerItem) { _, newItem in
@@ -195,6 +201,15 @@ struct NoteEditorScreen: View {
             // Re-uses the same `PhotoCropView` the bare-media editor uses.
             .sheet(isPresented: cropSheetPresented) {
                 cropSheet
+            }
+            // Phase F.1.1b' — trim sheet for videos over the duration cap.
+            .sheet(item: $trimSource) { source in
+                VideoTrimSheet(
+                    source: source,
+                    maxDurationSeconds: MediaImporter.videoMaxDurationSeconds,
+                    onCancel: { cancelTrim(source) },
+                    onConfirm: { range in confirmTrim(source: source, range: range) }
+                )
             }
             // Phase E.5.18c — discard confirmation is `.alert`, not
             // `.confirmationDialog`. Matches the same Apple-pattern
@@ -508,34 +523,67 @@ struct NoteEditorScreen: View {
 
     /// Imports a `PhotosPickerItem` via `MediaImporter`. **Images go
     /// through the crop sheet** (Phase E.5.18a — reusing
-    /// `PhotoCropView` from MediaCrop); **videos insert directly** since
-    /// we don't have a video-trim tool yet. Errors surface inline below
-    /// the strip without an alert.
+    /// `PhotoCropView` from MediaCrop); **videos under the duration cap
+    /// insert directly**, and **videos over the cap** route through
+    /// `VideoTrimSheet` (Phase F.1.1b'). Errors surface inline below the
+    /// strip without an alert.
     private func importAttachment(_ item: PhotosPickerItem) async {
         attachmentImportError = nil
         do {
-            let payload = try await MediaImporter.makePayload(from: item)
+            let result = try await MediaImporter.makePayload(from: item)
             await MainActor.run {
                 attachmentPickerItem = nil
-                if payload.kind == .image,
-                   let bytes = payload.data,
-                   let cropState = PhotoCropState(data: bytes) {
-                    // Stage for cropping. Sheet presents on the next
-                    // render cycle when both fields are set.
-                    pendingCropPayload = payload
-                    pendingCropState = cropState
-                } else {
-                    // Video (or image whose data couldn't decode) —
-                    // insert directly without cropping.
-                    withAnimation(.easeOut(duration: 0.2)) {
-                        draft.insertMedia(payload, size: .medium)
+                switch result {
+                case .payload(let payload):
+                    if payload.kind == .image,
+                       let bytes = payload.data,
+                       let cropState = PhotoCropState(data: bytes) {
+                        // Stage for cropping. Sheet presents on the next
+                        // render cycle when both fields are set.
+                        pendingCropPayload = payload
+                        pendingCropState = cropState
+                    } else {
+                        // Video (or image whose data couldn't decode) —
+                        // insert directly without cropping.
+                        withAnimation(.easeOut(duration: 0.2)) {
+                            draft.insertMedia(payload, size: .medium)
+                        }
                     }
+                case .needsTrim(let source):
+                    trimSource = source
                 }
             }
         } catch {
             await MainActor.run {
                 attachmentImportError = "Couldn't load that file. Try another one."
                 attachmentPickerItem = nil
+            }
+        }
+    }
+
+    private func cancelTrim(_ source: MediaImporter.VideoTrimSource) {
+        MediaImporter.discardTrimSource(source)
+        trimSource = nil
+    }
+
+    private func confirmTrim(source: MediaImporter.VideoTrimSource, range: CMTimeRange) {
+        trimSource = nil
+        Task {
+            do {
+                let payload = try await MediaImporter.makeTrimmedVideoPayload(
+                    source: source,
+                    range: range
+                )
+                await MainActor.run {
+                    withAnimation(.easeOut(duration: 0.2)) {
+                        draft.insertMedia(payload, size: .medium)
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    attachmentImportError = (error as? LocalizedError)?.errorDescription
+                        ?? "Couldn't trim that video. Try a different clip."
+                }
             }
         }
     }
