@@ -83,6 +83,10 @@ struct CardsBoardView: View {
     /// Phase F.1.0 — forwarded to each text card's `onTap` callback so
     /// tapping opens the editor. Optional so previews don't have to wire it.
     var onRequestEdit: ((UUID) -> Void)? = nil
+    /// Phase F.1.1b'.zoom — forwarded to each card so media taps route
+    /// through the parent's namespace + navigation push. Optional so
+    /// previews work without it (cards fall back to `.fullScreenCover`).
+    var mediaTapHandler: MediaTapHandler? = nil
 
     var body: some View {
         MasonryLayout(columns: 2, spacing: 12) {
@@ -90,7 +94,8 @@ struct CardsBoardView: View {
                 KeepCard(
                     note: note,
                     onRequestDelete: { onRequestDelete($0.id) },
-                    onTap: onRequestEdit.map { cb in { cb(note.id) } }
+                    onTap: onRequestEdit.map { cb in { cb(note.id) } },
+                    mediaTapHandler: mediaTapHandler
                 )
                 .draggable(NoteDragPayload(id: note.id))
                 .onDrop(

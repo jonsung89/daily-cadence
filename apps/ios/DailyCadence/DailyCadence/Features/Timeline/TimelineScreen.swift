@@ -47,6 +47,12 @@ struct TimelineScreen: View {
     /// opens a graphical `DatePicker` so the user can jump to any day.
     @State private var isDatePickerPresented = false
 
+    /// Phase F.1.1b'.zoom — media viewer state lives at `RootView` so
+    /// the viewer overlay can render above the TabBar (which is
+    /// mounted via `safeAreaInset` at RootView level). The handler
+    /// is injected through environment; cards read it directly.
+    @Environment(\.mediaTapHandler) private var mediaTapHandler
+
     /// Read-through to `TimelineStore.shared.notes`. Reading inside `body`
     /// registers this view as an observer of the @Observable store, so any
     /// `add(_:)` call re-renders the timeline automatically.
@@ -110,6 +116,7 @@ struct TimelineScreen: View {
         guard case .text = note.content else { return nil }
         return { requestEdit(note.id) }
     }
+
 
     var body: some View {
         NavigationStack {
@@ -187,6 +194,10 @@ struct TimelineScreen: View {
                     }
             )
         }
+        // Phase F.1.1b'.zoom — viewer overlay lives at `RootView` so
+        // its z-order is above the TabBar. Cards pull the tap handler
+        // from `EnvironmentValues.mediaTapHandler` (injected by
+        // RootView).
         .overlay(alignment: .bottomTrailing) {
             // Menu attached directly to the FAB — popup anchors to the
             // button itself rather than sliding up from the screen
@@ -196,7 +207,9 @@ struct TimelineScreen: View {
             //
             // FAB stays persistent; the ScrollView's `.contentMargins`
             // reserves a 120pt bottom buffer so the last card never
-            // ends up underneath the button.
+            // ends up underneath the button. The viewer overlay (at
+            // RootView level) z-covers the FAB while presented — no
+            // explicit hide-on-present plumbing needed.
             // SwiftUI's `Menu` anchored to a bottom-trailing FAB opens
             // upward and orders items closest-to-anchor first (so the
             // last-declared item renders at the visual TOP of the
@@ -525,7 +538,8 @@ struct TimelineScreen: View {
                 StackedBoardView(
                     groups: groupedNotes,
                     onRequestDelete: { requestDelete($0) },
-                    onRequestEdit: { requestEdit($0) }
+                    onRequestEdit: { requestEdit($0) },
+                    mediaTapHandler: mediaTapHandler
                 )
             }
         }
@@ -588,7 +602,8 @@ struct TimelineScreen: View {
                             KeepCard(
                                 note: note,
                                 onRequestDelete: { requestDelete($0.id) },
-                                onTap: tapHandler(for: note)
+                                onTap: tapHandler(for: note),
+                                mediaTapHandler: mediaTapHandler
                             )
                                 .containerRelativeFrame(.horizontal, alignment: .leading) { width, _ in
                                     width * 0.55
@@ -622,7 +637,8 @@ struct TimelineScreen: View {
         CardsBoardView(
             notes: CardsViewOrderStore.shared.sorted(unpinnedNotes),
             onRequestDelete: requestDelete,
-            onRequestEdit: requestEdit
+            onRequestEdit: requestEdit,
+            mediaTapHandler: mediaTapHandler
         )
     }
 
@@ -704,7 +720,8 @@ struct TimelineScreen: View {
                                 KeepCard(
                                 note: note,
                                 onRequestDelete: { requestDelete($0.id) },
-                                onTap: tapHandler(for: note)
+                                onTap: tapHandler(for: note),
+                                mediaTapHandler: mediaTapHandler
                             )
                                     // ~55% of the visible scroll width:
                                     // shows ~2 cards with a peek of the
@@ -775,7 +792,8 @@ struct TimelineScreen: View {
                         media: note.mediaPayload,
                         noteId: note.id,
                         onRequestDelete: requestDelete,
-                        onTap: tapHandler(for: note)
+                        onTap: tapHandler(for: note),
+                        mediaTapHandler: mediaTapHandler
                     )
                 }
             }

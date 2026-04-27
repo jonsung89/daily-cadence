@@ -53,6 +53,13 @@ struct NoteCard: View {
     /// = card is non-tappable (preview / static usage).
     let onTap: (() -> Void)?
 
+    /// Phase F.1.1b'.zoom — when set, the card uses the parent's shared
+    /// namespace for the matched-transition source and forwards media
+    /// taps so the parent can present `MediaViewerScreen` via
+    /// NavigationStack push (native zoom transition). When `nil`, the
+    /// card falls back to its own `.fullScreenCover`.
+    let mediaTapHandler: MediaTapHandler?
+
     /// Maximum rendered height for any timeline card. Tall portrait media
     /// or long messages are clipped to this. Slightly higher than `KeepCard`
     /// since the timeline is single-column and cards can afford more height.
@@ -70,7 +77,8 @@ struct NoteCard: View {
         media: MediaPayload? = nil,
         noteId: UUID? = nil,
         onRequestDelete: ((UUID) -> Void)? = nil,
-        onTap: (() -> Void)? = nil
+        onTap: (() -> Void)? = nil,
+        mediaTapHandler: MediaTapHandler? = nil
     ) {
         self.type = type
         self.title = title
@@ -82,6 +90,7 @@ struct NoteCard: View {
         self.noteId = noteId
         self.onRequestDelete = onRequestDelete
         self.onTap = onTap
+        self.mediaTapHandler = mediaTapHandler
     }
 
     /// Reads pin state through `PinStore.shared` inside `body` so the card
@@ -143,6 +152,9 @@ struct NoteCard: View {
             }
         }
         .animation(.easeOut(duration: 0.18), value: isPinned)
+        // Fallback presentation when no `mediaTapHandler` is supplied
+        // (previews, non-Timeline surfaces). When the handler is set
+        // the parent owns presentation + native zoom transition.
         .fullScreenCover(isPresented: $isMediaViewerPresented) {
             if let media {
                 MediaViewerScreen(media: media)
@@ -248,9 +260,22 @@ struct NoteCard: View {
         .aspectRatio(media.aspectRatio, contentMode: .fit)
         .frame(maxWidth: .infinity)
         .contentShape(Rectangle())
-        .onTapGesture { isMediaViewerPresented = true }
+        .onTapGesture { handleMediaTap(media) }
+        .modifier(MatchedGeometryModifier(handler: mediaTapHandler, id: noteId ?? UUID()))
         .accessibilityLabel(media.kind == .video ? "Play video" : "Open photo")
         .accessibilityAddTraits(.isButton)
+    }
+
+    /// Same routing pattern as `KeepCard.handleMediaTap`. When the
+    /// parent provided a `mediaTapHandler`, fires its callback with the
+    /// note's id so the parent can present the viewer; otherwise falls
+    /// back to the local `.fullScreenCover`.
+    private func handleMediaTap(_ media: MediaPayload) {
+        if let handler = mediaTapHandler, let noteId {
+            handler.onTap(media, noteId)
+        } else {
+            isMediaViewerPresented = true
+        }
     }
 
     /// Phase F.1.1b — kind-aware preview: image prefers `thumbnailData`

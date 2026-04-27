@@ -1,233 +1,221 @@
 import SwiftUI
-import AVKit
-import AVFoundation
 
-/// Full-screen viewer for a `MediaPayload` — image with pinch-zoom, or video
-/// with `AVKit`'s standard player UI.
+/// Full-screen viewer for a `MediaPayload` — a shared envelope that
+/// handles the matched-geometry zoom open/close, drag-down dismiss, and
+/// chrome (close button, caption) for both image and video. The actual
+/// content (image with pinch-zoom, video with AVKit chrome + drag-coexist)
+/// lives in `ImageMediaContent` / `VideoMediaContent`. Both content
+/// variants write their drag-dismiss state into bindings owned here, so
+/// the visual translate + scale effect is applied uniformly at this
+/// level regardless of media kind.
 ///
-/// Presented via `.fullScreenCover` from `KeepCard` and `NoteCard` when a
-/// media note is tapped. The viewer is intentionally minimal — black
-/// backdrop, single Done button (top-trailing), no chrome — so the content
-/// gets the whole canvas.
+/// **Phase F.1.1b'.zoom — manual matched-geometry overlay.** Rather than
+/// pushing onto a `NavigationStack` (whose interactive dismiss snapshots
+/// the destination and hides our live state-driven visuals), this view
+/// is rendered as a ZStack overlay on top of the active screen. The
+/// underlying timeline keeps rendering, so the backdrop fade during a
+/// drag-dismiss reveals the actual cards — same trick as Apple Photos.
 ///
-/// **Video temp-file dance.** `AVPlayer` reads from a `URL`, not raw bytes.
-/// We write the payload's `Data` to a temp file on appear and tear it down
-/// on dismiss. For the in-memory MVP that's fine; once Supabase Storage
-/// lands the URL points to a remote object instead.
+/// `RootView` interpolates `openProgress` from 0 (image at source-card
+/// frame) to 1 (image at fullscreen-fitted frame) on present, and back
+/// to 0 on dismiss. We compute the current frame each render via
+/// `lerp(sourceFrame → fitFrame)` and apply it to the content with
+/// `.frame` + `.position`.
 struct MediaViewerScreen: View {
     let media: MediaPayload
+    /// Source card's image-area frame in global coords, captured at
+    /// tap time. `nil` for the fallback `.fullScreenCover` path
+    /// (previews / non-Timeline surfaces), in which case the image
+    /// just renders at fullscreen with no zoom interpolation.
+    var sourceFrame: CGRect? = nil
+    /// 0 = content at `sourceFrame`, 1 = content at fullscreen-fitted
+    /// frame. RootView animates this with `.smooth(duration: 0.5)` on
+    /// present/dismiss.
+    var openProgress: CGFloat = 1
+    /// Called when the user taps close OR completes a drag-dismiss.
+    /// Defaults to `dismiss()` so the fallback `.fullScreenCover` path
+    /// still works without an explicit handler.
+    var onDismiss: (() -> Void)? = nil
+
     @Environment(\.dismiss) private var dismiss
 
-    @State private var videoURL: URL? = nil
-    @State private var player: AVPlayer? = nil
+    /// Drag-dismiss state — owned here so both image and video content
+    /// share the same visual effect. The content writes into these
+    /// bindings; the viewer reads them to translate the framed content
+    /// (`.offset(dismissOffset)`), scale it (`.scaleEffect(dismissScale)`),
+    /// and fade the backdrop + chrome (`(1 - dismissProgress)`).
+    @State private var dismissOffset: CGSize = .zero
+    @State private var dismissProgress: CGFloat = 0
+    @State private var dismissScale: CGFloat = 1.0
 
-    var body: some View {
-        ZStack {
-            Color.black.ignoresSafeArea()
+    /// Flips to `true` synchronously when `performDismiss` runs (X button,
+    /// drag-commit, or fallback). `VideoMediaContent` observes this to
+    /// pause the player so audio doesn't bleed through the ~510 ms close
+    /// animation. Image content ignores it.
+    @State private var isDismissing: Bool = false
 
-            switch media.kind {
-            case .image:
-                if let data = media.data {
-                    ImagePinchZoomView(data: data)
-                } else {
-                    // Phase F.1.1: fetched-from-server media. Resolves bytes
-                    // via `MediaResolver` against `media.ref`.
-                    ResolvedFullscreenImage(payload: media)
-                }
-            case .video:
-                if let player {
-                    VideoPlayer(player: player)
-                        .ignoresSafeArea()
-                        .onAppear { player.play() }
-                } else {
-                    ProgressView()
-                        .tint(.white)
-                }
-            }
-
-            VStack {
-                HStack {
-                    Spacer()
-                    Button {
-                        player?.pause()
-                        dismiss()
-                    } label: {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .frame(width: 36, height: 36)
-                            .background(.ultraThinMaterial, in: Circle())
-                    }
-                    .padding(.top, 12)
-                    .padding(.trailing, 16)
-                    .accessibilityLabel("Close")
-                }
-                Spacer()
-                if let caption = media.caption, !caption.isEmpty {
-                    Text(caption)
-                        .font(.DS.sans(size: 15, weight: .regular))
-                        .foregroundStyle(.white)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 24)
-                        .padding(.bottom, 24)
-                        .frame(maxWidth: .infinity)
-                        .background {
-                            LinearGradient(
-                                colors: [.clear, .black.opacity(0.45)],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            )
-                            .ignoresSafeArea()
-                        }
-                }
-            }
-        }
-        .statusBarHidden(true)
-        .task { await prepareVideoIfNeeded() }
-        .onDisappear { teardownVideo() }
+    /// Resolves to the explicit `onDismiss` if the parent provided one
+    /// (overlay path), otherwise falls back to the environment dismiss
+    /// (fullScreenCover path).
+    private func performDismiss() {
+        isDismissing = true
+        if let onDismiss { onDismiss() } else { dismiss() }
     }
-
-    private func prepareVideoIfNeeded() async {
-        guard media.kind == .video else { return }
-        // Phase F.1.1: prefer streaming via signed URL when we have a ref —
-        // saves writing the full video to a temp file. Falls back to the
-        // inline bytes path for newly-imported media that hasn't uploaded
-        // yet (its `ref` is nil until the background upload completes).
-        if let ref = media.ref {
-            do {
-                let url = try await MediaResolver.shared.signedURL(for: ref)
-                await MainActor.run { self.player = AVPlayer(url: url) }
-                return
-            } catch {
-                // Fall through to inline-bytes path if signed URL failed.
-            }
-        }
-        guard let data = media.data else { return }
-        // Write bytes to a temp file so AVPlayer can read via URL. Using a
-        // unique filename avoids collisions when multiple viewer sheets
-        // open during the same session.
-        let tempURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("dc-video-\(UUID().uuidString).mov")
-        do {
-            try data.write(to: tempURL)
-            await MainActor.run {
-                self.videoURL = tempURL
-                self.player = AVPlayer(url: tempURL)
-            }
-        } catch {
-            // Silent fail — the ProgressView stays visible. Phase F can
-            // surface an error toast if this turns out to bite real users.
-        }
-    }
-
-    private func teardownVideo() {
-        player?.pause()
-        if let url = videoURL {
-            try? FileManager.default.removeItem(at: url)
-        }
-    }
-}
-
-// MARK: - Pinch-zoom image
-
-/// Apple Photos–style pinch-and-pan fullscreen image. Image fits the
-/// device width by default; pinch to zoom up to 5× ; double-tap toggles
-/// between fit and 2.5×; pan when zoomed.
-///
-/// Phase F.1.1a fix: the prior implementation claimed iOS 17 `.zoomable`
-/// scroll but actually just used a regular ScrollView, which rendered
-/// images at full pixel size — a 4032×3024 photo became a 4032pt-wide
-/// scrollable area on a 393pt screen. This is a real `MagnifyGesture` +
-/// `DragGesture` rewrite with the standard double-tap toggle.
-struct ImagePinchZoomView: View {
-    let data: Data
-
-    @State private var uiImage: UIImage?
-    @State private var scale: CGFloat = 1.0
-    @State private var lastScale: CGFloat = 1.0
-    @State private var offset: CGSize = .zero
-    @State private var lastOffset: CGSize = .zero
-
-    private let minScale: CGFloat = 1.0
-    private let maxScale: CGFloat = 5.0
-    private let doubleTapScale: CGFloat = 2.5
 
     var body: some View {
         GeometryReader { geo in
-            Group {
-                if let uiImage {
-                    Image(uiImage: uiImage)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: geo.size.width, height: geo.size.height)
-                        .scaleEffect(scale)
-                        .offset(offset)
-                        .gesture(magnificationGesture)
-                        .simultaneousGesture(panGesture)
-                        .onTapGesture(count: 2) { handleDoubleTap() }
-                } else {
-                    Color.clear
-                }
+            let viewerGlobal = geo.frame(in: .global)
+            let viewerSize = geo.size
+            let fitFrame = aspectFitFrame(in: viewerSize)
+            let imageFrame: CGRect = {
+                guard let sourceFrame else { return fitFrame }
+                let localSource = CGRect(
+                    x: sourceFrame.minX - viewerGlobal.minX,
+                    y: sourceFrame.minY - viewerGlobal.minY,
+                    width: sourceFrame.width,
+                    height: sourceFrame.height
+                )
+                return lerp(from: localSource, to: fitFrame, t: openProgress)
+            }()
+
+            ZStack {
+                // Backdrop: openProgress fades it in/out; dismissProgress
+                // fades it during drag-dismiss. Combined formula keeps
+                // the timeline visible through both phases.
+                Color.black
+                    .opacity(openProgress * (1.0 - dismissProgress))
+                    .ignoresSafeArea()
+
+                content
+                    .frame(width: imageFrame.width, height: imageFrame.height)
+                    .position(x: imageFrame.midX, y: imageFrame.midY)
+                    // Constant 10pt matches the source card's corner radius
+                    // so the close-handoff has no corner-shape pop. The
+                    // slight rounding at fullscreen edges is intentional
+                    // and matches Photos.
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    // Drag-dismiss visual effect — applied here so both
+                    // image and video share it. The content writes to the
+                    // bindings via its own gesture; this just consumes them.
+                    .scaleEffect(dismissScale)
+                    .offset(dismissOffset)
+
+                chrome
+                    .opacity(openProgress * (1.0 - dismissProgress))
             }
-            .frame(width: geo.size.width, height: geo.size.height)
         }
         .ignoresSafeArea()
-        .task {
-            // Decode off-main for large assets; bounce back to main for @State.
-            let bytes = data
-            let decoded = await Task.detached { UIImage(data: bytes) }.value
-            await MainActor.run { self.uiImage = decoded }
-        }
+        .statusBarHidden(true)
     }
 
-    private var magnificationGesture: some Gesture {
-        MagnifyGesture()
-            .onChanged { value in
-                scale = clampedScale(lastScale * value.magnification)
-            }
-            .onEnded { _ in
-                if scale < minScale {
-                    withAnimation(.easeOut(duration: 0.2)) {
-                        scale = minScale
-                        offset = .zero
-                        lastOffset = .zero
-                    }
-                }
-                lastScale = scale
-            }
-    }
-
-    private var panGesture: some Gesture {
-        DragGesture()
-            .onChanged { value in
-                guard scale > 1 else { return }
-                offset = CGSize(
-                    width: lastOffset.width + value.translation.width,
-                    height: lastOffset.height + value.translation.height
+    @ViewBuilder
+    private var content: some View {
+        switch media.kind {
+        case .image:
+            if let data = media.data {
+                ImageMediaContent(
+                    data: data,
+                    thumbnailData: media.thumbnailData,
+                    dismissOffset: $dismissOffset,
+                    dismissProgress: $dismissProgress,
+                    dismissScale: $dismissScale,
+                    onDismissCommitted: performDismiss
+                )
+            } else {
+                // Phase F.1.1: fetched-from-server media. Resolves bytes
+                // via `MediaResolver`.
+                ResolvedFullscreenImage(
+                    payload: media,
+                    dismissOffset: $dismissOffset,
+                    dismissProgress: $dismissProgress,
+                    dismissScale: $dismissScale,
+                    onDismissCommitted: performDismiss
                 )
             }
-            .onEnded { _ in
-                lastOffset = offset
-            }
+        case .video:
+            VideoMediaContent(
+                media: media,
+                dismissOffset: $dismissOffset,
+                dismissProgress: $dismissProgress,
+                dismissScale: $dismissScale,
+                isDismissing: isDismissing,
+                onDismissCommitted: performDismiss
+            )
+        }
     }
 
-    private func handleDoubleTap() {
-        withAnimation(.easeOut(duration: 0.22)) {
-            if scale > minScale {
-                scale = minScale
-                lastScale = minScale
-                offset = .zero
-                lastOffset = .zero
-            } else {
-                scale = doubleTapScale
-                lastScale = doubleTapScale
+    private var chrome: some View {
+        VStack {
+            HStack {
+                Spacer()
+                Button {
+                    performDismiss()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 36, height: 36)
+                        .background(.ultraThinMaterial, in: Circle())
+                }
+                .padding(.top, 12)
+                .padding(.trailing, 16)
+                .accessibilityLabel("Close")
+            }
+            Spacer()
+            if let caption = media.caption, !caption.isEmpty {
+                Text(caption)
+                    .font(.DS.sans(size: 15, weight: .regular))
+                    .foregroundStyle(.white)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, 24)
+                    .frame(maxWidth: .infinity)
+                    .background {
+                        LinearGradient(
+                            colors: [.clear, .black.opacity(0.45)],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                        .ignoresSafeArea()
+                    }
             }
         }
     }
 
-    private func clampedScale(_ raw: CGFloat) -> CGFloat {
-        // Allow over-pinch slightly below 1× during gesture for a rubber-band
-        // feel — onEnded snaps back. Clamp the upper bound hard.
-        min(max(raw, minScale * 0.85), maxScale)
+    /// Aspect-fitted rect centered in the available viewer size. The
+    /// source-card frame and this fit frame share the same aspect ratio
+    /// (cards lay out at `media.aspectRatio` too) so the lerp between
+    /// them is a clean uniform scale — no shifting mid-zoom.
+    private func aspectFitFrame(in size: CGSize) -> CGRect {
+        let imageAspect = max(media.aspectRatio, 0.001)
+        let widthIfFitWidth = size.width
+        let heightIfFitWidth = widthIfFitWidth / imageAspect
+        if heightIfFitWidth <= size.height {
+            return CGRect(
+                x: 0,
+                y: (size.height - heightIfFitWidth) / 2,
+                width: widthIfFitWidth,
+                height: heightIfFitWidth
+            )
+        } else {
+            let heightIfFitHeight = size.height
+            let widthIfFitHeight = heightIfFitHeight * imageAspect
+            return CGRect(
+                x: (size.width - widthIfFitHeight) / 2,
+                y: 0,
+                width: widthIfFitHeight,
+                height: heightIfFitHeight
+            )
+        }
+    }
+
+    private func lerp(from: CGRect, to: CGRect, t: CGFloat) -> CGRect {
+        let clampedT = max(0, min(1, t))
+        return CGRect(
+            x: from.minX + (to.minX - from.minX) * clampedT,
+            y: from.minY + (to.minY - from.minY) * clampedT,
+            width: from.width + (to.width - from.width) * clampedT,
+            height: from.height + (to.height - from.height) * clampedT
+        )
     }
 }

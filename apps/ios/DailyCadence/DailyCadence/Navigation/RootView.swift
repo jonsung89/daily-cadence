@@ -6,13 +6,59 @@ import SwiftUI
 ///
 /// Each feature screen owns its own `NavigationStack`, so each tab's
 /// navigation stack is independent (iOS standard tab-bar behavior).
+///
+/// **Phase F.1.1b'.zoom — manual matched-geometry overlay.** Cards
+/// publish their image-area frames via `CardFrameKey`; on tap, RootView
+/// snapshots that frame onto `PresentedMedia` and animates
+/// `openProgress` from 0 (image at source frame) to 1 (image at
+/// fullscreen-fitted frame). The viewer interpolates the image's
+/// `.frame` + `.position` manually between source and full. SwiftUI's
+/// `matchedGeometryEffect` was tried but doesn't play well with overlay
+/// presentation — the viewer would slide in from the side and the
+/// close animation would render in the wrong z-layer.
 struct RootView: View {
     @State private var selection: RootTab = .today
 
+    /// Drives the open animation + steady-state viewer. Set/cleared
+    /// alongside `openProgress` for the matched-geo zoom feel.
+    @State private var presentedMedia: PresentedMedia?
+
+    /// Holds the same payload as `presentedMedia` during the close
+    /// animation so the viewer overlay STAYS rendered (above the
+    /// timeline + TabBar) while `openProgress` interpolates back to 0.
+    /// Cleared on a delayed `Task` once the close animation is past.
+    @State private var hidingMedia: PresentedMedia?
+
+    /// 0 = image at source-card frame, 1 = image at fullscreen-fitted
+    /// frame. Animated via `withAnimation` on present/dismiss to drive
+    /// the manual zoom in `MediaViewerScreen`.
+    @State private var openProgress: CGFloat = 0
+
+    /// Collected from cards via `CardFrameKey` `PreferenceKey`. Used to
+    /// snapshot the source frame onto `PresentedMedia` at tap time.
+    @State private var sourceFrames: [UUID: CGRect] = [:]
+
     var body: some View {
         content
+            .environment(\.mediaTapHandler, mediaTapHandler)
+            .onPreferenceChange(CardFrameKey.self) { sourceFrames = $0 }
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 TabBar(items: tabItems, selection: $selection)
+            }
+            .overlay {
+                if let displayed = presentedMedia ?? hidingMedia {
+                    MediaViewerScreen(
+                        media: displayed.payload,
+                        sourceFrame: displayed.sourceFrame,
+                        openProgress: openProgress,
+                        onDismiss: dismissViewer
+                    )
+                    // `.identity` so SwiftUI doesn't apply a default
+                    // appearance transition over our manual frame
+                    // interpolation. The viewer container materializes
+                    // instantly; openProgress drives the visible zoom.
+                    .transition(.identity)
+                }
             }
             // Root-level tint propagates the user's chosen primary color to
             // all SwiftUI controls (buttons, links, progress indicators) via
@@ -45,6 +91,53 @@ struct RootView: View {
         case .progress: DashboardScreen()
         case .library:  LibraryScreen()
         case .settings: SettingsScreen()
+        }
+    }
+
+    // MARK: - Media viewer
+
+    /// Handler injected into `EnvironmentValues.mediaTapHandler` so cards
+    /// can fire `onTap` and have RootView flip into presentation. The
+    /// `activeID`/`visibleID` split keeps the source card invisible
+    /// across the entire close animation.
+    private var mediaTapHandler: MediaTapHandler {
+        MediaTapHandler(
+            activeID: presentedMedia?.sourceID,
+            visibleID: (presentedMedia ?? hidingMedia)?.sourceID
+        ) { payload, sourceID in
+            // Snapshot the source frame at tap time — frozen for the
+            // open AND close animations so timeline scrolling /
+            // re-layout behind the viewer doesn't move our target.
+            // Fall back to .zero if the card hasn't reported a frame
+            // yet; first-frame zoom will be slightly off but won't
+            // crash, and subsequent renders fill in.
+            let frame = sourceFrames[sourceID] ?? .zero
+            presentedMedia = PresentedMedia(
+                sourceID: sourceID,
+                payload: payload,
+                sourceFrame: frame
+            )
+            withAnimation(.smooth(duration: 0.5)) {
+                openProgress = 1
+            }
+        }
+    }
+
+    /// Closes the viewer with the manual zoom-back. Keeps the overlay
+    /// rendered via `hidingMedia` for the animation duration so the
+    /// close runs in this overlay layer (above timeline + TabBar).
+    /// `.smooth(duration: 0.5)` matched on both directions removes the
+    /// spring-physics asymmetry that made open feel faster than close;
+    /// the 510 ms deferred clear is just past the animation's end.
+    private func dismissViewer() {
+        hidingMedia = presentedMedia
+        presentedMedia = nil
+        withAnimation(.smooth(duration: 0.5)) {
+            openProgress = 0
+        }
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(510))
+            hidingMedia = nil
         }
     }
 

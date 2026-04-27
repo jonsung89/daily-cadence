@@ -421,15 +421,38 @@ Photos.app-style. Built into the media editor.
 
 ## Media viewer
 
-**Owns:** `Features/MediaViewer/MediaViewerScreen.swift`
+**Owns:** `Features/MediaViewer/{MediaViewerScreen, ImageMediaContent, VideoMediaContent}.swift`
 
-Full-screen viewer presented via `.fullScreenCover` when a media card is tapped.
+Full-screen viewer presented as a `RootView` overlay (so the underlying timeline keeps rendering through the backdrop fade), opened with an Apple Photos-style matched-geometry zoom from the source card. Falls back to `.fullScreenCover` for surfaces without a tap handler (previews, non-Timeline screens).
 
-- Black backdrop. Top-trailing close button (X in `.ultraThinMaterial` 36pt circle).
-- **Image** — `ImagePinchZoomView`: iOS 17+ zoomable `ScrollView` with the image inside. Pinch + double-tap zoom built in. Image data decoded off-main via `Task.detached`.
-- **Video** — Writes bytes to `temporaryDirectory/dc-video-<UUID>.mov`; wraps an `AVPlayer` in SwiftUI's `VideoPlayer`. Auto-plays on appear. Cleans up the temp file in `onDisappear`.
+### Open / close zoom (Phase F.1.1b'.zoom)
+
+- Cards publish their image-area frame via `CardFrameKey`; on tap, `RootView` snapshots that frame onto `PresentedMedia` and animates `openProgress` from 0 (content at source-card frame) to 1 (content at fullscreen-fitted frame). The viewer interpolates `.frame` + `.position` between the two each render.
+- Animation: `.smooth(duration: 0.5)` symmetric on both directions; the close keeps the overlay rendered for 510 ms via a deferred-clear `hidingMedia` slot so the close runs above the TabBar layer.
+- Constant 10pt corner radius matches the source card so the close-handoff has no corner-shape pop.
+- Source-card opacity gates on `MatchedGeometryModifier.visibleID` (covers `presentedMedia ?? hidingMedia`) so the card stays invisible across the entire close.
+
+### Shared viewer envelope
+
+`MediaViewerScreen` is a thin shared envelope that handles zoom interpolation, corner clip, drag-dismiss visual effect (`.scaleEffect(dismissScale).offset(dismissOffset)` applied at outer level), and chrome — the kind-specific content lives in `ImageMediaContent` / `VideoMediaContent`. Both write drag-dismiss state into bindings owned by the envelope so the visual effect is identical for image and video.
+
+- Top-trailing close button (X in `.ultraThinMaterial` 36pt circle).
 - **Caption** (when present) — bottom gradient overlay (`.clear → .black @ 0.45`), white sans 15pt, 24pt horizontal padding, multiline-centered.
 - Status bar hidden during the viewer.
+
+### Image content (`ImageMediaContent`)
+
+- Pinch to zoom 1×–5×, double-tap to toggle 1×↔2.5×, pan-when-zoomed.
+- **Drag-down to dismiss** at scale 1: image follows finger (vertical + horizontal), backdrop fades proportionally over 200pt, scales toward 0.7×. Commit threshold: translation > 120pt OR predicted velocity > 600pt. Below threshold, springs back via `.spring(response: 0.35, dampingFraction: 0.85)`.
+- Thumbnail bytes (~80 KB HEIC) are sync-decoded in `init` so the very first zoom-in frame paints; full-resolution decode runs in `.task` and swaps in when ready.
+
+### Video content (`VideoMediaContent`)
+
+- **Poster handoff during zoom** — `posterData` is sync-decoded in `init` and shown immediately so the open zoom has visible content from frame one (matches what the source card was showing). Crossfades to the live `AVPlayerViewController` once `currentItem.status == .readyToPlay` (polled at ~30 fps).
+- AVKit chrome: scrubber, play/pause, mute, AirPlay (`showsPlaybackControls = true`, `videoGravity = .resizeAspect`).
+- **AVKit-coexisting drag-dismiss** — `UIPanGestureRecognizer` attached to the player view via `UIViewControllerRepresentable`. Delegate returns `true` from `shouldRecognizeSimultaneouslyWith` (coexists with all of AVKit's gestures) and only returns `true` from `gestureRecognizerShouldBegin` when initial velocity is vertical-dominant downward — so horizontal scrubs and taps fall through to AVKit untouched. Same translation/velocity thresholds as image.
+- **Auto-pause on dismiss** — `isDismissing` flips when the viewer's `performDismiss` runs (X button, drag-commit, or fallback). `.onChange` pauses the player synchronously so audio doesn't bleed through the close animation.
+- **Bytes path** — Phase F.1.1: signed URL via `MediaResolver` for fetched videos (`media.ref` set), or temp-file write at `temporaryDirectory/dc-video-<UUID>.mov` for newly-imported inline bytes. Temp file cleaned up in `onDisappear`.
 
 ---
 

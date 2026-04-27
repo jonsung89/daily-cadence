@@ -37,6 +37,13 @@ struct KeepCard: View {
     /// "tap → open `MediaViewerScreen`" behavior. Parent screens pass
     /// this to open the editor in edit mode for the tapped note.
     var onTap: (() -> Void)? = nil
+    /// Phase F.1.1b'.zoom — when set, the card uses the parent's shared
+    /// namespace for matched-transition source and forwards media taps
+    /// to the parent (which presents the viewer via NavigationStack
+    /// push for the native zoom transition). When `nil`, the card falls
+    /// back to its own `.fullScreenCover` — preserves preview /
+    /// non-Timeline surfaces that haven't migrated.
+    var mediaTapHandler: MediaTapHandler? = nil
     /// When false, suppresses the pin overlay and the card-owned
     /// `.contextMenu`. Used by previews and other surfaces that want a
     /// purely presentational card.
@@ -114,6 +121,10 @@ struct KeepCard: View {
         }
         .animation(.easeOut(duration: 0.18), value: isPinned)
         .accessibilityElement(children: .combine)
+        // Fallback presentation for surfaces that don't pass a
+        // `mediaTapHandler` (previews, non-Timeline). When the handler
+        // is set, the parent owns presentation + native zoom transition
+        // and `isMediaViewerPresented` stays false here.
         .fullScreenCover(isPresented: $isMediaViewerPresented) {
             if let media = note.mediaPayload {
                 MediaViewerScreen(media: media)
@@ -412,9 +423,22 @@ struct KeepCard: View {
         .aspectRatio(media.aspectRatio, contentMode: .fit)
         .frame(maxWidth: .infinity)
         .contentShape(Rectangle())
-        .onTapGesture { isMediaViewerPresented = true }
+        .onTapGesture { handleMediaTap(media) }
+        .modifier(MatchedGeometryModifier(handler: mediaTapHandler, id: note.id))
         .accessibilityLabel(media.kind == .video ? "Play video" : "Open photo")
         .accessibilityAddTraits(.isButton)
+    }
+
+    /// Routes the card's media tap. When the parent provided a
+    /// `mediaTapHandler`, fires its callback (parent presents via
+    /// NavigationStack push with native zoom transition). Otherwise
+    /// falls back to the card-local `.fullScreenCover`.
+    private func handleMediaTap(_ media: MediaPayload) {
+        if let handler = mediaTapHandler {
+            handler.onTap(media, note.id)
+        } else {
+            isMediaViewerPresented = true
+        }
     }
 
     /// Returns the displayable poster image for a media payload.

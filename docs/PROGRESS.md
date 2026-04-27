@@ -1,6 +1,6 @@
 # DailyCadence — Progress
 
-**Last updated:** 2026-04-27 (Phase F.1.1b' — video trim sheet shipped + load-time / gesture fixes. ProRes import dropped from ~60 s to ~1.8 s via `preferredItemEncoding: .current` + `VideoFile: Transferable`. Drag-gesture cumulative-translation bug fixed; AVPlayer scrub seeks no longer queue past finger lift.)
+**Last updated:** 2026-04-27 (Phase F.1.1b'.zoom — Apple Photos zoom + drag-dismiss for both image and video shipped. Reusable shared envelope (`MediaViewerScreen`) + per-kind content (`ImageMediaContent`, `VideoMediaContent`); video gets poster handoff during zoom + AVKit-coexisting `UIPanGestureRecognizer` for drag-dismiss + auto-pause on dismiss. Two prior bugs (corner radius snap, open vs close speed asymmetry) resolved by switching to constant 10pt corner + symmetric `.smooth(duration: 0.5)` on both directions.)
 **Current phase:** Phase 1 MVP — iOS app for Jon + wife, TestFlight distribution
 
 This is the living state of the project. Update at the end of every session.
@@ -1642,6 +1642,30 @@ Replaces the over-60s rejection path with a proper Apple Photos-style trim flow.
 
 Filmstrip also got smaller `maximumSize` (200 → 120 px) and `tolerance: .positiveInfinity` (snap to keyframe). Frames now publish to UI as they generate (~30 ms each on ProRes after the fix), and the strip renders fixed slots so per-frame width stays stable while loading.
 
+### Phase F.1.1b'.zoom — Apple Photos zoom + drag-dismiss for image and video (added this round)
+
+Replaces the prior `.fullScreenCover` slide-up presentation with an Apple Photos-style matched-geometry zoom that's identical for both photos and videos. Architecture is custom (manual frame interpolation) because SwiftUI's `.navigationTransition(.zoom)` snapshots the destination — the live state-driven visuals went black mid-transition. `matchedGeometryEffect` was tried second; the viewer slid in from the side and the close-back rendered in the wrong z-layer.
+
+**Open / close architecture.** [Models/MediaTapHandler.swift](apps/ios/DailyCadence/DailyCadence/Models/MediaTapHandler.swift) (new) bundles the tap callback, an `activeID`/`visibleID` split (the former drives card opacity gating during the close, the latter the matched-geo trigger), and a `CardFrameKey: PreferenceKey` collecting each card's image-area frame in global coords. `RootView` lifts the viewer state up so the overlay's z-order is above the TabBar (which lives in `safeAreaInset` at root level): owns `presentedMedia`, `hidingMedia` (kept rendered during the close via a deferred `Task.sleep(for: .milliseconds(510))`), `openProgress: CGFloat = 0`, and `sourceFrames: [UUID: CGRect]`. The viewer is mounted via `.overlay { ... .transition(.identity) }` so SwiftUI's default appearance transition doesn't fight the manual frame interpolation.
+
+**Animation timing.** `.smooth(duration: 0.5)` symmetric on both directions (open and close). Earlier iterations used `.spring(response: 0.55, dampingFraction: 0.92)` and the open consistently felt faster than the close — the spring's settle/oscillation profile was asymmetric in perception even though the physics were identical. Switching to a duration-based curve eliminated the asymmetry. The deferred-clear was tightened from 680 ms to 510 ms to match.
+
+**Constant 10pt corner radius.** Tried interpolating from 10pt (source-card) to 0pt (fullscreen) via a custom `AnimatableCornerClip: ViewModifier, Animatable` modifier; never visibly animated despite multiple variants (linear math, explicit `.animation(_:value:)`, transaction wrap). Root cause was likely SwiftUI's animation system not propagating through `let`-passed parameters into a custom modifier's `animatableData` the way it does for built-in modifiers like `.frame`. Switched to constant 10pt — matches the source card so the close-handoff has no corner-shape pop, and the slight rounding at fullscreen edges matches Apple Photos' own behavior.
+
+**Reusable envelope.** Refactored from a monolithic `MediaViewerScreen` + private `ImagePinchZoomView` into three files:
+- [Features/MediaViewer/MediaViewerScreen.swift](apps/ios/DailyCadence/DailyCadence/Features/MediaViewer/MediaViewerScreen.swift) — shared envelope. Owns matched-geo zoom interpolation, corner clip, drag-dismiss visual effect (`.scaleEffect(dismissScale).offset(dismissOffset)` applied at outer level so both content kinds inherit it identically), and chrome (close button + caption).
+- [Features/MediaViewer/ImageMediaContent.swift](apps/ios/DailyCadence/DailyCadence/Features/MediaViewer/ImageMediaContent.swift) — image specifics. Pinch-zoom 1×–5×, double-tap toggle, pan-when-zoomed, drag-down dismiss at scale 1. Writes dismiss state via `@Binding` to the envelope.
+- [Features/MediaViewer/VideoMediaContent.swift](apps/ios/DailyCadence/DailyCadence/Features/MediaViewer/VideoMediaContent.swift) — video specifics.
+
+**Photos-parity for video** required three tricks:
+1. **Poster handoff during zoom.** Sync-decoded `posterData` in `init` shows the poster image immediately so the open-zoom has visible content from frame one (matches what the source card was showing). Crossfades to the live `AVPlayerViewController` once `currentItem.status == .readyToPlay` (polled at ~30 fps inside `.task`). Without this, the user sees a `ProgressView` spinner being zoomed for the first ~150 ms while AVPlayer loads.
+2. **AVKit-coexisting drag-dismiss.** `AVPlayerViewController` is wrapped via `UIViewControllerRepresentable` with a `UIPanGestureRecognizer` attached to the controller's view. Delegate returns `true` from `shouldRecognizeSimultaneouslyWith` (coexists with all of AVKit's internal gestures — scrubber, tap-to-toggle-controls, etc.) and only returns `true` from `gestureRecognizerShouldBegin` when the initial velocity is vertical-dominant downward. Horizontal scrubs and taps fall through to AVKit untouched; vertical drags claim our recognizer for dismiss.
+3. **Auto-pause on dismiss.** `isDismissing` flips synchronously when the viewer's `performDismiss` runs (X button, drag-commit, fallback). `VideoMediaContent` observes via `.onChange` and calls `player?.pause()` immediately so audio doesn't bleed through the 510 ms close animation.
+
+The previous WIP entry in `docs/FEATURES.md` was rewritten to describe the shipped behavior; the `project_zoom_transition_wip.md` memory entry is removed (the architecture is in code, the bugs are fixed).
+
+**Files touched:** [MediaViewerScreen.swift](apps/ios/DailyCadence/DailyCadence/Features/MediaViewer/MediaViewerScreen.swift), [ImageMediaContent.swift](apps/ios/DailyCadence/DailyCadence/Features/MediaViewer/ImageMediaContent.swift) (new), [VideoMediaContent.swift](apps/ios/DailyCadence/DailyCadence/Features/MediaViewer/VideoMediaContent.swift) (new), [MediaTapHandler.swift](apps/ios/DailyCadence/DailyCadence/Models/MediaTapHandler.swift) (new), [RootView.swift](apps/ios/DailyCadence/DailyCadence/Navigation/RootView.swift), [TimelineScreen.swift](apps/ios/DailyCadence/DailyCadence/Features/Timeline/TimelineScreen.swift), [CardsBoardView.swift](apps/ios/DailyCadence/DailyCadence/Features/Timeline/CardsBoardView.swift), [StackedBoardView.swift](apps/ios/DailyCadence/DailyCadence/Features/Timeline/StackedBoardView.swift), [KeepCard.swift](apps/ios/DailyCadence/DailyCadence/DesignSystem/Components/KeepCard.swift), [NoteCard.swift](apps/ios/DailyCadence/DailyCadence/DesignSystem/Components/NoteCard.swift), [ResolvedMediaImage.swift](apps/ios/DailyCadence/DailyCadence/DesignSystem/Components/ResolvedMediaImage.swift).
+
 ### Phase F+ feature TODO (designed-for, not-built)
 
 Captured here so a fresh session can pick up the roadmap. Each line corresponds to schema fields that are reserved but unused.
@@ -1694,7 +1718,7 @@ Captured here so a fresh session can pick up the roadmap. Each line corresponds 
 
 ## 🚧 In flight
 
-**Phase F.1.1b' (media UX polish) — first item shipped.** Video trim sheet replaces the over-60s rejection. Remaining bundle items per `project_media_storage.md`: inline video playback in cards, camera capture from FAB, Apple-Photos zoom transition + interactive swipe-down dismiss, timeline media-width design call. None are ordered — pick any next.
+**Phase F.1.1b' (media UX polish) — two items shipped.** Video trim sheet (over-60s rejection → trim flow) and the Apple Photos zoom + drag-dismiss for both image and video. Remaining bundle items per `project_media_storage.md`: inline video playback in cards, camera capture from FAB, timeline media-width design call. None are ordered — pick any next.
 
 **Phase F (Supabase persistence) — text/stat/list/quote round-trip live; media + backgrounds + run-styling deferred.** `AppSupabase.client` + `AuthStore` + `NotesRepository` + the wired `TimelineStore` are all in place. The app signs in anonymously on launch, fetches the user's notes once `AuthStore.currentUserId` settles, and persists subsequent adds/deletes optimistically. Open Phase F+ persistence work captured in the Phase F+ TODO section: media-note Storage upload pipeline, image-background uploads, swatch-background-id resolution, AttributedString per-run styling round-trip (gated on Phase E.2 polish).
 
