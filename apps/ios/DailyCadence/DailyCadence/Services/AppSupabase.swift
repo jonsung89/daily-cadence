@@ -16,6 +16,17 @@ enum AppSupabase {
                 in apps/ios/DailyCadence/, fill in SUPABASE_URL + SUPABASE_ANON_KEY, then rebuild.
                 """)
         }
-        return SupabaseClient(supabaseURL: url, supabaseKey: anonKey)
+        return SupabaseClient(
+            supabaseURL: url,
+            supabaseKey: anonKey,
+            // Opt-in to the next-major-version semantics for `.initialSession`:
+            // emit whatever's in Keychain immediately, possibly expired, and let
+            // a follow-up `.tokenRefreshed` (or `.signedOut`) settle it. The
+            // legacy default refreshes before emitting, which masks expired
+            // sessions. AuthStore checks `session.isExpired` to handle both.
+            options: .init(
+                auth: .init(emitLocalSessionAsInitialSession: true)
+            )
+        )
     }()
 }

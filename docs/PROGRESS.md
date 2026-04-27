@@ -1,6 +1,6 @@
 # DailyCadence — Progress
 
-**Last updated:** 2026-04-27 (Phase F.0 wiring — `Config.xcconfig` + static `Info.plist` + `AppSupabase` singleton; in-memory cache strategy chosen; `MediaImporter.downscale` upscale-guard fix)
+**Last updated:** 2026-04-27 (Phase F.0.1 — `AuthStore` with anonymous bootstrap + Settings → Account row; auth state observable end-to-end)
 **Current phase:** Phase 1 MVP — iOS app for Jon + wife, TestFlight distribution
 
 This is the living state of the project. Update at the end of every session.
@@ -1432,6 +1432,26 @@ Caught while validating the test suite was green after the Phase F.0 wiring. Two
 
 Without the test fix the upscale-guard test was a false positive (the 1800×1200 source legitimately needed downscaling); without the source fix the contract was unenforced. Both went together.
 
+### Phase F.0.1 — AuthStore + anonymous bootstrap (added this round)
+
+The auth half of Phase F's iOS data layer. The app now actually signs in to Supabase on launch.
+
+**`Services/AuthStore.swift`.** `@Observable` singleton mirroring the `ThemeStore` / `TimelineStore` pattern. On init it spawns a Task that listens to `AppSupabase.client.auth.authStateChanges`. The SDK's stream emits an `.initialSession` event first carrying whatever's in Keychain. Exposes `currentUserId: UUID?`, `isReady: Bool` (false until first event resolved), and `lastError: String?`. Three branches:
+
+- Valid stored session → apply, mark ready.
+- **Expired stored session → wait.** The SDK's auto-refresh fires `.tokenRefreshed` (success) or `.signedOut` (refresh-token also dead). We don't apply the expired session, don't set `isReady` yet — the follow-up event resolves the state.
+- No session → `signInAnonymously()`. The resulting `.signedIn` event flows back through the same stream and applies the new session.
+
+Also handles `.signedOut` / `.userDeleted` by re-running `signInAnonymously()` so the app stays usable when the server tombstones an anon user (anon users can have a TTL).
+
+**`AppSupabase` opts into the next-major-version SDK semantics** via `emitLocalSessionAsInitialSession: true`. The legacy default refreshes the stored session *before* emitting `.initialSession`, which masks the expired-session case. The new behavior emits whatever's in Keychain immediately and lets us check `session.isExpired` ourselves — strictly more honest, and one less migration to do later.
+
+**`DailyCadenceApp.init`.** A bare `_ = AuthStore.shared` reference kicks off the bootstrap — first access creates the singleton, which spawns the listener task. Doesn't gate UI; the timeline still renders `MockNotes.today` while auth resolves in the background. (NotesRepository wiring will need `isReady` later.)
+
+**`SettingsScreen` — new Account section.** Sits between Appearance and About. Shows "Loading…" until `isReady` flips, then the active user's UUID in monospaced text. If anonymous sign-in fails (network down, anon-auth toggle off in dashboard, etc.), an Error row appears in `Color.DS.workout` (warm-red brand tone). Footer text explains this is dev mode and Apple/Google land after enrollment.
+
+**Verified by build (138/138 unit tests still pass).** Live anon sign-in tested manually by Jon — confirm via Settings → Account showing a UUID.
+
 ### Phase F+ feature TODO (designed-for, not-built)
 
 Captured here so a fresh session can pick up the roadmap. Each line corresponds to schema fields that are reserved but unused.
@@ -1479,7 +1499,7 @@ Captured here so a fresh session can pick up the roadmap. Each line corresponds 
 
 ## 🚧 In flight
 
-**Phase F (Supabase persistence) — wiring landed, auth/data layer next.** Config + client are in place. Next concrete step: `AuthStore` (anonymous auth for now while Apple Developer enrollment is in review) → `NotesRepository` → swap `TimelineStore` from `MockNotes.today` to live fetch.
+**Phase F (Supabase persistence) — auth layer landed, data layer next.** `AppSupabase.client` + `AuthStore` are wired; the app signs in anonymously on first launch and the user_id surfaces in Settings → Account. Next concrete step: `NotesRepository` (CRUD against `notes` table) → swap `TimelineStore.notes` from `MockNotes.today` to a live fetch keyed off `AuthStore.shared.currentUserId`.
 
 Other open follow-ups (unchanged from prior round): per-block focused TextEditors (mid-paragraph image insertion — currently the model supports it but UI ships intro/attachments/outro three-zone layout), drag-to-reorder blocks, inline text formatting (bold/italic/underline/strikethrough), auto-bullet + checkboxes in text notes, auto-scroll the cards grid when dragging near a viewport edge.
 

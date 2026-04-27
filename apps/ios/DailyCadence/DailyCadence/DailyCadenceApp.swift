@@ -22,6 +22,11 @@ struct DailyCadenceApp: App {
             .displayFrequency(.immediate),
             .datastoreLocation(.applicationDefault),
         ])
+        // Kick off the auth bootstrap. First access to `.shared`
+        // creates the store, which in turn spawns the listener task
+        // for `authStateChanges` and (if no Keychain session exists)
+        // signs in anonymously.
+        _ = AuthStore.shared
     }
 
     var body: some Scene {

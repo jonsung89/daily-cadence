@@ -13,6 +13,7 @@ struct SettingsScreen: View {
             List {
                 todaySection
                 appearanceSection
+                accountSection
                 aboutSection
             }
             .listStyle(.insetGrouped)
@@ -64,6 +65,53 @@ struct SettingsScreen: View {
         } header: {
             Text("Appearance")
         }
+    }
+
+    // MARK: - Account
+
+    /// Shows the current Supabase auth state. Phase F dev mode signs in
+    /// anonymously, so this displays a uuid that's stable per install
+    /// (until the device's Keychain entry is cleared). Replaces the
+    /// "Loading…" placeholder once `AuthStore` has bootstrapped.
+    private var accountSection: some View {
+        let auth = AuthStore.shared
+        return Section {
+            HStack {
+                Text("User ID")
+                    .foregroundStyle(Color.DS.ink)
+                Spacer()
+                Text(accountStatusText(auth: auth))
+                    .foregroundStyle(Color.DS.fg2)
+                    .font(.system(size: 13, design: .monospaced))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            .listRowBackground(Color.DS.bg2)
+
+            if let error = auth.lastError {
+                HStack {
+                    Text("Error")
+                        .foregroundStyle(Color.DS.ink)
+                    Spacer()
+                    Text(error)
+                        .foregroundStyle(Color.DS.workout)
+                        .font(.DS.small)
+                        .multilineTextAlignment(.trailing)
+                }
+                .listRowBackground(Color.DS.bg2)
+            }
+        } header: {
+            Text("Account")
+        } footer: {
+            Text("Phase F dev mode: anonymous Supabase session. Apple + Google sign-in land once Apple Developer enrollment clears.")
+        }
+    }
+
+    private func accountStatusText(auth: AuthStore) -> String {
+        if let id = auth.currentUserId {
+            return id.uuidString
+        }
+        return auth.isReady ? "—" : "Loading…"
     }
 
     // MARK: - About
