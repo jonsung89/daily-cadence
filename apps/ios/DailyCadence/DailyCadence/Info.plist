@@ -20,6 +20,10 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>DailyCadence uses the camera so you can capture a photo or video for a note without leaving the app.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>DailyCadence records audio with video captures so the clip plays back with sound.</string>
 	<key>SupabaseAnonKey</key>
 	<string>$(SUPABASE_ANON_KEY)</string>
 	<key>SupabaseURL</key>

@@ -28,14 +28,29 @@ import AVFoundation
 /// asset is the substance and forcing a re-pick on accidental dismiss is
 /// less disruptive than re-typing a long message.
 struct MediaNoteEditorScreen: View {
+    /// Where the editor's first asset came from. The FAB flow can hand
+    /// in either a `PhotosPickerItem` (library path) or a fresh capture
+    /// from `CameraPicker`. The editor switches to the right
+    /// `MediaImporter` adapter based on the case; everything downstream
+    /// (trim sheet, crop, payload state) is shared.
+    enum InitialMedia {
+        case pickerItem(PhotosPickerItem)
+        case cameraImage(UIImage)
+        case cameraVideoURL(URL)
+    }
+
     @Environment(\.dismiss) private var dismiss
 
-    /// Initial picker item passed in from the FAB flow (the user already
-    /// chose an asset before this sheet opened). May be `nil` if we want
-    /// the user to pick inside the sheet — we render the picker upfront
-    /// in that case.
-    let initialItem: PhotosPickerItem?
+    /// Initial source passed in from the FAB flow. May be `nil` if we
+    /// want the user to pick inside the sheet — we render the picker
+    /// upfront in that case.
+    let initialMedia: InitialMedia?
 
+    /// Picker state for the in-editor "Replace" action. Bound to the
+    /// editor's `PhotosPicker`. Initialized from `initialMedia` when
+    /// it's a `.pickerItem` so the picker reflects the user's choice;
+    /// camera captures leave this `nil` since they don't round-trip
+    /// through `PhotosPickerItem`.
     @State private var pickerItem: PhotosPickerItem?
     @State private var payload: MediaPayload?
     /// Owned crop state for image payloads. `nil` for videos (no crop UX
@@ -61,9 +76,16 @@ struct MediaNoteEditorScreen: View {
     /// the actual `AVPlayer`. Same surface used by the timeline cards.
     @State private var isVideoPreviewPresented = false
 
-    init(initialItem: PhotosPickerItem? = nil) {
-        self.initialItem = initialItem
-        self._pickerItem = State(initialValue: initialItem)
+    init(initialMedia: InitialMedia? = nil) {
+        self.initialMedia = initialMedia
+        // Only seed the in-editor PhotosPicker binding when the initial
+        // source is itself a picker item. Camera captures don't have a
+        // matching `PhotosPickerItem` representation.
+        if case .pickerItem(let item) = initialMedia {
+            self._pickerItem = State(initialValue: item)
+        } else {
+            self._pickerItem = State(initialValue: nil)
+        }
     }
 
     var body: some View {
@@ -86,13 +108,16 @@ struct MediaNoteEditorScreen: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { toolbarContent }
             .task {
-                if let item = initialItem, payload == nil {
-                    await importItem(item)
+                if let initialMedia, payload == nil {
+                    await importMedia(initialMedia)
                 }
             }
             .onChange(of: pickerItem) { _, newItem in
+                // Replace flow only — `.onChange` doesn't fire for the
+                // initial seeded value, so the `.task` above owns the
+                // first import.
                 guard let newItem else { return }
-                Task { await importItem(newItem) }
+                Task { await importMedia(.pickerItem(newItem)) }
             }
             .sheet(item: $trimSource) { source in
                 VideoTrimSheet(
@@ -303,7 +328,7 @@ struct MediaNoteEditorScreen: View {
 
     // MARK: - Actions
 
-    private func importItem(_ item: PhotosPickerItem) async {
+    private func importMedia(_ source: InitialMedia) async {
         await MainActor.run {
             isLoading = true
             importError = nil
@@ -312,7 +337,15 @@ struct MediaNoteEditorScreen: View {
             Task { @MainActor in isLoading = false }
         }
         do {
-            let result = try await MediaImporter.makePayload(from: item)
+            let result: MediaImporter.ImportResult
+            switch source {
+            case .pickerItem(let item):
+                result = try await MediaImporter.makePayload(from: item)
+            case .cameraImage(let image):
+                result = try MediaImporter.makePayload(fromCameraImage: image)
+            case .cameraVideoURL(let url):
+                result = try await MediaImporter.makePayload(fromCameraVideoURL: url)
+            }
             await MainActor.run {
                 switch result {
                 case .payload(let payload):

@@ -202,6 +202,30 @@ enum MediaImporter {
         try? FileManager.default.removeItem(at: source.sourceURL)
     }
 
+    // MARK: - Camera capture (Phase F.1.1b'.camera)
+
+    /// Camera-capture image variant. The camera hands us a `UIImage`
+    /// (already decoded). Encode to JPEG at q=0.92 to preserve quality,
+    /// then run the same `imagePayload` flow as picker imports — same
+    /// downscale + dual-size HEIC re-encode as library imports.
+    static func makePayload(fromCameraImage image: UIImage) throws -> ImportResult {
+        guard let jpeg = image.jpegData(compressionQuality: 0.92) else {
+            log.error("makePayload(fromCameraImage:): jpegData returned nil")
+            throw ImportError.unsupported
+        }
+        return .payload(try imagePayload(from: jpeg))
+    }
+
+    /// Camera-capture video variant. The picker hands us a `URL` we
+    /// already own (`CameraPicker` copies it into our temp dir before
+    /// the picker tears down). Routes through the same
+    /// `videoImportResult` pipeline as library imports, so >60s
+    /// captures land in `VideoTrimSheet` automatically — same trim UX
+    /// the user gets for picker imports.
+    static func makePayload(fromCameraVideoURL url: URL) async throws -> ImportResult {
+        try await videoImportResult(from: url)
+    }
+
     // MARK: - Image
 
     private static func imagePayload(from data: Data) throws -> MediaPayload {

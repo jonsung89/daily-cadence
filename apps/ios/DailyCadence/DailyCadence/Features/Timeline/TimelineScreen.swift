@@ -25,6 +25,13 @@ struct TimelineScreen: View {
     @State private var mediaPickerItem: PhotosPickerItem?
     @State private var isMediaEditorPresented = false
 
+    /// Phase F.1.1b'.camera — drives the camera capture flow when the
+    /// user picks "Take Photo or Video" from the FAB menu. The captured
+    /// asset (image OR video URL) seeds `pendingCapture`; the editor
+    /// opens with that as its initial source.
+    @State private var isCameraPresented = false
+    @State private var pendingCapture: MediaNoteEditorScreen.InitialMedia?
+
     /// The note id the user has asked to delete (Phase E.5.15). When
     /// non-nil, drives the `.confirmationDialog`. The card's
     /// `.contextMenu` Delete action sets this; user confirmation in
@@ -217,6 +224,17 @@ struct TimelineScreen: View {
             // it last in source places it on top, matching Apple Mail's
             // compose menu ordering.
             Menu {
+                // Source order is bottom-to-top in the popup (SwiftUI
+                // anchors the menu above the FAB and renders
+                // last-declared closest to the visual top — closest to
+                // the anchor for thumb travel). Frequency-first:
+                // camera at the bottom of source = bottom of popup;
+                // Text Note at top of popup = primary action.
+                Button {
+                    isCameraPresented = true
+                } label: {
+                    Label("Take Photo or Video", systemImage: "camera")
+                }
                 Button {
                     isMediaPickerPresented = true
                 } label: {
@@ -242,9 +260,30 @@ struct TimelineScreen: View {
             photoLibrary: .shared()
         )
         .onChange(of: mediaPickerItem) { _, newItem in
-            // PhotosPicker dismisses on selection — open the media editor
+            // PhotosPicker dismisses on selection — wrap the picked
+            // item in `InitialMedia.pickerItem` and open the editor
             // sheet so the user can add a caption + type before saving.
-            if newItem != nil { isMediaEditorPresented = true }
+            if let newItem {
+                pendingCapture = .pickerItem(newItem)
+                isMediaEditorPresented = true
+            }
+        }
+        // Phase F.1.1b'.camera — full-screen `UIImagePickerController`
+        // for direct camera capture. On capture, route to the same
+        // editor sheet as the picker path; on cancel, just dismiss.
+        .fullScreenCover(isPresented: $isCameraPresented) {
+            CameraPicker { capture in
+                isCameraPresented = false
+                guard let capture else { return }
+                switch capture {
+                case .image(let image):
+                    pendingCapture = .cameraImage(image)
+                case .video(let url):
+                    pendingCapture = .cameraVideoURL(url)
+                }
+                isMediaEditorPresented = true
+            }
+            .ignoresSafeArea()
         }
         .sheet(
             isPresented: $isEditorPresented
@@ -262,9 +301,10 @@ struct TimelineScreen: View {
             isPresented: $isMediaEditorPresented,
             onDismiss: {
                 mediaPickerItem = nil
+                pendingCapture = nil
             }
         ) {
-            MediaNoteEditorScreen(initialItem: mediaPickerItem)
+            MediaNoteEditorScreen(initialMedia: pendingCapture)
         }
         // Phase F.0.3 — graphical date picker for "jump to any date."
         // Tapping the header date column opens this. `.medium` detent

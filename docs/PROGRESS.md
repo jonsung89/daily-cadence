@@ -1,6 +1,6 @@
 # DailyCadence — Progress
 
-**Last updated:** 2026-04-27 (Phase F.1.1b'.zoom — Apple Photos zoom + drag-dismiss for both image and video shipped. Reusable shared envelope (`MediaViewerScreen`) + per-kind content (`ImageMediaContent`, `VideoMediaContent`); video gets poster handoff during zoom + AVKit-coexisting `UIPanGestureRecognizer` for drag-dismiss + auto-pause on dismiss. Two prior bugs (corner radius snap, open vs close speed asymmetry) resolved by switching to constant 10pt corner + symmetric `.smooth(duration: 0.5)` on both directions.)
+**Last updated:** 2026-04-27 (Phase F.1.1b'.camera — direct camera capture from the FAB. New `CameraPicker` (`UIViewControllerRepresentable` over `UIImagePickerController(.camera)`) + two `MediaImporter` adapters; `MediaNoteEditorScreen.init` now takes a unified `InitialMedia` enum (picker item / camera image / camera video URL) so the editor doesn't care where the asset came from. Captured videos route through the same trim pipeline as picker imports.)
 **Current phase:** Phase 1 MVP — iOS app for Jon + wife, TestFlight distribution
 
 This is the living state of the project. Update at the end of every session.
@@ -1666,6 +1666,24 @@ The previous WIP entry in `docs/FEATURES.md` was rewritten to describe the shipp
 
 **Files touched:** [MediaViewerScreen.swift](apps/ios/DailyCadence/DailyCadence/Features/MediaViewer/MediaViewerScreen.swift), [ImageMediaContent.swift](apps/ios/DailyCadence/DailyCadence/Features/MediaViewer/ImageMediaContent.swift) (new), [VideoMediaContent.swift](apps/ios/DailyCadence/DailyCadence/Features/MediaViewer/VideoMediaContent.swift) (new), [MediaTapHandler.swift](apps/ios/DailyCadence/DailyCadence/Models/MediaTapHandler.swift) (new), [RootView.swift](apps/ios/DailyCadence/DailyCadence/Navigation/RootView.swift), [TimelineScreen.swift](apps/ios/DailyCadence/DailyCadence/Features/Timeline/TimelineScreen.swift), [CardsBoardView.swift](apps/ios/DailyCadence/DailyCadence/Features/Timeline/CardsBoardView.swift), [StackedBoardView.swift](apps/ios/DailyCadence/DailyCadence/Features/Timeline/StackedBoardView.swift), [KeepCard.swift](apps/ios/DailyCadence/DailyCadence/DesignSystem/Components/KeepCard.swift), [NoteCard.swift](apps/ios/DailyCadence/DailyCadence/DesignSystem/Components/NoteCard.swift), [ResolvedMediaImage.swift](apps/ios/DailyCadence/DailyCadence/DesignSystem/Components/ResolvedMediaImage.swift).
 
+### Phase F.1.1b'.camera — Camera capture from the FAB (added this round)
+
+Adds a third FAB menu item, **Take Photo or Video**, that presents the iOS camera directly in-app. Previously the FAB only had `Text Note` + `Photo or Video` (library); a fresh camera capture meant leaving DailyCadence to the system Camera app and re-entering through the photo library. Camera-captured assets now flow through the same import → trim → editor pipeline as picker selections.
+
+**[Features/MediaCapture/CameraPicker.swift](apps/ios/DailyCadence/DailyCadence/Features/MediaCapture/CameraPicker.swift)** (new). `UIViewControllerRepresentable` over `UIImagePickerController(.camera)`. `mediaTypes = [UTType.image, UTType.movie]` so the native UI exposes the photo↔video mode switcher. The delegate copies the captured video URL out of the picker's temp scope into our app temp dir before reporting back, since the picker invalidates its own URL on dismiss. `UIImagePickerController` is API-marked deprecated in name only — Apple still ships it as the canonical camera surface (Mail and Notes both use it); the modern alternative `PHPickerViewController` is library-only.
+
+**[MediaImporter.swift](apps/ios/DailyCadence/DailyCadence/Services/MediaImporter.swift)** gains two thin adapters: `makePayload(fromCameraImage: UIImage)` (encodes to JPEG q=0.92, hands to the existing `imagePayload(from:)`) and `makePayload(fromCameraVideoURL: URL)` (forwards directly to the existing `videoImportResult(from:)` pipeline). The video adapter inherits the trim-sheet hand-off for free — captures over the 60 s cap route to `VideoTrimSheet` automatically, same UX as picker imports.
+
+**[MediaNoteEditorScreen.swift](apps/ios/DailyCadence/DailyCadence/Features/NoteEditor/MediaNoteEditorScreen.swift)** refactor. Replaces `init(initialItem: PhotosPickerItem?)` with `init(initialMedia: InitialMedia?)` where `InitialMedia` is a nested enum: `.pickerItem(PhotosPickerItem)`, `.cameraImage(UIImage)`, `.cameraVideoURL(URL)`. The editor's `.task` switches on the case and calls the right `MediaImporter` adapter; everything downstream (trim sheet, crop, payload state, save) is shared. `.onChange(of: pickerItem)` continues to drive the in-editor Replace flow (picker-only — replacing-via-camera is a future iteration).
+
+**[TimelineScreen.swift](apps/ios/DailyCadence/DailyCadence/Features/Timeline/TimelineScreen.swift)** adds the camera menu item, `@State isCameraPresented`, and a `pendingCapture: InitialMedia?` slot that holds the selected source between picker/camera dismissal and editor presentation. Camera UI uses `.fullScreenCover` (modal full-screen is the right surface — sheet doesn't work for `UIImagePickerController(.camera)`).
+
+**[Info.plist](apps/ios/DailyCadence/DailyCadence/Info.plist)** gains `NSCameraUsageDescription` + `NSMicrophoneUsageDescription`. Microphone is required for video audio; without the key, capturing a video crashes on AVCaptureDevice authorization.
+
+**Inline-text-note attachment flow** (`NoteEditorScreen`'s `+image` toolbar action) is unchanged — it stays picker-only for now. Camera-attach-to-text-note is a follow-up if the FAB → media note path proves it; the architectural pieces (CameraPicker, importer adapters, InitialMedia) are reusable.
+
+**Build clean.** Camera doesn't run in the simulator (no hardware), so functional verification needs a physical device; the simulator covers the picker, editor, trim, and import paths and those stay green.
+
 ### Phase F+ feature TODO (designed-for, not-built)
 
 Captured here so a fresh session can pick up the roadmap. Each line corresponds to schema fields that are reserved but unused.
@@ -1718,7 +1736,7 @@ Captured here so a fresh session can pick up the roadmap. Each line corresponds 
 
 ## 🚧 In flight
 
-**Phase F.1.1b' (media UX polish) — two items shipped.** Video trim sheet (over-60s rejection → trim flow) and the Apple Photos zoom + drag-dismiss for both image and video. Remaining bundle items per `project_media_storage.md`: inline video playback in cards, camera capture from FAB, timeline media-width design call. None are ordered — pick any next.
+**Phase F.1.1b' (media UX polish) — three items shipped.** Video trim sheet (over-60s rejection → trim flow), Apple Photos zoom + drag-dismiss for both image and video, and camera capture from FAB. Remaining bundle items per `project_media_storage.md`: inline video playback in cards, timeline media-width design call. None are ordered — pick any next.
 
 **Phase F (Supabase persistence) — text/stat/list/quote round-trip live; media + backgrounds + run-styling deferred.** `AppSupabase.client` + `AuthStore` + `NotesRepository` + the wired `TimelineStore` are all in place. The app signs in anonymously on launch, fetches the user's notes once `AuthStore.currentUserId` settles, and persists subsequent adds/deletes optimistically. Open Phase F+ persistence work captured in the Phase F+ TODO section: media-note Storage upload pipeline, image-background uploads, swatch-background-id resolution, AttributedString per-run styling round-trip (gated on Phase E.2 polish).
 

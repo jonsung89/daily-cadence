@@ -194,9 +194,10 @@ iOS arbitrates between the two automatically — the same Apple Photos / Files p
 
 - 56pt sage circle, white plus icon (24pt semibold), level-2 shadow.
 - Anchored bottom-trailing of the screen, 16pt above the tab bar, 20pt from the right edge.
-- Tap opens a SwiftUI `Menu` (popover anchored to the FAB):
+- Tap opens a SwiftUI `Menu` (popover anchored to the FAB). Items in visual top-to-bottom order (most-frequent first to minimize thumb travel):
   - **Text Note** → opens `NoteEditorScreen`.
-  - **Photo or Video** → opens `PhotosPicker` (filter `.any(of: [.images, .videos])`); on selection, presents `MediaNoteEditorScreen` with the picked item.
+  - **Photo or Video** → opens `PhotosPicker` (filter `.any(of: [.images, .videos])`, `preferredItemEncoding: .current` to skip Apple's H.264 transcode for ProRes / ProRAW); on selection, presents `MediaNoteEditorScreen` with the picked item wrapped in `InitialMedia.pickerItem(...)`.
+  - **Take Photo or Video** (Phase F.1.1b'.camera) → presents `CameraPicker` (a `UIViewControllerRepresentable` over `UIImagePickerController(.camera)`) full-screen. On capture, the result wraps into `InitialMedia.cameraImage(UIImage)` for stills or `InitialMedia.cameraVideoURL(URL)` for clips and the same `MediaNoteEditorScreen` opens. Captured videos route through the same `MediaImporter.videoImportResult` pipeline as picker imports — including the trim sheet for >60 s captures. Permissions: `NSCameraUsageDescription` + `NSMicrophoneUsageDescription` in `Info.plist`.
 - **Persistent — does not hide on scroll.** Bottom of the ScrollView reserves a 120pt buffer via `.contentMargins(.bottom, 120, for: .scrollContent)` so the last card never lands underneath the FAB. (Apple Mail / Reminders / Google Keep iOS pattern; we explicitly chose this over Material-style hide-on-scroll.)
 
 ---
