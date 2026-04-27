@@ -172,18 +172,23 @@ final class TimelineStore {
             return
         }
         do {
-            let serverId = try await repository.insert(note, userId: userId)
-            if let serverId, let idx = notes.firstIndex(where: { $0.id == note.id }) {
-                // Swap optimistic UUID for the server-canonical one so
-                // subsequent edits/deletes target the right row.
-                notes[idx] = MockNote(
-                    id: serverId,
-                    occurredAt: note.occurredAt,
-                    type: note.type,
-                    content: note.content,
-                    background: note.background,
-                    titleStyle: note.titleStyle
-                )
+            // No UUID swap — `note.id` is the client-supplied id used by
+            // both client and server (NoteRowInsert.id = note.id). Same
+            // UUID throughout the lifecycle eliminates a class of races
+            // between this background upload+insert and concurrent user
+            // actions (delete / edit while the upload is in flight).
+            _ = try await repository.insert(note, userId: userId)
+
+            // Race guard: did the user delete this note during the
+            // upload? Local removal was a no-op against the server
+            // because the row didn't exist yet — now that it does,
+            // soft-delete it so the row doesn't resurrect on next
+            // fetch. Critical for media notes where uploads take real
+            // time. Fire-and-forget; if the follow-up delete fails
+            // we'll catch the orphan on a future cleanup pass.
+            if !notes.contains(where: { $0.id == note.id }) {
+                log.info("Note \(note.id) deleted during upload — soft-deleting server-side")
+                try? await repository.delete(id: note.id)
             }
             lastError = nil
         } catch {

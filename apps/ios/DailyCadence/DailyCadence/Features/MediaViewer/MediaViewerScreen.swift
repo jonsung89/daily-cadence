@@ -27,7 +27,13 @@ struct MediaViewerScreen: View {
 
             switch media.kind {
             case .image:
-                ImagePinchZoomView(data: media.data)
+                if let data = media.data {
+                    ImagePinchZoomView(data: data)
+                } else {
+                    // Phase F.1.1: fetched-from-server media. Resolves bytes
+                    // via `MediaResolver` against `media.ref`.
+                    ResolvedFullscreenImage(payload: media)
+                }
             case .video:
                 if let player {
                     VideoPlayer(player: player)
@@ -83,13 +89,27 @@ struct MediaViewerScreen: View {
 
     private func prepareVideoIfNeeded() async {
         guard media.kind == .video else { return }
+        // Phase F.1.1: prefer streaming via signed URL when we have a ref —
+        // saves writing the full video to a temp file. Falls back to the
+        // inline bytes path for newly-imported media that hasn't uploaded
+        // yet (its `ref` is nil until the background upload completes).
+        if let ref = media.ref {
+            do {
+                let url = try await MediaResolver.shared.signedURL(for: ref)
+                await MainActor.run { self.player = AVPlayer(url: url) }
+                return
+            } catch {
+                // Fall through to inline-bytes path if signed URL failed.
+            }
+        }
+        guard let data = media.data else { return }
         // Write bytes to a temp file so AVPlayer can read via URL. Using a
         // unique filename avoids collisions when multiple viewer sheets
         // open during the same session.
         let tempURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("dc-video-\(UUID().uuidString).mov")
         do {
-            try media.data.write(to: tempURL)
+            try data.write(to: tempURL)
             await MainActor.run {
                 self.videoURL = tempURL
                 self.player = AVPlayer(url: tempURL)
@@ -110,41 +130,104 @@ struct MediaViewerScreen: View {
 
 // MARK: - Pinch-zoom image
 
-/// A pinch-and-pan zoomable image view, used by `MediaViewerScreen` for
-/// the `.image` case.
+/// Apple Photos–style pinch-and-pan fullscreen image. Image fits the
+/// device width by default; pinch to zoom up to 5× ; double-tap toggles
+/// between fit and 2.5×; pan when zoomed.
 ///
-/// Built around a `ScrollView` with `.zoomable` content (iOS 17+) — that's
-/// the canonical SwiftUI pattern and gives us double-tap-to-zoom and
-/// fling-to-pan for free. Scale range: 1.0 ... 4.0.
-private struct ImagePinchZoomView: View {
+/// Phase F.1.1a fix: the prior implementation claimed iOS 17 `.zoomable`
+/// scroll but actually just used a regular ScrollView, which rendered
+/// images at full pixel size — a 4032×3024 photo became a 4032pt-wide
+/// scrollable area on a 393pt screen. This is a real `MagnifyGesture` +
+/// `DragGesture` rewrite with the standard double-tap toggle.
+struct ImagePinchZoomView: View {
     let data: Data
 
     @State private var uiImage: UIImage?
+    @State private var scale: CGFloat = 1.0
+    @State private var lastScale: CGFloat = 1.0
+    @State private var offset: CGSize = .zero
+    @State private var lastOffset: CGSize = .zero
+
+    private let minScale: CGFloat = 1.0
+    private let maxScale: CGFloat = 5.0
+    private let doubleTapScale: CGFloat = 2.5
 
     var body: some View {
         GeometryReader { geo in
-            ScrollView([.horizontal, .vertical]) {
-                Group {
-                    if let uiImage {
-                        Image(uiImage: uiImage)
-                            .resizable()
-                            .scaledToFit()
-                            .frame(width: geo.size.width, height: geo.size.height)
-                    } else {
-                        Color.clear
-                    }
+            Group {
+                if let uiImage {
+                    Image(uiImage: uiImage)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: geo.size.width, height: geo.size.height)
+                        .scaleEffect(scale)
+                        .offset(offset)
+                        .gesture(magnificationGesture)
+                        .simultaneousGesture(panGesture)
+                        .onTapGesture(count: 2) { handleDoubleTap() }
+                } else {
+                    Color.clear
                 }
             }
-            // iOS 17+ zoomable scroll — pinch + double-tap zoom built-in.
-            .scrollIndicators(.hidden)
-            .ignoresSafeArea()
+            .frame(width: geo.size.width, height: geo.size.height)
         }
+        .ignoresSafeArea()
         .task {
-            // Decode off-main if the asset is large; bouncing back via
-            // MainActor for the @State assignment.
+            // Decode off-main for large assets; bounce back to main for @State.
             let bytes = data
             let decoded = await Task.detached { UIImage(data: bytes) }.value
             await MainActor.run { self.uiImage = decoded }
         }
+    }
+
+    private var magnificationGesture: some Gesture {
+        MagnifyGesture()
+            .onChanged { value in
+                scale = clampedScale(lastScale * value.magnification)
+            }
+            .onEnded { _ in
+                if scale < minScale {
+                    withAnimation(.easeOut(duration: 0.2)) {
+                        scale = minScale
+                        offset = .zero
+                        lastOffset = .zero
+                    }
+                }
+                lastScale = scale
+            }
+    }
+
+    private var panGesture: some Gesture {
+        DragGesture()
+            .onChanged { value in
+                guard scale > 1 else { return }
+                offset = CGSize(
+                    width: lastOffset.width + value.translation.width,
+                    height: lastOffset.height + value.translation.height
+                )
+            }
+            .onEnded { _ in
+                lastOffset = offset
+            }
+    }
+
+    private func handleDoubleTap() {
+        withAnimation(.easeOut(duration: 0.22)) {
+            if scale > minScale {
+                scale = minScale
+                lastScale = minScale
+                offset = .zero
+                lastOffset = .zero
+            } else {
+                scale = doubleTapScale
+                lastScale = doubleTapScale
+            }
+        }
+    }
+
+    private func clampedScale(_ raw: CGFloat) -> CGFloat {
+        // Allow over-pinch slightly below 1× during gesture for a rubber-band
+        // feel — onEnded snaps back. Clamp the upper bound hard.
+        min(max(raw, minScale * 0.85), maxScale)
     }
 }

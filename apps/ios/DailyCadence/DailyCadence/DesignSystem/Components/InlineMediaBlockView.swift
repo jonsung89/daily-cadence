@@ -104,6 +104,10 @@ struct InlineMediaBlockView: View {
         if let posterData = payload.posterData, let img = UIImage(data: posterData) {
             return img
         }
-        return UIImage(data: payload.data)
+        // Phase F.1.1: `payload.data` is optional — fetched-from-server
+        // media holds refs only and resolves bytes via `MediaResolver`.
+        // Inline media blocks aren't yet uploaded (F+ scope), so this
+        // path stays in-memory only for now.
+        return payload.data.flatMap(UIImage.init(data:))
     }
 }

@@ -1,6 +1,6 @@
 # DailyCadence — Progress
 
-**Last updated:** 2026-04-27 (Phase F.1.0 — tap-to-edit: card tap opens `NoteEditorScreen` in edit mode pre-populated from the note. Apple Notes pattern: drag-to-dismiss autosaves; Cancel confirms-discard. Toolbar gains pin toggle + delete in edit mode.)
+**Last updated:** 2026-04-27 (Phase F.1.1a — media-note Storage upload pipeline: bytes go to Supabase Storage, refs land in `body jsonb`, fetch lazy-resolves via `MediaResolver` + URLCache. F.1.1b adds HEIC/HEVC/dual-size compression next.)
 **Current phase:** Phase 1 MVP — iOS app for Jon + wife, TestFlight distribution
 
 This is the living state of the project. Update at the end of every session.
@@ -1542,6 +1542,42 @@ The "view + edit a note" milestone. Modern instant-edit pattern (Apple Notes / K
 - Type re-categorization in the same edit (chip row).
 - Per-note photo background + opacity editable in same surface.
 - `occurredAt` picker for re-timing — most apps only show created/modified passively.
+
+### Phase F.1.1a — Media-note Storage upload pipeline (added this round)
+
+The persistence half of media notes. Photos and videos now survive relaunch via Supabase Storage. The compression half (HEIC + HEVC + dual-size + 60s cap) ships separately as F.1.1b — splitting kept this milestone testable end-to-end without bundling the encoding pipeline rewrite.
+
+**`Services/MediaStorage.swift`** — provider-agnostic abstraction. `MediaStorage` protocol with `upload(_:contentType:userId:filename:)`, `signedURL(for:ttlSeconds:)`, `delete(_:)`. `MediaRef { provider, path }` is the durable opaque pointer that goes into `body jsonb` — never a URL (URLs expire). Today's impl is `SupabaseStorageImpl` writing to the `note-media` bucket; the migration to R2 (when egress crosses ~$200/mo) is a one-file swap because each ref carries its provider id and `MediaStorageProvider.impl(for: ref)` dispatches per-ref.
+
+**`Services/MediaResolver.swift`** — resolves refs to bytes with two cache layers:
+1. **Signed URL cache** (`urlCache: [MediaRef: (URL, fetchedAt)]`) — 50-min TTL, 10-min buffer below Supabase's 1-hour signed-URL expiry.
+2. **`URLCache.shared`** (HTTP-level) — bumped to 50 MB memory + 200 MB disk on init. Survives relaunch. Cached responses serve when the URL is identical (which it is during the URL cache window).
+
+**`MediaPayload` extended.** `data: Data` is now `data: Data?` (nil for fetched-from-server payloads); new `ref: MediaRef?` + `posterRef: MediaRef?` fields hold storage pointers. Editor flow stays the same shape — newly imported payloads have data populated, refs nil; uploaded payloads have refs populated; fetched payloads have refs only.
+
+**`BodyBlockDTO.media` schema rewritten.** New shape:
+```json
+{ "kind": "media", "mediaKind": "image" | "video",
+  "aspect": 1.5, "caption": "…", "size": "medium",
+  "ref": {"provider":"supabase","path":"…"},
+  "posterRef": {"provider":"supabase","path":"…"} }
+```
+Standalone media notes serialize as a `body` with one media block + null `structured_data`. Inline media blocks in text bodies use the same shape with `size` set. Decoder reconstructs `MediaPayload` with `data: nil` and refs populated; renderers lazy-fetch through `MediaResolver`.
+
+**`NotesRepository.encodeForInsert` is now `async`.** Walks the note's content, uploads any `MediaPayload` whose `ref` is nil (newly-attached media), assembles the body with refs filled in, then INSERTs/UPDATEs the row. Idempotent on update — already-uploaded refs aren't re-uploaded.
+
+**Card rendering**: `KeepCard.mediaScaffold` and `NoteCard.mediaScaffold` now branch — inline `posterImage` first (fast path), then `ResolvedMediaPoster` fallback when bytes are nil but refs exist. Soft taupe placeholder while loading.
+
+**`MediaViewerScreen`** — fullscreen viewer now branches on `media.data`. Inline bytes use the existing `ImagePinchZoomView`; nil bytes route through `ResolvedFullscreenImage`. Video playback prefers signed URL (streams via `AVPlayer(url:)`) over downloading the full asset to a temp file when the ref exists.
+
+**`ResolvedMediaPoster` + `ResolvedFullscreenImage`** (new design system components) — handle the loading state with `.task(id:)` triggers and soft placeholders. F.1.1c will add an `NSCache` decoded-image layer on top so re-decode-per-scroll goes away.
+
+**Phase F.1.1 split:**
+- **F.1.1a (this round)**: persistence end-to-end. Bytes are still JPEG (existing MediaImporter output). No 60s cap enforced. No dual-size yet.
+- **F.1.1b (next)**: HEIC + HEVC + dual-size + 60s cap. Pure optimization on top of the persistence layer.
+- **F.1.1c (later)**: NSCache decoded images + adjacent-day pre-fetch. Pure perf polish.
+
+138/138 unit tests still passing.
 
 ### Phase F+ feature TODO (designed-for, not-built)
 

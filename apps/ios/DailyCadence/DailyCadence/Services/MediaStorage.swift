@@ -1,0 +1,128 @@
+import Foundation
+import OSLog
+import Supabase
+
+/// Provider-agnostic media storage abstraction.
+///
+/// Phase F.1.1 — the iOS app uploads media bytes through `MediaStorage.current`.
+/// `current` is wired to `SupabaseStorageImpl` today; when egress costs hit
+/// the migration trigger (~$200/mo, ~4-5k DAU) we add `R2StorageImpl` and
+/// flip `current` to point at it. Existing `MediaRef`s stay valid — each
+/// ref carries its own `provider` field so old refs resolve to the old
+/// implementation while new refs resolve to the new one. See
+/// `~/.claude/.../memory/project_media_storage.md` for full strategy.
+///
+/// `MediaRef` is what goes into `notes.body` JSONB — a stable opaque
+/// pointer that survives provider migrations. URLs are short-lived
+/// (signed URLs, ~1hr TTL) and computed on demand.
+protocol MediaStorage: Sendable {
+    /// Provider id ("supabase" / "r2" / …) — written into the produced
+    /// `MediaRef.provider` so future fetches can resolve back to the
+    /// right impl.
+    var providerId: String { get }
+
+    /// Uploads bytes to a per-user folder and returns the durable ref.
+    /// Path layout: `{userId}/{filename}`. The filename is chosen by the
+    /// caller (e.g. `{uuid}.heic`, `{uuid}-thumb.heic`); we don't
+    /// generate it here so callers can pair full + thumbnail uploads.
+    func upload(
+        _ data: Data,
+        contentType: String,
+        userId: UUID,
+        filename: String
+    ) async throws -> MediaRef
+
+    /// Issues a signed URL for `ref` valid for `ttlSeconds`. iOS clients
+    /// fetch bytes via `URLSession` against this URL. Cache the URL
+    /// itself (not the bytes) for ~50 min — the URL-cache layer in
+    /// `MediaResolver` does this.
+    func signedURL(for ref: MediaRef, ttlSeconds: Int) async throws -> URL
+
+    /// Best-effort delete. Idempotent; doesn't throw if the object is
+    /// already gone. Used during note deletion (Phase F+) and the future
+    /// R2-migration cleanup.
+    func delete(_ ref: MediaRef) async throws
+}
+
+/// The opaque pointer stored in `notes.body` JSONB for each media block.
+/// Survives provider migrations: a backfill job reuploads bytes to the
+/// new provider and rewrites the ref's `provider` field; iOS code
+/// resolving the ref dispatches to the matching impl per-ref.
+struct MediaRef: Codable, Hashable, Sendable {
+    /// Provider id matching some `MediaStorage.providerId`. Future
+    /// migrations write a new value here without changing `path`.
+    let provider: String
+    /// Bucket-relative path. For Supabase that's `{userId}/{filename}`.
+    let path: String
+}
+
+// MARK: - Provider registry
+
+enum MediaStorageProvider {
+    /// The implementation new uploads should use. Phase F.1.1 starts at
+    /// Supabase; flipping this to an `R2StorageImpl` is the migration.
+    static let current: any MediaStorage = SupabaseStorageImpl()
+
+    /// Resolves a `MediaRef` to the right impl by provider id. Used on
+    /// fetch — older refs from Supabase keep working even after `current`
+    /// flips to R2 because each ref carries its provider.
+    static func impl(for ref: MediaRef) -> (any MediaStorage)? {
+        switch ref.provider {
+        case SupabaseStorageImpl.id: return SupabaseStorageImpl()
+        // case R2StorageImpl.id: return R2StorageImpl()    // Phase F+
+        default: return nil
+        }
+    }
+}
+
+// MARK: - Supabase implementation
+
+struct SupabaseStorageImpl: MediaStorage {
+    static let id = "supabase"
+    var providerId: String { Self.id }
+
+    /// `note-media` bucket — created in `supabase/migrations/20260427000002_storage_buckets.sql`.
+    /// All app media (photos, videos, posters, thumbnails) goes here under
+    /// `{userId}/...`. Per-user folder isolation is enforced by RLS on
+    /// `storage.objects` (`(storage.foldername(name))[1] = auth.uid()::text`).
+    private static let bucket = "note-media"
+
+    private static let log = Logger(
+        subsystem: "com.jonsung.DailyCadence",
+        category: "SupabaseStorage"
+    )
+
+    func upload(
+        _ data: Data,
+        contentType: String,
+        userId: UUID,
+        filename: String
+    ) async throws -> MediaRef {
+        let path = "\(userId.uuidString.lowercased())/\(filename)"
+        let options = FileOptions(
+            cacheControl: "3600",
+            contentType: contentType,
+            // We never overwrite — every upload uses a fresh UUID
+            // filename — so leave upsert at the default false.
+            upsert: false
+        )
+        try await AppSupabase.client.storage
+            .from(Self.bucket)
+            .upload(path, data: data, options: options)
+        Self.log.info("Uploaded \(data.count) bytes → \(path)")
+        return MediaRef(provider: Self.id, path: path)
+    }
+
+    func signedURL(for ref: MediaRef, ttlSeconds: Int) async throws -> URL {
+        try await AppSupabase.client.storage
+            .from(Self.bucket)
+            .createSignedURL(path: ref.path, expiresIn: ttlSeconds)
+    }
+
+    func delete(_ ref: MediaRef) async throws {
+        _ = try await AppSupabase.client.storage
+            .from(Self.bucket)
+            .remove(paths: [ref.path])
+        Self.log.info("Deleted \(ref.path)")
+    }
+}

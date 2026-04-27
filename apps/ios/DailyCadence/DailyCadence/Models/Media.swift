@@ -22,11 +22,14 @@ struct MediaPayload: Hashable {
     }
 
     let kind: Kind
-    /// The bytes of the asset itself — JPEG/PNG/HEIC for images, MP4/MOV
-    /// for videos. iOS decodes via `UIImage(data:)` (images) or
-    /// `AVAsset(url:)` after writing to a temp file (videos).
-    let data: Data
-    /// First-frame thumbnail for videos; `nil` for images.
+    /// Inline asset bytes — populated for newly-imported media notes
+    /// (just picked from the photo library), `nil` for fetched-from-server
+    /// media. When `nil`, callers should resolve via `ref` through
+    /// `MediaResolver`. JPEG/PNG/HEIC for images, MP4/MOV for videos.
+    let data: Data?
+    /// First-frame poster for videos; `nil` for images. Inline bytes,
+    /// populated for newly-imported video; `nil` for fetched videos
+    /// (use `posterRef` instead).
     let posterData: Data?
     /// width / height. Used to lay out the media area in cards without
     /// touching the asset on every render. Clamped to a sensible range
@@ -37,12 +40,24 @@ struct MediaPayload: Hashable {
     /// text in the timeline view.
     let caption: String?
 
+    /// Phase F.1.1 — Storage ref for the full asset. Populated when this
+    /// payload was decoded from a fetched note's body, or after a
+    /// background upload completes for a newly-imported note. `nil` for
+    /// session-only media that hasn't uploaded yet.
+    let ref: MediaRef?
+    /// Phase F.1.1 — Storage ref for the video poster. Image notes
+    /// leave this nil. Video notes fetched from server populate it so
+    /// cards can render the poster without fetching the full asset.
+    let posterRef: MediaRef?
+
     init(
         kind: Kind,
-        data: Data,
+        data: Data? = nil,
         posterData: Data? = nil,
         aspectRatio: CGFloat,
-        caption: String? = nil
+        caption: String? = nil,
+        ref: MediaRef? = nil,
+        posterRef: MediaRef? = nil
     ) {
         self.kind = kind
         self.data = data
@@ -56,5 +71,7 @@ struct MediaPayload: Hashable {
         } else {
             self.caption = nil
         }
+        self.ref = ref
+        self.posterRef = posterRef
     }
 }

@@ -388,6 +388,12 @@ struct KeepCard: View {
                         .scaledToFill()
                         .frame(width: width, height: height)
                         .clipped()
+                } else if media.ref != nil || media.posterRef != nil {
+                    // Phase F.1.1: fetched-from-server media — bytes
+                    // resolve via MediaResolver against ref/posterRef.
+                    ResolvedMediaPoster(payload: media)
+                        .frame(width: width, height: height)
+                        .clipped()
                 }
                 if media.kind == .video {
                     ZStack {
@@ -413,10 +419,12 @@ struct KeepCard: View {
 
     /// Returns the displayable poster image for a media payload — the
     /// `posterData` if present (videos), otherwise the asset itself
-    /// decoded as a `UIImage` (images).
+    /// decoded as a `UIImage` (images). Phase F.1.1: returns `nil` when
+    /// the payload has no inline bytes (fetched-from-server media); the
+    /// caller wraps a `MediaPosterView` that fetches via `MediaResolver`.
     private func mediaPosterImage(_ media: MediaPayload) -> UIImage? {
         if let poster = media.posterData, let img = UIImage(data: poster) { return img }
-        return UIImage(data: media.data)
+        return media.data.flatMap(UIImage.init(data:))
     }
 }
 

@@ -82,19 +82,16 @@ final class NotesRepository {
 
     /// Persists a new note. Returns the server-assigned `id` so the caller
     /// can replace the optimistic client UUID with the canonical one.
-    /// Returns `nil` for media notes — those are kept client-side only
-    /// until the Storage upload pipeline lands (Phase F+).
+    /// **Phase F.1.1**: media bytes (standalone media notes + inline media
+    /// blocks in text bodies) are uploaded to Supabase Storage during
+    /// encoding; the inserted row's `body` contains `MediaRef`s, not bytes.
     @discardableResult
     func insert(_ note: MockNote, userId: UUID) async throws -> UUID? {
-        if case .media = note.content {
-            log.notice("Skipping persistence: media notes need Storage upload (Phase F+)")
-            return nil
-        }
         try await ensureNoteTypesLoaded()
         guard let typeId = noteTypeIdBySlug[note.type.rawValue] else {
             throw NotesRepositoryError.unknownNoteTypeSlug(note.type.rawValue)
         }
-        let payload = encodeForInsert(note, userId: userId, typeId: typeId)
+        let payload = try await encodeForInsert(note, userId: userId, typeId: typeId)
         let row: NoteRow = try await AppSupabase.client
             .from("notes")
             .insert(payload)
@@ -107,19 +104,15 @@ final class NotesRepository {
     }
 
     /// Updates an existing note's mutable fields. The `id` and `user_id`
-    /// stay fixed (RLS scopes the update to rows the user owns); we
-    /// re-encode the rest from the in-memory `MockNote`. Media notes are
-    /// skipped same as `insert(_:userId:)` — Storage upload pipeline first.
+    /// stay fixed (RLS scopes the update to rows the user owns). Re-uploads
+    /// any media bytes whose `MediaPayload.ref` is nil (newly-attached
+    /// media); leaves already-uploaded refs untouched.
     func update(_ note: MockNote, userId: UUID) async throws {
-        if case .media = note.content {
-            log.notice("Skipping update: media notes need Storage upload (Phase F+)")
-            return
-        }
         try await ensureNoteTypesLoaded()
         guard let typeId = noteTypeIdBySlug[note.type.rawValue] else {
             throw NotesRepositoryError.unknownNoteTypeSlug(note.type.rawValue)
         }
-        let payload = encodeForInsert(note, userId: userId, typeId: typeId)
+        let payload = try await encodeForInsert(note, userId: userId, typeId: typeId)
         try await AppSupabase.client
             .from("notes")
             .update(payload)
@@ -160,35 +153,41 @@ final class NotesRepository {
 
     // MARK: - Encode (client → server)
 
-    private func encodeForInsert(_ note: MockNote, userId: UUID, typeId: UUID) -> NoteRowInsert {
+    private func encodeForInsert(_ note: MockNote, userId: UUID, typeId: UUID) async throws -> NoteRowInsert {
         let title: String?
-        let body: [BodyBlockDTO]
+        var body: [BodyBlockDTO] = []
         let structuredData: StructuredDataDTO?
 
         switch note.content {
         case .text(let t, let blocks):
             title = t.isEmpty ? nil : t
-            body = blocks.compactMap(encodeBlock(_:))
+            for block in blocks {
+                if let dto = try await encodeBlock(block, userId: userId) {
+                    body.append(dto)
+                }
+            }
             structuredData = nil
         case .stat(let t, let value, let sub):
             title = t.isEmpty ? nil : t
-            body = []
             structuredData = .stat(value: value, sub: sub)
         case .list(let t, let items):
             title = t.isEmpty ? nil : t
-            body = []
             structuredData = .list(items: items)
         case .quote(let text):
             title = nil
-            body = []
             structuredData = .quote(text: text)
-        case .media:
-            // Caller filtered this out in `insert(_:userId:)`; if we get
-            // here it's a programming error.
-            preconditionFailure("encodeForInsert called with media note")
+        case .media(let payload):
+            // Standalone media note — body holds a single media block,
+            // no title (caption serves as the visual content), no
+            // structured_data.
+            title = nil
+            structuredData = nil
+            let dto = try await encodeMediaBlock(payload, userId: userId, size: nil)
+            body = [dto]
         }
 
         return NoteRowInsert(
+            id: note.id,
             user_id: userId,
             type_id: typeId,
             title: title,
@@ -201,17 +200,69 @@ final class NotesRepository {
         )
     }
 
-    private func encodeBlock(_ block: TextBlock) -> BodyBlockDTO? {
+    private func encodeBlock(_ block: TextBlock, userId: UUID) async throws -> BodyBlockDTO? {
         switch block.kind {
         case .paragraph(let attr):
             // Phase E.2 polish (fontId / colorId AttributedStringKeys) lands
             // separately. For now paragraphs persist as plain text, losing
             // per-run styling on the round-trip.
             return .paragraph(text: String(attr.characters))
-        case .media:
-            // Inline media blocks need Storage upload. Skip until F+.
-            return nil
+        case .media(let payload, let size):
+            return try await encodeMediaBlock(payload, userId: userId, size: size)
         }
+    }
+
+    /// Phase F.1.1 — uploads media bytes to Storage (when not already
+    /// uploaded) and returns the body block DTO with refs filled in.
+    /// Skips uploads when the payload's ref is already set (e.g., editing
+    /// a previously-uploaded note re-saves the same media block).
+    private func encodeMediaBlock(
+        _ payload: MediaPayload,
+        userId: UUID,
+        size: MediaBlockSize?
+    ) async throws -> BodyBlockDTO {
+        let storage = MediaStorageProvider.current
+        // Upload the full asset if we have inline bytes and no existing ref.
+        let assetRef: MediaRef
+        if let existing = payload.ref {
+            assetRef = existing
+        } else if let data = payload.data {
+            let ext = payload.kind == .video ? "mov" : "jpg"
+            let contentType = payload.kind == .video ? "video/quicktime" : "image/jpeg"
+            assetRef = try await storage.upload(
+                data,
+                contentType: contentType,
+                userId: userId,
+                filename: "\(UUID().uuidString.lowercased()).\(ext)"
+            )
+        } else {
+            // No bytes and no ref — shouldn't happen but stay defensive.
+            throw NotesRepositoryError.unknownNoteTypeSlug("media payload without bytes or ref")
+        }
+
+        // Upload poster (videos only) when we have inline bytes.
+        let posterRef: MediaRef?
+        if let existing = payload.posterRef {
+            posterRef = existing
+        } else if payload.kind == .video, let posterBytes = payload.posterData {
+            posterRef = try await storage.upload(
+                posterBytes,
+                contentType: "image/jpeg",
+                userId: userId,
+                filename: "\(UUID().uuidString.lowercased())-poster.jpg"
+            )
+        } else {
+            posterRef = nil
+        }
+
+        return .media(MediaBlockDTO(
+            mediaKind: payload.kind,
+            aspect: Double(payload.aspectRatio),
+            caption: payload.caption,
+            size: size?.rawValue,
+            ref: assetRef,
+            posterRef: posterRef
+        ))
     }
 
     // MARK: - Decode (server → client)
@@ -234,17 +285,23 @@ final class NotesRepository {
             case .quote(let text):
                 content = .quote(text: text)
             }
+        } else if type == .media,
+                  case let .media(media)? = row.body.first,
+                  row.body.count == 1 {
+            // Standalone media note: body has exactly one media block,
+            // structured_data is null, type slug is "media".
+            content = .media(media.toPayload())
         } else {
-            // Default: text variant, body blocks → paragraph TextBlocks.
-            let blocks: [TextBlock] = row.body.compactMap { dto in
+            // Default: text variant, body blocks → paragraph + inline
+            // media TextBlocks. Inline media is reconstructed with refs
+            // populated and inline bytes nil (lazy fetch via MediaResolver).
+            let blocks: [TextBlock] = row.body.compactMap { dto -> TextBlock? in
                 switch dto {
                 case .paragraph(let text):
                     return .paragraph(AttributedString(text))
-                case .media:
-                    // Inline media blocks aren't reconstructable without
-                    // their bytes (Phase F+). Drop on decode so the rest of
-                    // the body still renders.
-                    return nil
+                case .media(let m):
+                    let size = m.size.flatMap(MediaBlockSize.init(rawValue:)) ?? .medium
+                    return TextBlock(kind: .media(m.toPayload(), size: size))
                 }
             }
             content = .text(title: row.title ?? "", body: blocks)
@@ -288,9 +345,15 @@ private struct NoteRow: Decodable {
     let updated_at: Date
 }
 
-/// Insert payload — only the fields the client controls. id, created_at,
-/// updated_at are server-generated.
+/// Insert payload — `id` is **client-supplied** (matches `MockNote.id`)
+/// so the optimistic UI never has to "swap" a server-assigned UUID.
+/// Same UUID throughout the lifecycle eliminates a class of races
+/// between background uploads and concurrent user actions (delete /
+/// edit while an upload is in flight).
+///
+/// `created_at` / `updated_at` stay server-generated.
 private struct NoteRowInsert: Encodable {
+    let id: UUID
     let user_id: UUID
     let type_id: UUID
     let title: String?
@@ -307,10 +370,12 @@ private struct NoteRowInsert: Encodable {
 /// category).
 private enum BodyBlockDTO: Codable, Hashable {
     case paragraph(text: String)
-    case media(aspect: Double, caption: String?)
+    case media(MediaBlockDTO)
 
     private enum CodingKeys: String, CodingKey {
-        case kind, text, aspect, caption
+        case kind, text
+        // Media block fields (flattened into the same object as `kind`):
+        case mediaKind, aspect, caption, size, ref, posterRef
     }
 
     private enum Kind: String, Codable {
@@ -326,10 +391,14 @@ private enum BodyBlockDTO: Codable, Hashable {
         case .paragraph:
             self = .paragraph(text: try c.decodeIfPresent(String.self, forKey: .text) ?? "")
         case .media:
-            self = .media(
+            self = .media(MediaBlockDTO(
+                mediaKind: (try? c.decode(MediaPayload.Kind.self, forKey: .mediaKind)) ?? .image,
                 aspect: try c.decodeIfPresent(Double.self, forKey: .aspect) ?? 1.0,
-                caption: try c.decodeIfPresent(String.self, forKey: .caption)
-            )
+                caption: try c.decodeIfPresent(String.self, forKey: .caption),
+                size: try c.decodeIfPresent(String.self, forKey: .size),
+                ref: try c.decodeIfPresent(MediaRef.self, forKey: .ref),
+                posterRef: try c.decodeIfPresent(MediaRef.self, forKey: .posterRef)
+            ))
         }
     }
 
@@ -339,11 +408,42 @@ private enum BodyBlockDTO: Codable, Hashable {
         case .paragraph(let text):
             try c.encode(Kind.paragraph, forKey: .kind)
             try c.encode(text, forKey: .text)
-        case .media(let aspect, let caption):
+        case .media(let m):
             try c.encode(Kind.media, forKey: .kind)
-            try c.encode(aspect, forKey: .aspect)
-            try c.encodeIfPresent(caption, forKey: .caption)
+            try c.encode(m.mediaKind, forKey: .mediaKind)
+            try c.encode(m.aspect, forKey: .aspect)
+            try c.encodeIfPresent(m.caption, forKey: .caption)
+            try c.encodeIfPresent(m.size, forKey: .size)
+            try c.encodeIfPresent(m.ref, forKey: .ref)
+            try c.encodeIfPresent(m.posterRef, forKey: .posterRef)
         }
+    }
+}
+
+/// Flattened media-block fields. Kept separate from the parent enum so
+/// it's easy to pass around and keeps the encode/decode site readable.
+private struct MediaBlockDTO: Codable, Hashable {
+    let mediaKind: MediaPayload.Kind
+    let aspect: Double
+    let caption: String?
+    /// Size hint for inline media blocks (`small` / `medium` / `large`).
+    /// nil for standalone media notes — the whole card IS the media.
+    let size: String?
+    let ref: MediaRef?
+    let posterRef: MediaRef?
+
+    /// Reconstruct an in-memory `MediaPayload` for a fetched note. Bytes
+    /// are nil; refs drive lazy resolution via `MediaResolver`.
+    func toPayload() -> MediaPayload {
+        MediaPayload(
+            kind: mediaKind,
+            data: nil,
+            posterData: nil,
+            aspectRatio: CGFloat(aspect),
+            caption: caption,
+            ref: ref,
+            posterRef: posterRef
+        )
     }
 }
 

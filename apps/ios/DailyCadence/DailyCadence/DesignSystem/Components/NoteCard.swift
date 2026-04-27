@@ -224,6 +224,12 @@ struct NoteCard: View {
                         .scaledToFill()
                         .frame(width: width, height: height)
                         .clipped()
+                } else if media.ref != nil || media.posterRef != nil {
+                    // Phase F.1.1: fetched-from-server media — bytes
+                    // resolve via MediaResolver against ref/posterRef.
+                    ResolvedMediaPoster(payload: media)
+                        .frame(width: width, height: height)
+                        .clipped()
                 }
                 if media.kind == .video {
                     ZStack {
@@ -249,7 +255,7 @@ struct NoteCard: View {
 
     private func mediaPosterImage(_ media: MediaPayload) -> UIImage? {
         if let poster = media.posterData, let img = UIImage(data: poster) { return img }
-        return UIImage(data: media.data)
+        return media.data.flatMap(UIImage.init(data:))
     }
 
     @ViewBuilder

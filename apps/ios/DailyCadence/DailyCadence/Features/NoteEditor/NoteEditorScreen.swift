@@ -517,7 +517,9 @@ struct NoteEditorScreen: View {
             let payload = try await MediaImporter.makePayload(from: item)
             await MainActor.run {
                 attachmentPickerItem = nil
-                if payload.kind == .image, let cropState = PhotoCropState(data: payload.data) {
+                if payload.kind == .image,
+                   let bytes = payload.data,
+                   let cropState = PhotoCropState(data: bytes) {
                     // Stage for cropping. Sheet presents on the next
                     // render cycle when both fields are set.
                     pendingCropPayload = payload

@@ -50,6 +50,11 @@ struct MediaNoteEditorScreen: View {
     /// shared draft store because media-note editor doesn't persist drafts.
     @State private var occurredAt: Date?
 
+    /// Drives the fullscreen video player from the editor's preview area.
+    /// Tapping the play poster sets this true; `MediaViewerScreen` handles
+    /// the actual `AVPlayer`. Same surface used by the timeline cards.
+    @State private var isVideoPreviewPresented = false
+
     init(initialItem: PhotosPickerItem? = nil) {
         self.initialItem = initialItem
         self._pickerItem = State(initialValue: initialItem)
@@ -135,9 +140,11 @@ struct MediaNoteEditorScreen: View {
         }
     }
 
-    /// Video flow: read-only preview with play poster + Replace/Remove.
-    /// Video trim UX is a separate, larger feature; we don't crop video
-    /// at all in this phase.
+    /// Video flow: read-only preview with tap-to-play + Replace/Remove.
+    /// Tapping the poster opens the same `MediaViewerScreen` used from
+    /// the timeline — that's where `AVPlayer` runs. Video trim UX is a
+    /// separate, larger feature (Phase F.1.1b'); we don't crop video at
+    /// all in this phase.
     private func videoPreview(_ payload: MediaPayload) -> some View {
         VStack(spacing: 8) {
             ZStack {
@@ -164,6 +171,13 @@ struct MediaNoteEditorScreen: View {
             .overlay {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .strokeBorder(Color.DS.border1, lineWidth: 1)
+            }
+            .contentShape(Rectangle())
+            .onTapGesture { isVideoPreviewPresented = true }
+            .accessibilityLabel("Play video")
+            .accessibilityAddTraits(.isButton)
+            .fullScreenCover(isPresented: $isVideoPreviewPresented) {
+                MediaViewerScreen(media: payload)
             }
 
             replaceRemoveRow
@@ -195,7 +209,7 @@ struct MediaNoteEditorScreen: View {
 
     private func posterImage(for payload: MediaPayload) -> UIImage? {
         if let poster = payload.posterData, let img = UIImage(data: poster) { return img }
-        return UIImage(data: payload.data)
+        return payload.data.flatMap(UIImage.init(data:))
     }
 
     private var pickerCallout: some View {
@@ -286,7 +300,7 @@ struct MediaNoteEditorScreen: View {
             await MainActor.run {
                 self.payload = payload
                 self.cropState = payload.kind == .image
-                    ? PhotoCropState(data: payload.data)
+                    ? payload.data.flatMap(PhotoCropState.init(data:))
                     : nil
             }
         } catch {
@@ -301,7 +315,10 @@ struct MediaNoteEditorScreen: View {
 
         // For image notes, commit the user's crop choices into a fresh
         // MediaPayload before saving. Falls back to the original payload
-        // when the crop math fails or the source was a video.
+        // when the crop math fails or the source was a video. Crop only
+        // runs in the editor flow where `payload.data` is non-nil
+        // (freshly imported), so the cropState bind site already filtered
+        // for that.
         if payload.kind == .image, let cropState,
            let result = cropState.commitCrop() {
             payload = MediaPayload(
