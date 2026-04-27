@@ -1,6 +1,6 @@
 # DailyCadence — Progress
 
-**Last updated:** 2026-04-26 (Phase D.2.2 + crop tool refinements — interactive crop for backgrounds unified with media notes, downscale-on-import, plus pinch + pan + corner-handle inset on the shared crop tool)
+**Last updated:** 2026-04-27 (Phase F prep — schema designed + Supabase Swift SDK installed; Apple Developer enrollment in review; Phase F+ feature TODO captured at the bottom of "✅ Shipped" so a fresh session can resume)
 **Current phase:** Phase 1 MVP — iOS app for Jon + wife, TestFlight distribution
 
 This is the living state of the project. Update at the end of every session.
@@ -1383,6 +1383,50 @@ The "Pinned" shelf was Board-only since Phase E.5.15. Extending it to Timeline g
 **Files (~30 lines):**
 - `Features/Timeline/TimelineScreen.swift` — new `timelineContent` view that wraps the timeline rail with an optional `pinnedSection` above it; `content` switch dispatches to it for `.timeline`. Tightened the pinned-section's rail/masonry condition from `boardLayout == .grouped` to `viewMode == .board && boardLayout == .grouped` so a stale `boardLayout = .grouped` from a previous session can't leak the rail layout onto Timeline. Doc comments on `pinnedSection` + `boardContent` updated to reflect cross-mode use.
 - `docs/FEATURES.md` — refactored: new shared "Pinned section" subsection, Timeline view block references it, Board view block thins down (no longer the home of the pinned-section docs).
+
+### Phase F prep — schema design + SDK install (added this round)
+
+The pre-enrollment prep work for Phase F (Supabase persistence). Schema is drafted in `supabase/migrations/`; the iOS Supabase SDK is wired into the Xcode project. **Nothing is applied to the live Supabase project from the iOS side yet** — that ships in the next session once Apple Developer enrollment clears (currently in review).
+
+**Schema design (`supabase/migrations/20260427000001_notes_init.sql`).** Detailed in `supabase/README.md`. Key decisions:
+
+- **Types are data, not enums.** `note_types` table holds system + user-created types. Each row carries a `structured_data_schema jsonb` describing the editor fields for that type. Field `kind` vocabulary is recursive (`object` + `list` with `item_schema`) so workouts → exercises → sets/reps/weight compose without bespoke kinds.
+- **Backgrounds are an account-level library.** `backgrounds` table holds system presets + user-created entries. `notes.background_id` is a FK so library entries are reusable across notes.
+- **`notes` shape:** hybrid — common fields typed; variant content in `body jsonb` (paragraph/media/checkbox blocks) + `structured_data jsonb` (per-type fields). No `content_kind` discriminator.
+- **Reorder:** fractional indexing (`position double precision`).
+- **Soft delete:** `deleted_at timestamptz` nullable, 30-day retention via future scheduled cleanup.
+- **Reschedule audit trail:** `cancelled_at` + `rescheduled_from_id` columns. Push-to-next-day inserts a fresh note with `rescheduled_from_id = original.id`, then marks original `cancelled_at = now()`. Original stays visible at original date with a "moved" indicator.
+- **Evergreen notes:** `occurred_at` is **nullable**. NULL = no specific date (running grocery list, ongoing reference); past = journal; future = reminder/todo.
+- **Reminders / todos orthogonal to type.** `notification_offsets int[]` reserved on `notes` (Phase F+ UI). `completed_at timestamptz` for todo-style completion (any note can be completable).
+- **Sharing — unified per-note + group-tag model.** `note_collaborators` (role + status: invited/accepted/declined/left) covers per-note share/invite ("share with viewer" and "invite as editor" are the same row, just different role). `shared_groups` + `shared_group_members` (also status-tracked) covers group-tag sharing. Only group owners can invite; members can leave. RLS reads share tables from day one so adding the share UI later doesn't require policy rewrites.
+- **Discriminator vocabulary:** `kind` for JSONB shapes (block kinds, background kinds, structured-data field kinds); `type` reserved for the note's category (`note_types.slug`). They never collide.
+
+**Storage (`supabase/migrations/20260427000002_storage_buckets.sql`).** Two private buckets — `note-media` for inline media in `body` blocks, `note-backgrounds` for image backgrounds. Per-user folder isolation via `(storage.foldername(name))[1] = auth.uid()::text` in the RLS.
+
+**iOS SDK install.** `supabase-swift` 2.44.1 added via SPM with the umbrella `Supabase` library on the `DailyCadence` target. Resolved deps: swift-asn1, swift-clocks, swift-concurrency-extras, swift-crypto, swift-http-types, xctest-dynamic-overlay. Build verified (`DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild ... build` → BUILD SUCCEEDED).
+
+**Apple Developer enrollment:** in review as of 2026-04-27 evening. Started ~24h before. Once approved: enable Sign in with Apple capability on the App ID; create a Services ID + signing key for the Supabase OAuth provider; configure Supabase dashboard Auth → Providers → Apple.
+
+**Dev-mode plan (interim, while enrollment is pending):** anonymous auth. Supabase's `signInAnonymously()` creates real sessions with generated user_ids; RLS works identically. Wires the data layer + tests CRUD/Storage/Realtime end-to-end without depending on Apple. When enrollment clears, add Apple + Google providers and link the anonymous user to the new identity. Anonymous Sign-Ins toggle has been enabled in the Supabase dashboard; migrations have been applied to the live project.
+
+### Phase F+ feature TODO (designed-for, not-built)
+
+Captured here so a fresh session can pick up the roadmap. Each line corresponds to schema fields that are reserved but unused.
+
+- **Recently Deleted UI** — list soft-deleted notes; per-note Restore / Delete forever; bulk "Empty Recently Deleted." Schedule-driven hard-delete via `pg_cron` after 30 days.
+- **Reschedule action menu + indicator** — "Push to..." date picker on uncompleted notes; creates new note with `rescheduled_from_id` set, marks original `cancelled_at = now()`. Indicator: small SF Symbol (`arrow.uturn.forward.circle` candidate) on cancelled rows; tap reveals "Moved to [date]" with link to successor.
+- **Evergreen toggle in editor** — date/time picker gains a "Clear" / "No date" option; clearing sets `occurred_at = NULL`. Notes display "No date" in time column. Evergreen notes appear in a separate "Notes" surface (not the dated timeline).
+- **Reminders / push notifications** — Apple Push Notification service via APNs (requires the Phase F+ thin Next.js backend; can't fire from iOS app alone). Per-note `notification_offsets int[]` set in editor; account-level defaults via future `user_settings` table.
+- **Smart natural-language time parsing** — detect "I ate breakfast at 8 AM" / "Coffee date with wife at 11 AM" / "Finish homework by 8 PM" in the title, auto-set `occurred_at` and reminder offsets per account defaults. App-side feature; doesn't change schema.
+- **Sharing UI — per-note share/invite** — invite collaborators by Apple ID / email; recipient sees a pending invite, accepts → role=viewer goes to "Shared with me," role=editor goes to main timeline. "Leave" action flips own row to status='left'.
+- **Sharing UI — shared groups** — create group, invite members, members accept/decline/leave. Tagging a note with a group auto-shares to all accepted members. Only group owner can invite.
+- **Custom user types** — admin panel (or in-app form) for creating new types: slug, color, icon/emoji, structured_data_schema. INSERT into `note_types` with `created_by_user_id = self`. Visible only to creator.
+- **Admin-managed system types** — admin panel for managing system types (rows where `created_by_user_id IS NULL`). Initial system types ship via the migration; admin panel adds/edits without app updates.
+- **Custom user backgrounds** — image upload to `note-backgrounds` Storage bucket, INSERT into `backgrounds` with `user_id = self`. Saved at account level, reusable across notes. Editing a library entry propagates to all notes using it.
+- **Body-level checkboxes** — new block kind in `body jsonb`: `{kind: 'checkbox', text: '...', checked: false}` alongside `paragraph` and `media`. Toggleable inline. Apple Notes / Notion pattern.
+- **Realtime cross-device sync** — Supabase Realtime channels on the `notes` table; iOS app subscribes to `user_id = auth.uid()` filter, applies remote changes to local state. Useful when both phone and iPad are open at once.
+- **Structured-data field schemas** — populate the `structured_data_schema` jsonb on system types (workout: exercises with sets/reps/weight; mood: rating slider; sleep: hours-slept + wake count). Pure UPDATE statements, no migration.
+- **`user_settings` table** — account-level preferences: default reminder offsets, default note type, theme override, etc. Migration when first preference ships.
 
 ### Tests (79/79 passing — +3 this round)
 - `ColorHexTests` (16) — hex initializer, every palette family in light + dark, invariant tokens, role flips
