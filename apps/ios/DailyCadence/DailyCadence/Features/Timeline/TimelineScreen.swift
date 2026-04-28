@@ -221,6 +221,14 @@ struct TimelineScreen: View {
             // the FAB persistent and rely on content insets); the
             // hide-on-scroll trick is more Material Design than UIKit.
             .contentMargins(.bottom, 120, for: .scrollContent)
+            // Phase F.1.2.scrolledge — iOS 26 declarative scroll-edge
+            // effect. `.soft` produces the Messages/Notes-style fade as
+            // content scrolls under the status bar, so text doesn't
+            // crash through the system chrome. The LoadingBar overlay
+            // is a sibling OUTSIDE the ScrollView in the view tree, so
+            // it sits above the fade and stays fully opaque while a
+            // fetch is in flight.
+            .scrollEdgeEffectStyle(.soft, for: .top)
             .background(Color.DS.bg1)
             .toolbar(.hidden, for: .navigationBar)
             // Phase F.0.3 — thin animated indeterminate progress bar at

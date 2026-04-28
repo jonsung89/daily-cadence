@@ -79,6 +79,10 @@ Catching a doc/code drift later is much harder than keeping them in step.
 
 The day's notes, viewable as a Timeline rail or a Board grid.
 
+### Scroll-edge fade (Phase F.1.2.scrolledge)
+
+Content fades smoothly into the status bar area as the user scrolls — Apple Messages / Mail / Notes pattern. iOS 26 `.scrollEdgeEffectStyle(.soft, for: .top)` on the main `ScrollView`. Three style values are available — `.automatic` (system-chosen), `.soft` (the fade), `.hard` (a thin separator). Soft is the right call for the Today screen's calm vibe; ports without iOS 26's API should reach for a top-edge `LinearGradient` mask as a fallback. The `LoadingBar` overlay sits OUTSIDE the ScrollView in the view tree, so it stays fully opaque against the status bar even while content fades behind it.
+
 ### Header
 
 Two-row layout introduced in Phase F.0.3:
