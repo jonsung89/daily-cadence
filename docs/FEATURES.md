@@ -514,7 +514,7 @@ Full-screen viewer presented as a `RootView` overlay (so the underlying timeline
 - Surface: `bg1` (cream / warm near-black), `bg2` (white / dark surface), `border1` / `border2`.
 - Text: `ink` (warm dark / warm off-white), `fg2` (warm gray).
 - Accents: `sage` / `sageDeep` / `sageSoft` (primary theme — computed through `ThemeStore`).
-- 9 note-type pairs: `workout`/`workoutSoft`, `meal`/`mealSoft`, `sleep`/`sleepSoft`, `mood`/`moodSoft`, `activity`/`activitySoft`, plus `general` using `warmGray`/`taupe`, `media` using `periwinkle`/`periwinkleSoft`, `pets` using `blush`/`blushSoft`, and `book` using `book`/`bookSoft` (coffee-brown).
+- 10 note-type pairs: `workout`/`workoutSoft`, `meal`/`mealSoft`, `sleep`/`sleepSoft`, `mood`/`moodSoft`, `activity`/`activitySoft`, plus `general` using `warmGray`/`taupe`, `media` using `periwinkle`/`periwinkleSoft`, `pets` using `blush`/`blushSoft`, `book` using `book`/`bookSoft` (coffee-brown), and `recipe` using `recipe`/`recipeSoft` (paprika red).
 - Brand neutrals: `cream`, `taupe`, `taupeDeep`, `warmGray`.
 - Companion brights: `periwinkle`, `blush`, `honey`.
 
@@ -573,7 +573,7 @@ Full-screen viewer presented as a `RootView` overlay (so the underlying timeline
 
 ### NoteType
 
-- Nine cases: `general` (text-note default, neutral), `workout`, `meal`, `sleep`, `mood`, `activity`, `pets` (Phase F.1.2.pets — pet-related logs; pawprint icon, blush pigment), `book` (Phase F.1.2.book — reading logs; book.closed.fill icon, coffee-brown pigment; structured-data schema reserved for `title`/`author`/`progress`/`is_finished`), `media` (auto-assigned to bare photo/video notes; Phase E.5.10).
+- Ten cases: `general` (text-note default, neutral), `workout`, `meal`, `sleep`, `mood`, `activity`, `pets` (Phase F.1.2.pets — pet-related logs; pawprint icon, blush pigment), `book` (Phase F.1.2.book — reading logs; book.closed.fill icon, coffee-brown pigment; structured-data schema reserved for `title`/`author`/`progress`/`is_finished`), `recipe` (Phase F.1.2.recipe — recipe screenshots + tags; frying.pan.fill icon, paprika-red pigment; structured-data schema reserved for `title`/`food_type`/`tags`/`is_favorite`), `media` (auto-assigned to bare photo/video notes; Phase E.5.10).
 - Each has a title, default pigment + soft color, and a SF Symbol placeholder. Color/icon overrides via `NoteTypeStyleStore` flow into all card visuals.
 - `NoteType.textEditorPickable` returns `allCases` minus `.media` — used by the text-note editor's type picker so a text note can't accidentally be tagged Media. Settings → Note Types and Group / Stack views still use `allCases`, so Media participates in color overrides and section rendering like any other type.
 

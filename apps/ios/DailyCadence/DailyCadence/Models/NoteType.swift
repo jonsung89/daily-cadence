@@ -43,6 +43,7 @@ enum NoteType: String, CaseIterable, Identifiable, Hashable, Codable {
     case activity
     case pets
     case book
+    case recipe
     case media
 
     var id: String { rawValue }
@@ -68,6 +69,7 @@ enum NoteType: String, CaseIterable, Identifiable, Hashable, Codable {
         case .activity: return "Activity"
         case .pets:     return "Pets"
         case .book:     return "Book"
+        case .recipe:   return "Recipe"
         case .media:    return "Media"
         }
     }
@@ -96,6 +98,7 @@ enum NoteType: String, CaseIterable, Identifiable, Hashable, Codable {
         case .activity: return .DS.activity
         case .pets:     return .DS.blush
         case .book:     return .DS.book
+        case .recipe:   return .DS.recipe
         case .media:    return .DS.periwinkle
         }
     }
@@ -111,6 +114,7 @@ enum NoteType: String, CaseIterable, Identifiable, Hashable, Codable {
         case .activity: return .DS.activitySoft
         case .pets:     return .DS.blushSoft
         case .book:     return .DS.bookSoft
+        case .recipe:   return .DS.recipeSoft
         case .media:    return .DS.periwinkleSoft
         }
     }
@@ -144,6 +148,7 @@ enum NoteType: String, CaseIterable, Identifiable, Hashable, Codable {
         case .activity: return "figure.walk"
         case .pets:     return "pawprint.fill"
         case .book:     return "book.closed.fill"
+        case .recipe:   return "frying.pan.fill"
         case .media:    return "photo.on.rectangle"
         }
     }

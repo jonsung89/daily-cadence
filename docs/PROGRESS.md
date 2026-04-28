@@ -1,6 +1,6 @@
 # DailyCadence — Progress
 
-**Last updated:** 2026-04-28 (Phase F.1.2.exifdate — capture-moment metadata overlay in the media viewer. Image library imports extract EXIF `DateTimeOriginal` via `CGImageSource`; camera image captures pass `Date()` (jpegData strips EXIF); video pulls `AVAsset.creationDate`. New `MediaPayload.capturedAt: Date?` flows through all 4 reconstruction sites (crop/save/caption-edit) and persists as a forward-compatible field on the body JSONB media block — no SQL migration needed. Viewer chrome shows it lower-left in the existing caption gradient zone; nothing rendered when neither caption nor date is present. +1 test.)
+**Last updated:** 2026-04-28 (Phase F.1.2.recipe — 9th system note type for recipe screenshots + tags. New `NoteType.recipe` case + 4 switch arms (title/defaultColor/softColor/systemImage), new `Color.DS.recipe` / `Color.DS.recipeSoft` (paprika red — confidently distinct from meal's amber and workout's terracotta-brown so the three "warm" types stay individually identifiable), `frying.pan.fill` icon. Migration `20260428000001_add_recipe_note_type.sql` seeds the row with `structured_data_schema` populated for `title` / `food_type` / `tags` / `is_favorite` — schema is reserved for the future structured-data renderer + cross-note search.)
 **Current phase:** Phase 1 MVP — iOS app for Jon + wife, TestFlight distribution
 
 This is the living state of the project. Update at the end of every session.
@@ -1839,6 +1839,24 @@ Strip is ~14pt taller now. Trade is fair — the strip is the at-a-glance naviga
 
 Pre-existing bug from Phase F.1.2.refresh's caption-edit sheet: both a custom `Text("Add a caption…")` overlay AND the `TextField`'s built-in placeholder ("Caption" — passed as the title parameter) rendered simultaneously when the field was empty, producing visible overlap. Deleted the custom overlay + the wrapping ZStack and used the built-in TextField placeholder with the design copy "Add a caption…". One less moving part; SwiftUI's default placeholder color is fine.
 
+### Phase F.1.2.recipe — Recipe note type (added this round)
+
+Adds a 9th system note type for recipe screenshots and tags. Use case: "I want to save this dish I saw on Instagram so I can find it later." Snap a screenshot, optionally add the dish title, food type ("Korean," "Italian"), and a few tags ("spicy," "weeknight," "date-night"). Future cross-note search will use the tags + food_type to surface "all my Korean recipes" or "all my spicy weeknight ideas."
+
+**iOS** — single-file changes in [NoteType.swift](apps/ios/DailyCadence/DailyCadence/Models/NoteType.swift): new `recipe` case + 4 switch arms. Icon is `frying.pan.fill` — distinct from meal's `fork.knife` (which evokes eating, not cooking). Pigment is the new `Color.DS.recipe` / `Color.DS.recipeSoft` pair — paprika red (#CC462D light / #E16E50 dark). Tokens added to [Tokens/Colors.swift](apps/ios/DailyCadence/DailyCadence/DesignSystem/Tokens/Colors.swift) alongside the existing semantic note-type pigments. The color choice is deliberately a confident red (not meal's amber-yellow, not workout's terracotta-brown) so the three "warm" food/effort types stay individually identifiable at small dot sizes.
+
+**Database** — [supabase/migrations/20260428000001_add_recipe_note_type.sql](supabase/migrations/20260428000001_add_recipe_note_type.sql): single `INSERT` row with `structured_data_schema` populated for four optional fields:
+- `title`       — recipe name (string)
+- `food_type`   — broad category, free-form so users aren't enum-constrained ("Korean", "Italian", "Dessert")
+- `tags`        — `string[]`, free-form ("spicy", "weeknight", "soup")
+- `is_favorite` — toggle for starring recipes worth re-making
+
+Schema is reserved-but-not-yet-rendered. Future structured-data renderer (captured in Phase F+ TODO) will surface these as scaffolding above the free-form body. The body remains the primary surface — recipe notes are about screenshot + thoughts; the fields are there for searchability, not as a form to fill out.
+
+**Run via `supabase db push` or paste into the SQL editor** before saving a recipe-typed note — until the row exists, `NotesRepository.insert` throws `unknownNoteTypeSlug("recipe")`.
+
+Build clean, all 88 tests pass.
+
 ### Phase F+ feature TODO (designed-for, not-built)
 
 Captured here so a fresh session can pick up the roadmap. Each line corresponds to schema fields that are reserved but unused.
@@ -1867,7 +1885,7 @@ Captured here so a fresh session can pick up the roadmap. Each line corresponds 
 - ~~**Rename "Primary color" in Settings → Appearance**~~ — Shipped as "Theme color" (Phase F.1.2.refresh).
 - ~~**`pets` note type with paw icon**~~ — Shipped (Phase F.1.2.pets). See entry above.
 - ~~**`book` note type for reading logs**~~ — Shipped (Phase F.1.2.book). See entry above. The structured-data fields renderer that surfaces `title` / `author` / `progress` / `is_finished` is still a separate Phase F+ task (covers all types with populated schemas, not just book).
-- **`recipe` note type with screenshot + tags.** New 9th system note type. Use case: snap a recipe screenshot, add a title + food type + tags so it's findable later. Schema: `note_types` row with slug=`recipe`, icon=`fork.knife.circle` or `frying.pan.fill`, color TBD (distinct from `meal`'s amber — maybe a fresh terracotta or sage-deep). `structured_data_schema` fields: `title` (string, recipe name), `food_type` (string, e.g., "Korean"), `tags` (text[], free-form like "spicy", "soup", "weeknight"). Body: image attachments (the screenshot) + optional notes. Cross-cutting search work captured separately below — this entry is the schema + editor; the search UX uses what this writes.
+- ~~**`recipe` note type with screenshot + tags.**~~ Shipped Phase F.1.2.recipe (see entry above). The future structured-data renderer that surfaces `title` / `food_type` / `tags` / `is_favorite` is still a separate Phase F+ task (covers all types with populated schemas, not just recipe).
 - **Real-time cross-note search with multi-level filters.** Cross-cutting feature. Use case (driven by recipes but applies to all notes): search for "Korean" → results, then within those, filter by tag "spicy" → narrows live, no "Search" button press. UX shape: search field at the top of the timeline / library / dedicated search screen; results update on each keystroke; chips below the field show active filters (note type, tag, food type) the user can stack. Schema additions needed: `tags text[]` column on `notes` (or a `note_tags` join table — text[] is simpler and supports GIN index for fast `&&` queries). `notes.search_text` generated column for full-text search across title + body? OR Postgres `to_tsvector` with a GIN index on the fly. Phase 1 can ship with `ILIKE '%query%'` against `title || body` — slower but no schema change beyond tags.
 - ~~**FAB menu copy refresh**~~ — Shipped (Phase F.1.2.refresh). Final picks: "Write a thought" / "Add from Photos" / "Snap something".
 - **User profile: avatar + first/last name.** Currently auth is anonymous (Phase F.0.1) and there's no profile UI. New `profiles` table (one-row-per-user, `id uuid PK references auth.users(id)`, `first_name text`, `last_name text`, `avatar_ref MediaRef?`). Storage: new `avatars` bucket (public read for the user's own row, RLS like `note-media`). Settings → Profile section with image picker (reuse `CameraPicker` + `PhotosPicker`) + two text fields. Read-through via a `ProfileStore` `@Observable`. Required before Sign in with Apple / Google ship — those provide the name as a one-shot at first sign-in, which we should write into `profiles` then.

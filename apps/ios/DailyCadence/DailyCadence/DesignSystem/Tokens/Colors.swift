@@ -78,6 +78,14 @@ extension Color {
         static let book         = dynamicColor(light: 0x6B4F3A, dark: 0xA38971)
         static let bookSoft     = dynamicColor(light: 0xEFE7DC, dark: 0x332A22)
 
+        // Recipe — paprika red. Confidently red (vs workout's brown-orange
+        // and meal's amber-yellow) so the three "warm" food/effort types
+        // stay individually identifiable at small dot sizes. Evokes the
+        // kitchen-spice / tomato-sauce association without sliding into
+        // alarm-red territory.
+        static let recipe       = dynamicColor(light: 0xCC462D, dark: 0xE16E50)
+        static let recipeSoft   = dynamicColor(light: 0xF7DBD2, dark: 0x3F231C)
+
         // MARK: - Foreground / background roles
         //
         // Role tokens alias to base tokens so they inherit dynamic behavior
