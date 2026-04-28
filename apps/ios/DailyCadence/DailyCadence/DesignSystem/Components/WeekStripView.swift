@@ -77,25 +77,30 @@ struct WeekStripView: View {
             }
             .frame(width: 8, height: 8)
         }
-        .padding(.vertical, 6)
-        .padding(.horizontal, 4)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity)
         .background(
-            // Selected-day highlight: subtle sage soft fill behind the
-            // whole column. Today AND selected = full pill; selected
-            // (different day from today) also gets the pill so the
-            // user can see which day they're navigating.
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
+            // Selected-day highlight: subtle sage soft fill that fills
+            // the column's allocated width (with a 3pt inset so adjacent
+            // selected pills wouldn't touch). Earlier 4pt-padded version
+            // read as a skinny tall oval; this one feels like a proper
+            // bubble around the day. Today AND selected = full pill;
+            // selected (different day from today) also gets the pill so
+            // the user sees which day they're navigating.
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .fill(isSelected ? Color.DS.sageSoft : Color.clear)
+                .padding(.horizontal, 3)
         )
         .overlay(
             // Today gets a 1pt sage-tinted ring on TOP of the selected
             // fill — makes "today" identifiable even when the user is
             // viewing a different day (no fill on this column).
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .stroke(
                     isToday ? Color.DS.sage.opacity(0.5) : Color.clear,
                     lineWidth: 1
                 )
+                .padding(.horizontal, 3)
         )
         .accessibilityLabel(accessibilityLabel(day: day, isToday: isToday, isSelected: isSelected, hasNotes: hasNotes))
         .accessibilityAddTraits(isSelected ? .isSelected : [])
