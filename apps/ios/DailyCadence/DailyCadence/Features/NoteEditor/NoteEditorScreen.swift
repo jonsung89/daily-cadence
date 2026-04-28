@@ -338,21 +338,46 @@ struct NoteEditorScreen: View {
 
     // MARK: - Type picker (Phase F.1.2.picker — combo A+B)
     //
-    // Single chip showing the current selected type. Tap → presents
-    // `NoteTypePickerSheet` (searchable + scrollable grid). The editor
-    // opens straight to writing; the user only interacts with the type
-    // picker when they explicitly want to change it. Scales to 7, 17,
-    // or 70 types without changing this UI.
+    // Compact horizontal pill showing the current selected type. Tap →
+    // presents `NoteTypePickerSheet` (searchable + flow-layout grid).
+    // The editor opens straight to writing; the user only interacts
+    // with the type picker when they explicitly want to change it.
+    // Apple Notes folder selector / Mail account selector pattern —
+    // small footprint (~32pt), unobtrusive, doesn't compete with the
+    // title field for visual priority. Scales to 7, 17, or 70 types
+    // without changing this UI.
 
     private var typePicker: some View {
         HStack {
-            TypeChip(type: draft.selectedType, isSelected: true) {
+            Button {
                 isTypePickerSheetPresented = true
+            } label: {
+                HStack(spacing: 8) {
+                    Circle()
+                        .fill(draft.selectedType.color)
+                        .frame(width: 10, height: 10)
+                    Text(draft.selectedType.title)
+                        .font(.DS.sans(size: 13, weight: .medium))
+                        .foregroundStyle(Color.DS.ink)
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(Color.DS.fg2)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(
+                    Capsule().fill(Color.DS.bg2)
+                )
+                .overlay(
+                    Capsule().stroke(Color.DS.border1, lineWidth: 1)
+                )
             }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Note type: \(draft.selectedType.title). Double-tap to change.")
             Spacer()
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 12)
+        .padding(.vertical, 8)
     }
 
     // MARK: - Form
