@@ -108,15 +108,35 @@ final class PhotoCropState {
         return CGRect(x: cx - w / 2, y: cy - h / 2, width: w, height: h)
     }
 
-    /// Clamps a proposed `(scale, offset)` so the displayed image always
-    /// covers the base `imageRect` (no exposed canvas chrome behind a
-    /// panned-too-far image). Returns the clamped offset.
+    /// Clamps a proposed `(scale, offset)` so the displayed image
+    /// always **covers the crop rect** — i.e., no canvas / empty pixels
+    /// can ever fall inside what gets cropped. Allows the user to pan
+    /// the image freely as long as the crop rect stays over real
+    /// image content.
+    ///
+    /// Phase F.1.2.cropfix — the previous formula clamped against the
+    /// canvas (`imageRect`), which at `scale == 1.0` collapsed to a
+    /// zero-pan range and made aspect-ratio crops feel locked in
+    /// place. Reframed against the smaller `cropRect`: when the rect
+    /// is smaller than the image (the common case for any aspect
+    /// preset), there's panning headroom equal to the difference.
     func clampedOffset(_ proposed: CGSize, for scale: CGFloat) -> CGSize {
-        let maxX = imageRect.width  * (scale - 1) / 2
-        let maxY = imageRect.height * (scale - 1) / 2
+        // Half-extents of the displayed image after `scale` is applied.
+        let halfW = imageRect.width  * scale / 2
+        let halfH = imageRect.height * scale / 2
+
+        // Required: displayed image rect contains crop rect on every edge.
+        // displayed.minX = imageRect.midX + offset.x - halfW   ≤ cropRect.minX
+        // displayed.maxX = imageRect.midX + offset.x + halfW   ≥ cropRect.maxX
+        // (and analogous for Y)
+        let maxOffsetX = cropRect.minX - imageRect.midX + halfW
+        let minOffsetX = cropRect.maxX - imageRect.midX - halfW
+        let maxOffsetY = cropRect.minY - imageRect.midY + halfH
+        let minOffsetY = cropRect.maxY - imageRect.midY - halfH
+
         return CGSize(
-            width:  max(-maxX, min(proposed.width,  maxX)),
-            height: max(-maxY, min(proposed.height, maxY))
+            width:  max(minOffsetX, min(proposed.width,  maxOffsetX)),
+            height: max(minOffsetY, min(proposed.height, maxOffsetY))
         )
     }
 
@@ -400,6 +420,13 @@ struct PhotoCropView: View {
                     starting: dragStartRect,
                     in: imageRect
                 )
+                // Phase F.1.2.cropfix — `clampedOffset` constrains the
+                // pan so the displayed image covers `cropRect`. After a
+                // resize, the existing offset may now violate that
+                // constraint (rect grew, image hasn't moved). Re-clamp
+                // so the image snaps back into a valid position rather
+                // than leaving canvas exposed inside the new rect.
+                state.imageOffset = state.clampedOffset(state.imageOffset, for: state.imageScale)
             }
             .onEnded { _ in dragStartRect = .zero }
     }
