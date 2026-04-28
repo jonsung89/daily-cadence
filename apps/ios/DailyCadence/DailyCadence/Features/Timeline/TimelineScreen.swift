@@ -233,17 +233,17 @@ struct TimelineScreen: View {
                 Button {
                     isCameraPresented = true
                 } label: {
-                    Label("Take Photo or Video", systemImage: "camera")
+                    Label("Snap something", systemImage: "camera")
                 }
                 Button {
                     isMediaPickerPresented = true
                 } label: {
-                    Label("Photo or Video", systemImage: "photo.on.rectangle")
+                    Label("Add from Photos", systemImage: "photo.on.rectangle")
                 }
                 Button {
                     isEditorPresented = true
                 } label: {
-                    Label("Text Note", systemImage: "note.text")
+                    Label("Write a thought", systemImage: "note.text")
                 }
             } label: {
                 FABAppearance()

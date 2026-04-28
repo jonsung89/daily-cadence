@@ -39,7 +39,7 @@ struct PrimaryColorPickerScreen: View {
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
         .background(Color.DS.bg1)
-        .navigationTitle("Primary color")
+        .navigationTitle("Theme color")
         .navigationBarTitleDisplayMode(.inline)
     }
 

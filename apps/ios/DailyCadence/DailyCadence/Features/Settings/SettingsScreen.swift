@@ -165,7 +165,7 @@ struct PrimaryColorRow: View {
         let swatch = ThemeStore.shared.primary
         HStack(spacing: 14) {
             PrimaryTrioDots(swatch: swatch, dotSize: 18)
-            Text("Primary color")
+            Text("Theme color")
                 .font(.DS.body)
                 .foregroundStyle(Color.DS.ink)
             Spacer(minLength: 8)
