@@ -359,13 +359,22 @@ final class TimelineStore {
         // Drop notes the server no longer has.
         notes.removeAll { fetchedById[$0.id] == nil }
 
-        // Overwrite existing notes with the server's version + track
-        // which ids are already present so the next pass only inserts
-        // the genuinely new ones.
+        // Overwrite existing notes with the server's version, **only
+        // when content actually differs**. The equality check matters
+        // because @Observable fires for every array write, even when
+        // the assigned element is value-equal to the existing one. A
+        // blind `notes[i] = fresh` triggers re-render of every card
+        // body — and for image-background notes that means re-decoding
+        // the freshly-downloaded `Data` into a new `UIImage`, which
+        // visibly flickers the background even though the image bytes
+        // are identical. Equality short-circuits avoid this churn for
+        // the common refetch case (no real change).
         var presentIds: Set<UUID> = []
         for i in notes.indices {
             if let fresh = fetchedById[notes[i].id] {
-                notes[i] = fresh
+                if notes[i] != fresh {
+                    notes[i] = fresh
+                }
                 presentIds.insert(fresh.id)
             }
         }
@@ -375,7 +384,26 @@ final class TimelineStore {
             notes.append(note)
         }
 
-        sortByOccurredAtAscending()
+        // Guard the sort too — only resort when the array's actual
+        // ordering has shifted (insertions or per-note `occurredAt`
+        // changes), so a no-op refetch doesn't trigger a write.
+        if !isAlreadySortedAscending() {
+            sortByOccurredAtAscending()
+        }
+    }
+
+    /// Cheap pre-check for `mergeFetched` so a no-op refetch (cache
+    /// already matches server) doesn't trigger an array write through
+    /// `sort(by:)`. Walks once, O(n); short-circuits at the first
+    /// out-of-order pair.
+    private func isAlreadySortedAscending() -> Bool {
+        var previous: Date = .distantPast
+        for note in notes {
+            let stamp = note.occurredAt ?? .distantFuture
+            if stamp < previous { return false }
+            previous = stamp
+        }
+        return true
     }
 
     /// Removes the note locally (and forgets its pin state) and soft-deletes
