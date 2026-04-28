@@ -34,14 +34,22 @@ struct RootView: View {
     /// the manual zoom in `MediaViewerScreen`.
     @State private var openProgress: CGFloat = 0
 
-    /// Collected from cards via `CardFrameKey` `PreferenceKey`. Used to
-    /// snapshot the source frame onto `PresentedMedia` at tap time.
-    @State private var sourceFrames: [UUID: CGRect] = [:]
-
     var body: some View {
         content
             .environment(\.mediaTapHandler, mediaTapHandler)
-            .onPreferenceChange(CardFrameKey.self) { sourceFrames = $0 }
+            // Phase F.1.2.zoomfix — write to the non-observable
+            // `CardFrameStore` singleton instead of a `@State` dict.
+            // Storing in `@State` was the cause of the drag-dismiss
+            // "image duplicates / screen flickers" bug — every layout
+            // pass on every card published a frame preference, this
+            // closure mutated the @State, RootView re-rendered, every
+            // card re-rendered, and frames re-published. Feedback loop
+            // scaled with card count. Plain class breaks the loop —
+            // the only reader is the tap-handler closure below, which
+            // runs at tap time when the dict is settled.
+            .onPreferenceChange(CardFrameKey.self) { newFrames in
+                CardFrameStore.shared.frames = newFrames
+            }
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 TabBar(items: tabItems, selection: $selection)
             }
@@ -119,7 +127,7 @@ struct RootView: View {
             // Fall back to .zero if the card hasn't reported a frame
             // yet; first-frame zoom will be slightly off but won't
             // crash, and subsequent renders fill in.
-            let frame = sourceFrames[sourceID] ?? .zero
+            let frame = CardFrameStore.shared.frames[sourceID] ?? .zero
             presentedMedia = PresentedMedia(
                 sourceID: sourceID,
                 payload: payload,

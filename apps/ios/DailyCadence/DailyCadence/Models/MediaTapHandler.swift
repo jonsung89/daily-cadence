@@ -70,13 +70,31 @@ struct PresentedMedia: Hashable {
 }
 
 /// PreferenceKey that bubbles each card's image-area frame (in global
-/// coords) up to `RootView`. The viewer uses these to know where to
-/// "zoom out from" on dismiss and "zoom in to" on open.
+/// coords) up to `CardFrameStore`. The viewer uses these to know where
+/// to "zoom out from" on dismiss and "zoom in to" on open.
 struct CardFrameKey: PreferenceKey {
     static let defaultValue: [UUID: CGRect] = [:]
     static func reduce(value: inout [UUID: CGRect], nextValue: () -> [UUID: CGRect]) {
         value.merge(nextValue()) { _, new in new }
     }
+}
+
+/// Phase F.1.2.zoomfix — single source of truth for the live card
+/// frame map. **Plain reference type, NOT `@Observable`** — the only
+/// reader is the tap-handler closure (which runs at tap time when the
+/// dictionary is settled). Making the storage observable was the bug:
+/// `RootView` had `@State sourceFrames` updated from
+/// `.onPreferenceChange`, which churned the state and re-rendered the
+/// entire screen on every layout pass — every card re-rendered, every
+/// card republished its frame, the dict mutated again, RootView
+/// re-rendered. Feedback loop scaled with card count, manifesting as
+/// drag-down-to-dismiss "image duplicates and shakes" + "entire screen
+/// flickers." Storing in a plain class lets `.onPreferenceChange`
+/// write without invalidating any SwiftUI view subtree.
+@MainActor
+final class CardFrameStore {
+    static let shared = CardFrameStore()
+    var frames: [UUID: CGRect] = [:]
 }
 
 /// Environment-injected so cards (`KeepCard`, `NoteCard`) can pick up
