@@ -623,7 +623,8 @@ struct NoteEditorScreen: View {
             data: result.data,
             posterData: nil,
             aspectRatio: result.aspectRatio,
-            caption: pending.caption
+            caption: pending.caption,
+            capturedAt: pending.capturedAt
         )
         withAnimation(.easeOut(duration: 0.2)) {
             draft.insertMedia(croppedPayload, size: .medium)

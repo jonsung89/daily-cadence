@@ -81,6 +81,10 @@ enum MediaImporter {
         let duration: Double
         let aspectRatio: CGFloat
         let posterData: Data?
+        /// Phase F.1.2.exifdate — preserved across the trim sheet so the
+        /// trimmed payload retains the original capture moment instead
+        /// of falling back to "now."
+        let capturedAt: Date?
     }
 
     /// Maximum trimmed-video duration. Picked clips longer than this go
@@ -137,6 +141,35 @@ enum MediaImporter {
     /// in the 2-col masonry render at ~180-200pt wide, so 600px is
     /// plenty for retina (3×) sharpness. Cuts grid-view egress 5-10×.
     static let mediaNoteThumbnailDimension: CGFloat = 600
+
+    /// Phase F.1.2.exifdate — extract the capture moment from the asset's
+    /// EXIF metadata. EXIF `DateTimeOriginal` is a wall-clock string in
+    /// the format `YYYY:MM:DD HH:MM:SS` with no embedded timezone — we
+    /// parse it as if it's in the device's current timezone. This is the
+    /// pragmatic Phase 1 approach: correct when the user views photos in
+    /// the same timezone they took them in (the common case), slightly
+    /// off when traveling. Apple Photos itself doesn't surface timezone
+    /// either. Falls back to `nil` when the field is missing (camera
+    /// captures without metadata, screenshots, etc.).
+    static func extractCaptureDate(from data: Data) -> Date? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let exif = props[kCGImagePropertyExifDictionary] as? [CFString: Any],
+              let raw = exif[kCGImagePropertyExifDateTimeOriginal] as? String
+        else { return nil }
+        return exifDateFormatter.date(from: raw)
+    }
+
+    /// EXIF `DateTimeOriginal` parser. Format never changes — POSIX locale
+    /// + current timezone gives a stable, locale-independent parse that
+    /// resolves to the user's wall-clock interpretation.
+    private static let exifDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy:MM:dd HH:mm:ss"
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = .current
+        return f
+    }()
 
     /// Phase F.1.1b — encodes a `UIImage` as HEIC with the given quality.
     /// HEIC is ~50% smaller than JPEG at perceptually-equivalent quality.
@@ -208,12 +241,17 @@ enum MediaImporter {
     /// (already decoded). Encode to JPEG at q=0.92 to preserve quality,
     /// then run the same `imagePayload` flow as picker imports — same
     /// downscale + dual-size HEIC re-encode as library imports.
+    ///
+    /// Phase F.1.2.exifdate — `UIImage.jpegData()` strips EXIF, so the
+    /// `imagePayload` extractor would return nil. The camera shutter
+    /// just fired, so `Date()` IS the capture moment — pass it explicitly
+    /// so the viewer's metadata overlay shows "today" instead of blank.
     static func makePayload(fromCameraImage image: UIImage) throws -> ImportResult {
         guard let jpeg = image.jpegData(compressionQuality: 0.92) else {
             log.error("makePayload(fromCameraImage:): jpegData returned nil")
             throw ImportError.unsupported
         }
-        return .payload(try imagePayload(from: jpeg))
+        return .payload(try imagePayload(from: jpeg, capturedAtOverride: Date()))
     }
 
     /// Camera-capture video variant. The picker hands us a `URL` we
@@ -228,7 +266,7 @@ enum MediaImporter {
 
     // MARK: - Image
 
-    private static func imagePayload(from data: Data) throws -> MediaPayload {
+    private static func imagePayload(from data: Data, capturedAtOverride: Date? = nil) throws -> MediaPayload {
         // Phase F.1.1b — produce dual-size HEIC.
         // Full: 2048px max longest edge, HEIC q=0.85 (~150-300 KB typical).
         // Thumb: 600px max longest edge, HEIC q=0.7 (~30-60 KB).
@@ -247,15 +285,24 @@ enum MediaImporter {
             return encodeHEIC(img, quality: 0.7) ?? jpeg
         }
 
+        // Phase F.1.2.exifdate — extract from the SOURCE bytes, not the
+        // re-encoded HEIC. The downscale path strips EXIF (the thumbnail
+        // API doesn't preserve it), so reading from the original picker
+        // bytes is the only path that surfaces the original capture time.
+        // Camera-capture path bypasses EXIF extraction (jpegData strips
+        // it) and supplies `Date()` via the override.
+        let capturedAt = capturedAtOverride ?? extractCaptureDate(from: data)
+
         let mp = (fullImage.size.width * fullImage.size.height) / 1_000_000
-        log.info("imagePayload: \(Int(fullImage.size.width))×\(Int(fullImage.size.height)) (\(String(format: "%.1f", mp))MP) full=\(fullHEIC.count) thumb=\(thumbHEIC?.count ?? 0)")
+        log.info("imagePayload: \(Int(fullImage.size.width))×\(Int(fullImage.size.height)) (\(String(format: "%.1f", mp))MP) full=\(fullHEIC.count) thumb=\(thumbHEIC?.count ?? 0) capturedAt=\(capturedAt.map { ISO8601DateFormatter().string(from: $0) } ?? "nil")")
         let aspect = fullImage.size.height > 0 ? fullImage.size.width / fullImage.size.height : 1.0
         return MediaPayload(
             kind: .image,
             data: fullHEIC,
             posterData: nil,
             thumbnailData: thumbHEIC,
-            aspectRatio: aspect
+            aspectRatio: aspect,
+            capturedAt: capturedAt
         )
     }
 
@@ -277,6 +324,7 @@ enum MediaImporter {
         let duration = try? await asset.load(.duration)
         let seconds = duration?.seconds ?? 0
         let aspect = await videoAspectRatio(asset: asset) ?? (16.0 / 9.0)
+        let capturedAt = await videoCreationDate(asset: asset)
 
         if seconds > videoMaxDurationSeconds {
             log.info("video > cap (\(String(format: "%.1f", seconds))s) — handing off to trim sheet")
@@ -284,7 +332,8 @@ enum MediaImporter {
                 sourceURL: sourceURL,
                 duration: seconds,
                 aspectRatio: aspect,
-                posterData: nil
+                posterData: nil,
+                capturedAt: capturedAt
             ))
         }
 
@@ -298,14 +347,15 @@ enum MediaImporter {
             throw ImportError.exportFailed
         }
 
-        log.info("videoImportResult: \(seconds)s aspect=\(String(format: "%.2f", aspect)) hevc=\(encodedData.count)")
+        log.info("videoImportResult: \(seconds)s aspect=\(String(format: "%.2f", aspect)) hevc=\(encodedData.count) capturedAt=\(capturedAt.map { ISO8601DateFormatter().string(from: $0) } ?? "nil")")
 
         return .payload(MediaPayload(
             kind: .video,
             data: encodedData,
             posterData: posterData,
             thumbnailData: nil,
-            aspectRatio: aspect
+            aspectRatio: aspect,
+            capturedAt: capturedAt
         ))
     }
 
@@ -336,7 +386,8 @@ enum MediaImporter {
             data: encodedData,
             posterData: trimmedPoster,
             thumbnailData: nil,
-            aspectRatio: source.aspectRatio
+            aspectRatio: source.aspectRatio,
+            capturedAt: source.capturedAt
         )
     }
 
@@ -364,6 +415,18 @@ enum MediaImporter {
             return try Data(contentsOf: outputURL)
         } catch {
             log.error("HEVC export failed: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    /// Phase F.1.2.exifdate — load the asset's creation date metadata.
+    /// Camera-recorded videos populate this; screen recordings and
+    /// edited exports may not. Returns nil on missing or unparseable
+    /// metadata; callers fall back to "no date" in the viewer overlay.
+    private static func videoCreationDate(asset: AVAsset) async -> Date? {
+        do {
+            return try await asset.load(.creationDate)?.load(.dateValue)
+        } catch {
             return nil
         }
     }

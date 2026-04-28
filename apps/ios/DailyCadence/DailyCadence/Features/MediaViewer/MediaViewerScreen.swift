@@ -162,22 +162,44 @@ struct MediaViewerScreen: View {
                 .accessibilityLabel("Close")
             }
             Spacer()
-            if let caption = media.caption, !caption.isEmpty {
-                Text(caption)
-                    .font(.DS.sans(size: 15, weight: .regular))
-                    .foregroundStyle(.white)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 24)
-                    .padding(.bottom, 24)
-                    .frame(maxWidth: .infinity)
-                    .background {
-                        LinearGradient(
-                            colors: [.clear, .black.opacity(0.45)],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
-                        .ignoresSafeArea()
-                    }
+            bottomChrome
+        }
+    }
+
+    /// Bottom chrome — caption (centered) and capture date (lower-left)
+    /// share a single gradient backdrop. Renders nothing when neither is
+    /// present so a metadata-less photo gets a clean unobstructed bottom.
+    @ViewBuilder
+    private var bottomChrome: some View {
+        let caption = media.caption?.isEmpty == false ? media.caption : nil
+        let dateText = media.capturedAt.map { $0.formatted(date: .abbreviated, time: .shortened) }
+
+        if caption != nil || dateText != nil {
+            VStack(spacing: 6) {
+                if let caption {
+                    Text(caption)
+                        .font(.DS.sans(size: 15, weight: .regular))
+                        .foregroundStyle(.white)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity)
+                }
+                if let dateText {
+                    Text(dateText)
+                        .font(.DS.sans(size: 12, weight: .regular))
+                        .foregroundStyle(.white.opacity(0.85))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .accessibilityLabel("Captured \(dateText)")
+                }
+            }
+            .padding(.horizontal, 24)
+            .padding(.bottom, 24)
+            .background {
+                LinearGradient(
+                    colors: [.clear, .black.opacity(0.45)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .ignoresSafeArea()
             }
         }
     }

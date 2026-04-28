@@ -26,6 +26,24 @@ struct MediaPayloadTests {
         #expect(p.aspectRatio == 1.5)
     }
 
+    @Test func capturedAtPreserved() {
+        // Phase F.1.2.exifdate — capture moment surfaces in the viewer's
+        // metadata overlay. Default is nil for assets without EXIF /
+        // creation metadata.
+        let withDate = Date(timeIntervalSince1970: 1_745_786_520)  // 2025-04-27 19:42:00 UTC
+        let dated = MediaPayload(
+            kind: .image,
+            data: Self.stubBytes,
+            aspectRatio: 1.0,
+            capturedAt: withDate
+        )
+        #expect(dated.capturedAt == withDate)
+
+        let undated = MediaPayload(kind: .image, data: Self.stubBytes, aspectRatio: 1.0)
+        #expect(undated.capturedAt == nil,
+                "Default capturedAt is nil so screenshots and metadata-less imports don't render a fake date")
+    }
+
     @Test func captionTrimmedAndEmptyBecomesNil() {
         let allWhitespace = MediaPayload(
             kind: .image,

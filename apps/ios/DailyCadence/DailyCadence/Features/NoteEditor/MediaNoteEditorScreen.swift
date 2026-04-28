@@ -420,7 +420,8 @@ struct MediaNoteEditorScreen: View {
                 data: result.data,
                 posterData: nil,
                 aspectRatio: result.aspectRatio,
-                caption: payload.caption
+                caption: payload.caption,
+                capturedAt: payload.capturedAt
             )
         }
 
@@ -430,7 +431,8 @@ struct MediaNoteEditorScreen: View {
             data: payload.data,
             posterData: payload.posterData,
             aspectRatio: payload.aspectRatio,
-            caption: trimmedCaption.isEmpty ? nil : trimmedCaption
+            caption: trimmedCaption.isEmpty ? nil : trimmedCaption,
+            capturedAt: payload.capturedAt
         )
         let note = MockNote(
             occurredAt: occurredAt ?? defaultOccurredAt,

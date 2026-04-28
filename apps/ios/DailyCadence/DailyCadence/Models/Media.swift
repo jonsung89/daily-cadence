@@ -47,6 +47,16 @@ struct MediaPayload: Hashable {
     /// text in the timeline view.
     let caption: String?
 
+    /// Phase F.1.2.exifdate — wall-clock moment the asset was captured,
+    /// extracted from EXIF `DateTimeOriginal` for image library imports
+    /// or set to `Date()` at camera-capture time. For video, comes from
+    /// `AVAsset.creationDate` when available. Surfaced in
+    /// `MediaViewerScreen` chrome as a small info label so the user
+    /// sees when the moment was taken (vs. when the note was logged).
+    /// `nil` for assets without metadata or for notes saved before this
+    /// field landed.
+    let capturedAt: Date?
+
     /// Phase F.1.1 — Storage ref for the full asset. Populated when this
     /// payload was decoded from a fetched note's body, or after a
     /// background upload completes for a newly-imported note. `nil` for
@@ -68,6 +78,7 @@ struct MediaPayload: Hashable {
         thumbnailData: Data? = nil,
         aspectRatio: CGFloat,
         caption: String? = nil,
+        capturedAt: Date? = nil,
         ref: MediaRef? = nil,
         posterRef: MediaRef? = nil,
         thumbnailRef: MediaRef? = nil
@@ -85,6 +96,7 @@ struct MediaPayload: Hashable {
         } else {
             self.caption = nil
         }
+        self.capturedAt = capturedAt
         self.ref = ref
         self.posterRef = posterRef
         self.thumbnailRef = thumbnailRef

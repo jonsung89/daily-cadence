@@ -307,6 +307,7 @@ final class NotesRepository {
             mediaKind: payload.kind,
             aspect: Double(payload.aspectRatio),
             caption: payload.caption,
+            capturedAt: payload.capturedAt,
             size: size?.rawValue,
             ref: assetRef,
             posterRef: posterRef,
@@ -432,7 +433,7 @@ private enum BodyBlockDTO: Codable, Hashable {
     private enum CodingKeys: String, CodingKey {
         case kind, text
         // Media block fields (flattened into the same object as `kind`):
-        case mediaKind, aspect, caption, size, ref, posterRef, thumbnailRef
+        case mediaKind, aspect, caption, capturedAt, size, ref, posterRef, thumbnailRef
     }
 
     private enum Kind: String, Codable {
@@ -452,6 +453,7 @@ private enum BodyBlockDTO: Codable, Hashable {
                 mediaKind: (try? c.decode(MediaPayload.Kind.self, forKey: .mediaKind)) ?? .image,
                 aspect: try c.decodeIfPresent(Double.self, forKey: .aspect) ?? 1.0,
                 caption: try c.decodeIfPresent(String.self, forKey: .caption),
+                capturedAt: try c.decodeIfPresent(Date.self, forKey: .capturedAt),
                 size: try c.decodeIfPresent(String.self, forKey: .size),
                 ref: try c.decodeIfPresent(MediaRef.self, forKey: .ref),
                 posterRef: try c.decodeIfPresent(MediaRef.self, forKey: .posterRef),
@@ -471,6 +473,7 @@ private enum BodyBlockDTO: Codable, Hashable {
             try c.encode(m.mediaKind, forKey: .mediaKind)
             try c.encode(m.aspect, forKey: .aspect)
             try c.encodeIfPresent(m.caption, forKey: .caption)
+            try c.encodeIfPresent(m.capturedAt, forKey: .capturedAt)
             try c.encodeIfPresent(m.size, forKey: .size)
             try c.encodeIfPresent(m.ref, forKey: .ref)
             try c.encodeIfPresent(m.posterRef, forKey: .posterRef)
@@ -485,6 +488,10 @@ private struct MediaBlockDTO: Codable, Hashable {
     let mediaKind: MediaPayload.Kind
     let aspect: Double
     let caption: String?
+    /// Phase F.1.2.exifdate — wall-clock capture moment surfaced in the
+    /// viewer's metadata overlay. nil for assets without EXIF / creation
+    /// metadata, and for notes saved before this field landed.
+    let capturedAt: Date?
     /// Size hint for inline media blocks (`small` / `medium` / `large`).
     /// nil for standalone media notes — the whole card IS the media.
     let size: String?
@@ -504,6 +511,7 @@ private struct MediaBlockDTO: Codable, Hashable {
             thumbnailData: nil,
             aspectRatio: CGFloat(aspect),
             caption: caption,
+            capturedAt: capturedAt,
             ref: ref,
             posterRef: posterRef,
             thumbnailRef: thumbnailRef

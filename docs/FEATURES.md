@@ -454,6 +454,8 @@ Full-screen viewer presented as a `RootView` overlay (so the underlying timeline
 
 - Top-trailing close button (X in `.ultraThinMaterial` 36pt circle).
 - **Caption** (when present) — bottom gradient overlay (`.clear → .black @ 0.45`), white sans 15pt, 24pt horizontal padding, multiline-centered.
+- **Capture date** (when present) — same gradient zone as the caption, leading-aligned below it, white sans 12pt @ 0.85 opacity, locale-aware format (`Date.formatted(date: .abbreviated, time: .shortened)` — "Apr 27, 2026 at 8:42 PM" in en-US). Sourced from EXIF `DateTimeOriginal` for image library imports, `Date()` for camera captures (UIImage.jpegData strips EXIF), `AVAsset.creationDate` for videos. **Distinct from the note's `occurredAt`** — `occurredAt` is when the user logged the note; `capturedAt` is when the moment happened. Photos taken weeks ago and added to today's timeline still display their true capture date.
+- Bottom gradient is suppressed entirely when neither caption nor capturedAt is present (metadata-less screenshot → clean unobstructed bottom).
 - Status bar hidden during the viewer.
 
 ### Image content (`ImageMediaContent`)
@@ -578,6 +580,7 @@ Full-screen viewer presented as a `RootView` overlay (so the underlying timeline
 ### MediaPayload
 
 - `kind: .image | .video`, `data: Data`, `posterData: Data?` (videos only), `aspectRatio: CGFloat` (clamped 0.4...2.5 to keep the masonry sane), `caption: String?` (whitespace-trimmed, empty → nil).
+- `capturedAt: Date?` (Phase F.1.2.exifdate) — wall-clock moment the asset was captured. Image library imports populate from EXIF `DateTimeOriginal`; camera captures use `Date()` at shutter; video uses `AVAsset.creationDate`. `nil` for assets without metadata (screenshots, edited exports) and for notes saved before this field landed. Surfaced in `MediaViewerScreen`'s bottom chrome.
 - Phase 1 stores bytes inline. Phase F+ moves to Supabase Storage URLs (case shape unchanged).
 
 ### TextStyle

@@ -137,6 +137,7 @@ struct TimelineScreen: View {
             thumbnailData: payload.thumbnailData,
             aspectRatio: payload.aspectRatio,
             caption: newCaption,
+            capturedAt: payload.capturedAt,
             ref: payload.ref,
             posterRef: payload.posterRef,
             thumbnailRef: payload.thumbnailRef
