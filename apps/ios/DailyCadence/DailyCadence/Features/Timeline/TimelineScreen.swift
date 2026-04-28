@@ -479,8 +479,31 @@ struct TimelineScreen: View {
                     .padding(.top, 4)
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
+
+            // Phase F.1.2.weekstrip — minimal motivational indicator.
+            // Sits between the date row and the view toggle so the user
+            // sees their week-at-a-glance every time they open Today.
+            weekStrip
+                .padding(.top, 6)
         }
         .animation(.easeOut(duration: 0.18), value: TimelineStore.shared.selectedDate)
+    }
+
+    /// Wraps `WeekStripView` with bindings to the live stores.
+    /// `WeekStripStore.daysWithNotes` is read inside `body` so the
+    /// Observation framework re-renders the strip when a note add /
+    /// delete / week-change updates the set.
+    private var weekStrip: some View {
+        let selected = TimelineStore.shared.selectedDate
+        let days = WeekStripView.days(forWeekContaining: selected)
+        return WeekStripView(
+            days: days,
+            selectedDay: selected,
+            filledDays: WeekStripStore.shared.daysWithNotes,
+            onTap: { tapped in
+                TimelineStore.shared.selectDate(tapped)
+            }
+        )
     }
 
     private enum ChevronDirection { case left, right }

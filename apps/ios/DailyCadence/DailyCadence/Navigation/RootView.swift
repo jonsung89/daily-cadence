@@ -76,10 +76,18 @@ struct RootView: View {
                 userId: AuthStore.shared.currentUserId,
                 date: TimelineStore.shared.selectedDate
             )) {
-                guard let userId = AuthStore.shared.currentUserId,
-                      !TimelineStore.shared.hasLoaded
-                else { return }
-                await TimelineStore.shared.load(userId: userId)
+                guard let userId = AuthStore.shared.currentUserId else { return }
+                if !TimelineStore.shared.hasLoaded {
+                    await TimelineStore.shared.load(userId: userId)
+                }
+                // Phase F.1.2.weekstrip — load the week-strip data
+                // alongside the day's notes. Same auth + selectedDate
+                // trigger; same-week navigations short-circuit inside
+                // the store so this is idempotent.
+                await WeekStripStore.shared.load(
+                    userId: userId,
+                    day: TimelineStore.shared.selectedDate
+                )
             }
     }
 

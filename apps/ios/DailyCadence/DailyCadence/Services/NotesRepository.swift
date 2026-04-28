@@ -80,6 +80,33 @@ final class NotesRepository {
         return notes
     }
 
+    /// Phase F.1.2.weekstrip — returns the set of local-calendar days
+    /// within the week containing `day` that have at least one
+    /// non-deleted note for `userId`. Powers the Today screen's week
+    /// strip indicator: each filled day shows a sage dot, empty days
+    /// an outline.
+    ///
+    /// Selects only `occurred_at` (not the full row body) so the query
+    /// stays small. Notes with NULL `occurred_at` (evergreen — Phase
+    /// F+) don't belong on a dated week strip and are filtered server-
+    /// side via `gte`/`lt` on the column.
+    func fetchDaysWithNotes(userId: UUID, weekContaining day: Date) async throws -> Set<Date> {
+        let cal = Calendar.current
+        guard let interval = cal.dateInterval(of: .weekOfYear, for: day) else { return [] }
+        let rows: [OccurredAtRow] = try await AppSupabase.client
+            .from("notes")
+            .select("occurred_at")
+            .eq("user_id", value: userId)
+            .is("deleted_at", value: nil)
+            .gte("occurred_at", value: interval.start)
+            .lt("occurred_at", value: interval.end)
+            .execute()
+            .value
+        return Set(rows.compactMap { row in
+            row.occurred_at.flatMap { cal.startOfDay(for: $0) }
+        })
+    }
+
     /// Persists a new note. Returns the server-assigned `id` so the caller
     /// can replace the optimistic client UUID with the canonical one.
     /// **Phase F.1.1**: media bytes (standalone media notes + inline media
@@ -346,6 +373,14 @@ final class NotesRepository {
 private struct NoteTypeRow: Decodable {
     let id: UUID
     let slug: String
+}
+
+/// Phase F.1.2.weekstrip — narrow projection used by
+/// `fetchDaysWithNotes`. Selecting only the timestamp column keeps
+/// the query payload tiny (a 7-day week typically returns < 100 rows
+/// even for a heavy logger).
+private struct OccurredAtRow: Decodable {
+    let occurred_at: Date?
 }
 
 /// Mirror of the `notes` table for `select()` reads.

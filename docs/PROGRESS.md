@@ -1,6 +1,6 @@
 # DailyCadence — Progress
 
-**Last updated:** 2026-04-27 (Phase F.1.2.refresh — three quick polish items: (1) FAB menu + Settings copy refresh ("Write a thought" / "Add from Photos" / "Snap something" / "Theme color"); (2) Edit caption on existing media notes via long-press menu + lightweight CaptionEditSheet; (3) Note-type picker scaling — defer-the-decision + searchable sheet (combo A+B) replaces the horizontal-scroll chip row, scales arbitrarily to N types.)
+**Last updated:** 2026-04-27 (Phase F.1.2.weekstrip — minimal week-strip motivational indicator on Today screen. 7 columns with locale-aware day letters + filled-or-hollow dots showing which days have notes. Today highlighted with a sage ring; selected day gets a sage-soft pill; tap any column to navigate. Backed by new `NotesRepository.fetchDaysWithNotes` + `WeekStripStore`. Optimistic updates from `TimelineStore.add` / `update` / `delete` keep dot fills in sync without a refetch.)
 **Current phase:** Phase 1 MVP — iOS app for Jon + wife, TestFlight distribution
 
 This is the living state of the project. Update at the end of every session.
@@ -1736,6 +1736,22 @@ Removed the obsolete `typePickerExpanded: Bool` state + the resume-draft-aware i
 
 Build clean, 84/84 tests still passing.
 
+### Phase F.1.2.weekstrip — Today screen week-strip indicator (added this round)
+
+Minimal motivational indicator slotted between the date header and the Timeline / Board view toggle on the Today screen. Shows the current week as 7 columns (S M T W T F S, locale-aware first-day-of-week via `Calendar.current.veryShortWeekdaySymbols`). Each column has a small dot below the letter: filled sage when that day has at least one note, hollow ring when empty. Today's column gets a subtle sage-tinted ring; the user's currently-selected day gets a sage-soft pill background. Tapping any column navigates the timeline to that day via `TimelineStore.shared.selectDate(_:)` — the strip doubles as week-level navigation.
+
+**Data layer.** New [NotesRepository.fetchDaysWithNotes(userId:weekContaining:)](apps/ios/DailyCadence/DailyCadence/Services/NotesRepository.swift) — single bulk query selecting only `occurred_at`, returning `Set<Date>` (normalized to `startOfDay`). Cheap query; tiny payload even for heavy loggers.
+
+**Cache layer.** New [WeekStripStore](apps/ios/DailyCadence/DailyCadence/Services/WeekStripStore.swift) (`@Observable @MainActor`) singleton holds `daysWithNotes` for the currently-loaded week. `load(userId:day:)` short-circuits when called for the same week (idempotent — fires from `RootView`'s existing `.task(id:)` alongside `TimelineStore.load`). Optimistic updates from `TimelineStore.add` / `update` / `delete` mutate the in-memory set immediately so the strip's dot fills the moment the user saves a note (same-week mutations only — cross-week changes pick up on the next week refetch).
+
+**View layer.** New [WeekStripView](apps/ios/DailyCadence/DailyCadence/DesignSystem/Components/WeekStripView.swift) — pure presentational, takes `[Date]` + `selectedDay` + `Set<Date> filledDays` + `onTap`. Sized ~36pt tall. `WeekStripView.days(forWeekContaining:)` is the convenience builder. Slotted into `TimelineScreen.header` after the (conditional) `todayPill` row.
+
+**Lifecycle hooks.** `TimelineStore.add(_:)` calls `WeekStripStore.shared.noteAdded(occurredAt:)`. `TimelineStore.update(_:)` computes the old day's remaining-count locally (excluding the just-swapped note) and calls `noteUpdated(oldOccurredAt:newOccurredAt:oldDayRemaining:)` so a moved note empties its old day's dot only when it was the last note there. `TimelineStore.delete(noteId:)` mirrors via `noteRemoved(occurredAt:remainingForDay:)`. Persist-failure reverts don't currently round-trip back to the strip — minor edge case; the next week-change refetches authoritative state.
+
+**FEATURES.md** updated with the new component description.
+
+Build clean, 84/84 tests passing.
+
 ### Phase F+ feature TODO (designed-for, not-built)
 
 Captured here so a fresh session can pick up the roadmap. Each line corresponds to schema fields that are reserved but unused.
@@ -1769,7 +1785,7 @@ Captured here so a fresh session can pick up the roadmap. Each line corresponds 
 - ~~**FAB menu copy refresh**~~ — Shipped (Phase F.1.2.refresh). Final picks: "Write a thought" / "Add from Photos" / "Snap something".
 - **User profile: avatar + first/last name.** Currently auth is anonymous (Phase F.0.1) and there's no profile UI. New `profiles` table (one-row-per-user, `id uuid PK references auth.users(id)`, `first_name text`, `last_name text`, `avatar_ref MediaRef?`). Storage: new `avatars` bucket (public read for the user's own row, RLS like `note-media`). Settings → Profile section with image picker (reuse `CameraPicker` + `PhotosPicker`) + two text fields. Read-through via a `ProfileStore` `@Observable`. Required before Sign in with Apple / Google ship — those provide the name as a one-shot at first sign-in, which we should write into `profiles` then.
 - **Image viewer: capture metadata overlay (date/time + optional location).** When viewing a photo in `MediaViewerScreen`, show a small info row near the chrome (lower-left, semi-translucent like the caption gradient) with the capture date/time and optionally GPS-resolved location. Capture date pulled from EXIF at import time and stored on the `MediaPayload` (new `capturedAt: Date?` field). Location: at first import per session, prompt the user with an opt-in toggle ("Save location with photos? You can change this later in Settings"). Default off. When on, store `latitude`/`longitude` in EXIF passthrough OR in a dedicated `media.location point` column. Reverse-geocode on demand for display. Settings → Privacy (new section) toggle to globally enable/disable location storage.
-- **Today page: minimal week strip indicator.** Small horizontal indicator near the date header showing the current week (S M T W T F S, single-letter day abbrevs). Mark days that have at least one note with a filled dot below the letter; mark today with a sage-tinted background or stronger highlight; mark days with no notes with a faint dim. Tappable: tap a day → `TimelineStore.shared.selectDate(...)` to navigate. Goal (per Jon): motivational without being obtrusive — "where am I in the week, did I log yesterday." Sizing: ~28pt tall, slots in between the date header and the Timeline / Board toggle. Implementation: query `notes` for the week's bounds (Mon–Sun or Sun–Sat per locale) on day-change, build a 7-element `[Date: Bool]` map, render via `HStack { ForEach(daysOfWeek) { ... } }`. Caching: re-fetch on day change OR subscribe to `TimelineStore` insert/delete events.
+- ~~**Today page: minimal week strip indicator**~~ — Shipped (Phase F.1.2.weekstrip). See entry above.
 - ~~**Note type picker — scaling beyond ~7 types**~~ — Shipped as combo A+B (Phase F.1.2.refresh). Original brainstorm preserved below for future reference / re-evaluation if A+B doesn't land:
     - **A. Defer the type decision.** Editor opens with no visible picker; default type is `.general` (or last-used). Type chip shown as a discreet button in the toolbar / navbar; tap to change. The user just starts writing. **Tradeoff:** users who want to commit early have one extra tap; users who don't can ignore type entirely until save. **Closest to Apple Notes' folder-implicit model.**
     - **B. Searchable type picker sheet.** Replace the horizontal scroll with a single chip showing the current type. Tap → presents a small `.presentationDetent(.medium)` sheet with a search field at the top and a 2-column grid of all types (icon + name). Type to filter; tap to commit. **Tradeoff:** scales arbitrarily — works at 7 types or 70. Slight friction (sheet) vs. inline chips for the common case. **Notion / Bear pattern.**

@@ -95,6 +95,19 @@ Two-row layout introduced in Phase F.0.3:
 
 **Swipe gesture**: a horizontal drag on the content area (≥60pt translation, dominant-horizontal motion: `|dx| > |dy| × 1.5`) advances/rewinds one day. Vertical scroll keeps working — the gesture only fires when motion is decisively horizontal.
 
+### Week strip indicator (Phase F.1.2.weekstrip)
+
+Minimal motivational indicator slotted between the date header and the view toggle. Renders the current week as 7 columns (locale-aware first-day-of-week from `Calendar.current.firstWeekday`).
+
+- Each column: single-letter day abbreviation on top (`Calendar.veryShortWeekdaySymbols` — "S M T W T F S" in en_US), small dot below.
+- **Dot fill** — sage when the day has at least one non-deleted note, hollow ring (1pt `fg2` @ 0.4) otherwise.
+- **Today** — column gets a 1pt sage-tinted ring around its 8pt rounded background.
+- **Selected day** — sage-soft pill background fills the column. Today + selected = pill + ring stacked.
+- **Tappable** — tap a column → `TimelineStore.shared.selectDate(...)`. Doubles as week-level navigation alongside the chevrons.
+- Sized ~36pt tall total. Padded 12pt horizontal so the columns spread across the screen evenly.
+
+Backed by `WeekStripStore` (`@Observable @MainActor` singleton) which caches `daysWithNotes: Set<Date>` for the loaded week. `RootView`'s existing `.task(id:)` triggers `WeekStripStore.load(userId:day:)` alongside the regular timeline load — same-week navigations short-circuit; cross-week navigations refetch via `NotesRepository.fetchDaysWithNotes`. Optimistic in-memory updates fire from `TimelineStore.add` / `update` / `delete` so dot fills track live with no refetch.
+
 ### Loading state
 
 While the day's notes are being fetched (initial app launch or any day-switch), a thin 2pt indeterminate progress bar overlays the very top of the screen. Sage-tinted, segment slides left → right, animated linearly with `.repeatForever`. The rest of the layout doesn't change — empty days show the same `emptyState` they show after a confirmed-empty load. Replaces the prior redacted-skeleton approach (which flashed in/out on every short fetch and felt noisy).

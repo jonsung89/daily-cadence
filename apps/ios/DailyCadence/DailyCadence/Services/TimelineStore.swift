@@ -140,6 +140,11 @@ final class TimelineStore {
         notes.append(note)
         sortByOccurredAtAscending()
         log.info("Added note locally: type=\(note.type.rawValue) title=\(note.timelineTitle)")
+        // Phase F.1.2.weekstrip — keep the week-strip indicator in
+        // sync with the in-memory mutation. Same-week adds fill the
+        // dot immediately; cross-week adds are no-ops here and pick
+        // up via the next week-change refetch.
+        WeekStripStore.shared.noteAdded(occurredAt: note.occurredAt)
         Task { await self.persistAdd(note) }
     }
 
@@ -160,6 +165,23 @@ final class TimelineStore {
         notes[index] = updated
         sortByOccurredAtAscending()
         log.info("Updated note locally: id=\(updated.id) type=\(updated.type.rawValue)")
+        // Phase F.1.2.weekstrip — if the user changed `occurredAt`
+        // during edit, the strip's dot positions may need to shift.
+        // Compute the OLD day's remaining count (excluding this note,
+        // since we already swapped it) so the store knows whether to
+        // empty that day's dot.
+        let oldDay = previous.occurredAt.map { Calendar.current.startOfDay(for: $0) }
+        let oldDayRemaining = oldDay.map { day in
+            notes.filter {
+                $0.id != updated.id &&
+                $0.occurredAt.map(Calendar.current.startOfDay(for:)) == day
+            }.count
+        } ?? 0
+        WeekStripStore.shared.noteUpdated(
+            oldOccurredAt: previous.occurredAt,
+            newOccurredAt: updated.occurredAt,
+            oldDayRemaining: oldDayRemaining
+        )
         Task { await self.persistUpdate(updated, fallback: previous) }
     }
 
@@ -186,6 +208,19 @@ final class TimelineStore {
         let removed = notes.remove(at: index)
         PinStore.shared.forget(noteId)
         log.info("Deleted note locally: type=\(removed.type.rawValue) title=\(removed.timelineTitle)")
+        // Phase F.1.2.weekstrip — if this was the last note on its
+        // day, drop the day from the filled set so the strip's dot
+        // empties. Day count is computed AFTER the local removal.
+        let removedDay = removed.occurredAt.map { Calendar.current.startOfDay(for: $0) }
+        let dayRemaining = removedDay.map { day in
+            notes.filter {
+                $0.occurredAt.map(Calendar.current.startOfDay(for:)) == day
+            }.count
+        } ?? 0
+        WeekStripStore.shared.noteRemoved(
+            occurredAt: removed.occurredAt,
+            remainingForDay: dayRemaining
+        )
         Task { await self.persistDelete(noteId) }
     }
 
