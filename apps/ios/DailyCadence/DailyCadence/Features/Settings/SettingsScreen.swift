@@ -196,10 +196,17 @@ struct NoteTypesRow: View {
             Text("Note Types")
                 .font(.DS.body)
                 .foregroundStyle(Color.DS.ink)
+                .lineLimit(1)
             Spacer(minLength: 8)
             Text(summary)
                 .font(.DS.body)
                 .foregroundStyle(Color.DS.fg2)
+                // Prevent the trailing detail from wrapping ("6 customized"
+                // → "6 custo / mized" on two lines once the leading dots
+                // grew past 7). `fixedSize` keeps the summary's natural
+                // width; the leading label can truncate before this does.
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
         }
     }
 

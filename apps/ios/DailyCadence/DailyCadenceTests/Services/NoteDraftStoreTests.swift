@@ -230,6 +230,84 @@ struct NoteDraftStoreTests {
         }
     }
 
+    @Test func populateFromNoteWithMediaButNoTrailingParagraphPadsTheInvariant() {
+        // Phase F.1.2.bug-fix — regression of E.5.18b for the edit-mode
+        // path. `save()` strips empty trailing paragraphs from the body
+        // before persistence (so cards don't carry phantom blank rows).
+        // When the user later edits that saved note, populate() loads
+        // body = [paragraph("intro"), media] — no trailer. Without the
+        // invariant pad, message.get and trailerMessage.get both resolve
+        // to the same single paragraph and the trailerEditor mirrors the
+        // messageEditor's text in the editor UI.
+        let store = NoteDraftStore()
+        let intro = TextBlock.paragraph(AttributedString("DailyCadence: notes"))
+        let savedNote = MockNote(
+            occurredAt: Date(timeIntervalSince1970: 0),
+            type: .general,
+            content: .text(title: "Todo", body: [
+                intro,
+                .media(Self.samplePayload(), size: .medium),
+            ])
+        )
+        store.populate(from: savedNote)
+
+        // Body must end with a DISTINCT trailing paragraph so the two
+        // editors bind to different blocks.
+        #expect(store.body.count == 3, "Loaded body should be padded to [intro, media, trailingP]")
+        #expect(store.body[0].id == intro.id, "Leading paragraph preserved")
+        #expect(store.body[1].isMedia)
+        #expect(store.body[2].isParagraph)
+        #expect(store.body[2].id != intro.id, "Trailing paragraph must be a fresh distinct block")
+        #expect(store.body[2].isEmptyParagraph)
+
+        // The bridges resolve to different paragraphs — no duplication.
+        #expect(String(store.message.characters) == "DailyCadence: notes")
+        #expect(String(store.trailerMessage.characters) == "")
+    }
+
+    @Test func populateFromNoteWithMediaButNoLeadingParagraphPadsBoth() {
+        // Defensive — if a saved body somehow has shape [media, paragraph]
+        // (no leading paragraph), populate must prepend one too. The
+        // bridges would otherwise both resolve to the same trailing
+        // paragraph (the only paragraph in the body).
+        let store = NoteDraftStore()
+        let savedNote = MockNote(
+            occurredAt: Date(timeIntervalSince1970: 0),
+            type: .general,
+            content: .text(title: "Todo", body: [
+                .media(Self.samplePayload(), size: .medium),
+                .paragraph(AttributedString("after image")),
+            ])
+        )
+        store.populate(from: savedNote)
+
+        // Expect: [freshLeadingP, media, "after image"]
+        #expect(store.body.count == 3)
+        #expect(store.body[0].isParagraph)
+        #expect(store.body[0].isEmptyParagraph)
+        #expect(store.body[1].isMedia)
+        #expect(store.body[2].isParagraph)
+        #expect(String(store.message.characters) == "")
+        #expect(String(store.trailerMessage.characters) == "after image")
+    }
+
+    @Test func populateFromTextOnlyNoteSkipsTheInvariantPad() {
+        // No media, no padding — keep the body lean. Otherwise text-only
+        // edits would gain a phantom trailing paragraph that save() would
+        // immediately strip.
+        let store = NoteDraftStore()
+        let savedNote = MockNote(
+            occurredAt: Date(timeIntervalSince1970: 0),
+            type: .general,
+            content: .text(title: "Todo", body: [
+                .paragraph(AttributedString("just text")),
+            ])
+        )
+        store.populate(from: savedNote)
+        #expect(store.body.count == 1)
+        #expect(store.body[0].isParagraph)
+    }
+
     @Test func clearResetsBodyToSingleEmptyParagraph() {
         let store = NoteDraftStore()
         store.body = [

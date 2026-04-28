@@ -130,9 +130,15 @@ final class TimelineStore {
 
     // MARK: - Mutations (sync surface, async persist)
 
-    /// Appends a note locally and persists in the background.
+    /// Inserts a note locally — sorted into chronological position by
+    /// `occurredAt` ascending — and persists in the background. The sort
+    /// matches the server's `order("occurred_at", ascending: true)` so
+    /// the next refresh produces the same layout. Without the in-memory
+    /// sort, a past-event note (user picks an earlier time) lands at
+    /// the bottom until refresh.
     func add(_ note: MockNote) {
         notes.append(note)
+        sortByOccurredAtAscending()
         log.info("Added note locally: type=\(note.type.rawValue) title=\(note.timelineTitle)")
         Task { await self.persistAdd(note) }
     }
@@ -142,14 +148,33 @@ final class TimelineStore {
     /// in the background. On failure, reverts to the previous version
     /// and surfaces `lastError`. No-op if the id isn't present.
     ///
+    /// Re-sorts after the swap because the user may have changed
+    /// `occurredAt` during edit, which would land the note in a new
+    /// chronological position.
+    ///
     /// Phase F.1.0 — invoked from `NoteEditorScreen` Save when the screen
     /// was opened in edit mode (`editing: MockNote?` non-nil).
     func update(_ updated: MockNote) {
         guard let index = notes.firstIndex(where: { $0.id == updated.id }) else { return }
         let previous = notes[index]
         notes[index] = updated
+        sortByOccurredAtAscending()
         log.info("Updated note locally: id=\(updated.id) type=\(updated.type.rawValue)")
         Task { await self.persistUpdate(updated, fallback: previous) }
+    }
+
+    /// Sorts `notes` by `occurredAt` ascending. Mirrors
+    /// `repository.fetchForDay`'s server-side ORDER BY so an in-memory
+    /// add/update produces the same layout as the next refresh. Notes
+    /// with no `occurredAt` (evergreen — currently unreachable in
+    /// Phase 1, but the model permits nil) sort to the end via
+    /// `.distantFuture`, matching Postgres's NULLS LAST default for ASC.
+    /// Swift's `sort(by:)` is stable, so notes that share a timestamp
+    /// keep their relative insertion order.
+    private func sortByOccurredAtAscending() {
+        notes.sort {
+            ($0.occurredAt ?? .distantFuture) < ($1.occurredAt ?? .distantFuture)
+        }
     }
 
     /// Removes the note locally (and forgets its pin state) and soft-deletes

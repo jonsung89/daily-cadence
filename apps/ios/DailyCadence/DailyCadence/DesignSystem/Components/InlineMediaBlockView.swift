@@ -26,6 +26,13 @@ struct InlineMediaBlockView: View {
     /// Set to `false` in editor contexts so a parent `Menu` wrapper can
     /// take the tap (resize / remove).
     var isInteractive: Bool = true
+    /// Phase F.1.1b'.zoom — when both `mediaTapHandler` and `blockId`
+    /// are set, taps route through the parent's matched-geo zoom (same
+    /// pipeline `KeepCard.mediaScaffold` uses for standalone-media
+    /// notes). When unset, the legacy `.fullScreenCover` slide-up
+    /// fallback handles preview surfaces and the editor's strip.
+    var mediaTapHandler: MediaTapHandler? = nil
+    var blockId: UUID? = nil
 
     @State private var isViewerPresented = false
 
@@ -41,10 +48,19 @@ struct InlineMediaBlockView: View {
                 }
                 ZStack {
                     Color.DS.bg2
-                    if let posterImage = posterImage() {
+                    if let posterImage = inlinePosterImage() {
+                        // Fast path — inline bytes available (just-imported
+                        // payload in the editor's strip, or a not-yet-uploaded
+                        // session-only note). Renders synchronously.
                         Image(uiImage: posterImage)
                             .resizable()
                             .scaledToFill()
+                    } else if payload.ref != nil || payload.posterRef != nil || payload.thumbnailRef != nil {
+                        // Fetched-from-server media — bytes resolve via
+                        // `MediaResolver` (signed URL + URLCache). Without
+                        // this branch, a reloaded note's inline-block
+                        // renders an empty white box.
+                        ResolvedMediaPoster(payload: payload)
                     }
                     if payload.kind == .video {
                         ZStack {
@@ -66,8 +82,17 @@ struct InlineMediaBlockView: View {
                 )
                 .contentShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
                 .onTapGesture {
-                    if isInteractive { isViewerPresented = true }
+                    if isInteractive { handleTap() }
                 }
+                // Publish this block's frame to the matched-geo source-frame
+                // map and gate opacity during the open/close so the viewer's
+                // image renders in this slot, not over it. Falls through to
+                // the identity branch when no handler is provided (preview /
+                // editor surfaces).
+                .modifier(MatchedGeometryModifier(
+                    handler: mediaTapHandler,
+                    id: blockId ?? UUID()
+                ))
                 if size.horizontalAlignment == .center {
                     Spacer(minLength: 0)
                 }
@@ -80,6 +105,8 @@ struct InlineMediaBlockView: View {
         // the GeometryReader to allocate the right outer height.
         .aspectRatio(aspectRatioForLayout, contentMode: .fit)
         .fullScreenCover(isPresented: $isViewerPresented) {
+            // Legacy slide-up fallback — used only when no
+            // `mediaTapHandler` is provided (previews, editor strip).
             MediaViewerScreen(media: payload)
         }
         .accessibilityLabel(payload.kind == .video ? "Play video" : "Open photo")
@@ -100,14 +127,32 @@ struct InlineMediaBlockView: View {
         payload.aspectRatio / size.widthFraction
     }
 
-    private func posterImage() -> UIImage? {
-        if let posterData = payload.posterData, let img = UIImage(data: posterData) {
-            return img
+    /// Routes a tap to the parent's zoom-transition handler when one is
+    /// provided; otherwise falls through to the legacy fullScreenCover.
+    private func handleTap() {
+        if let handler = mediaTapHandler, let blockId {
+            handler.onTap(payload, blockId)
+        } else {
+            isViewerPresented = true
         }
-        // Phase F.1.1: `payload.data` is optional — fetched-from-server
-        // media holds refs only and resolves bytes via `MediaResolver`.
-        // Inline media blocks aren't yet uploaded (F+ scope), so this
-        // path stays in-memory only for now.
-        return payload.data.flatMap(UIImage.init(data:))
+    }
+
+    /// Synchronous inline-bytes lookup — kind-aware, mirrors
+    /// `MediaResolver.posterBytes(for:)`'s preference chain so the inline
+    /// fast path matches the resolved fallback. Returns `nil` when no
+    /// inline bytes are present (fetched-from-server media); the caller
+    /// falls back to `ResolvedMediaPoster` in that case.
+    private func inlinePosterImage() -> UIImage? {
+        switch payload.kind {
+        case .image:
+            // F.1.1b dual-size: prefer the small HEIC thumbnail (~80 KB)
+            // over the full asset (~400 KB).
+            if let thumb = payload.thumbnailData, let img = UIImage(data: thumb) {
+                return img
+            }
+            return payload.data.flatMap(UIImage.init(data:))
+        case .video:
+            return payload.posterData.flatMap(UIImage.init(data:))
+        }
     }
 }

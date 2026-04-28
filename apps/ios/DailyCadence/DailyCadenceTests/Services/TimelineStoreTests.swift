@@ -59,6 +59,50 @@ struct TimelineStoreTests {
                 "Default seed at runtime must be empty so first-launch users don't see fake notes flash")
     }
 
+    @Test func addInsertsByOccurredAtAscending() {
+        // Phase F.1.2.bug-fix — past-event notes (user picks an earlier
+        // time when creating) used to append to the end and only land in
+        // their chronological slot after an app refresh. The store now
+        // sorts on add to match the server's `order("occurred_at",
+        // ascending: true)`.
+        let store = TimelineStore(initialNotes: [])
+        let nine = Date(timeIntervalSince1970: 9 * 3600)
+        let ten = Date(timeIntervalSince1970: 10 * 3600)
+        let eleven = Date(timeIntervalSince1970: 11 * 3600)
+
+        store.add(MockNote(occurredAt: ten,    type: .general, content: .text(title: "Ten AM")))
+        store.add(MockNote(occurredAt: eleven, type: .general, content: .text(title: "Eleven AM")))
+        store.add(MockNote(occurredAt: nine,   type: .general, content: .text(title: "Nine AM (past)")))
+
+        #expect(store.notes.count == 3)
+        #expect(store.notes[0].timelineTitle == "Nine AM (past)",
+                "A past-event note added last must sort into its chronological slot")
+        #expect(store.notes[1].timelineTitle == "Ten AM")
+        #expect(store.notes[2].timelineTitle == "Eleven AM")
+    }
+
+    @Test func updateRepositionsWhenOccurredAtChanges() {
+        // Editing the time of an existing note should move it to the
+        // matching chronological slot — same invariant as `add`.
+        let nine = Date(timeIntervalSince1970: 9 * 3600)
+        let ten = Date(timeIntervalSince1970: 10 * 3600)
+        let eleven = Date(timeIntervalSince1970: 11 * 3600)
+        let id = UUID()
+        let seed: [MockNote] = [
+            MockNote(id: id,        occurredAt: ten,    type: .general, content: .text(title: "Original at 10")),
+            MockNote(occurredAt: eleven, type: .general, content: .text(title: "Eleven AM")),
+        ]
+        let store = TimelineStore(initialNotes: seed)
+        // Move the 10 AM note back to 9 AM.
+        let moved = MockNote(id: id, occurredAt: nine, type: .general, content: .text(title: "Moved to 9"))
+        store.update(moved)
+
+        #expect(store.notes.count == 2)
+        #expect(store.notes[0].id == id, "The repositioned note must sort to the front")
+        #expect(store.notes[0].timelineTitle == "Moved to 9")
+        #expect(store.notes[1].timelineTitle == "Eleven AM")
+    }
+
     @Test func attributedMessagePreservesPerRunAttributes() {
         // Phase E.2 — message is AttributedString. A note's per-run font +
         // foreground color must round-trip through the store unchanged so

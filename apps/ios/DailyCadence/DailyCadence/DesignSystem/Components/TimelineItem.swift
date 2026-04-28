@@ -55,7 +55,12 @@ struct TimelineItem<Trailing: View>: View {
             Text(time)
                 .font(.system(size: 10, design: .monospaced))
                 .foregroundStyle(Color.DS.fg2)
-                .frame(width: 44, alignment: .trailing)
+                // 56pt fits the longest 8-character time ("12:59 PM" /
+                // "10:38 AM") at 10pt monospaced with breathing room.
+                // Prior 44pt was sized for 7-char times ("9:02 AM") and
+                // wrapped 10-something AM/PM times to two lines.
+                .lineLimit(1)
+                .frame(width: 56, alignment: .trailing)
                 .padding(.top, 18)
 
             // Rail column — line + dot centered in a 20pt-wide lane

@@ -143,6 +143,15 @@ final class NoteDraftStore {
             // Empty body → leave the default empty paragraph so the
             // user has something to type into.
             self.body = blocks.isEmpty ? [.paragraph()] : blocks
+            // `save()` strips empty trailing paragraphs to avoid
+            // persisting phantom rows in card rendering — but the
+            // editor needs a distinct trailing paragraph for the
+            // trailerEditor's binding target whenever the body has
+            // media. Re-add one on load so messageEditor and
+            // trailerEditor bind to different blocks (otherwise both
+            // resolve to the same paragraph and the trailer mirrors
+            // the message — duplicate-text bug, regression of E.5.18b).
+            ensureMediaParagraphInvariant()
         case .stat(let title, _, _),
              .list(let title, _):
             // Other variants aren't authored by the current editor;
@@ -297,6 +306,25 @@ final class NoteDraftStore {
         guard let i = body.firstIndex(where: { $0.id == id }) else { return }
         if case .paragraph = body[i].kind {
             body[i].kind = .paragraph(text)
+        }
+    }
+
+    /// Pads the body so that, when media is present, there's a leading
+    /// paragraph AND a distinct trailing paragraph. Mirrors `insertMedia`'s
+    /// invariant logic but without inserting media. Used by
+    /// `populate(from:)` since `save()` strips empty trailing paragraphs
+    /// and the persisted body may have only one paragraph when reloaded
+    /// for edit. Without this, `message.get` and `trailerMessage.get`
+    /// both resolve to the same paragraph block and the trailerEditor
+    /// renders identical text to the messageEditor.
+    func ensureMediaParagraphInvariant() {
+        guard hasMedia else { return }
+        if body.first?.isParagraph != true {
+            body.insert(.paragraph(), at: 0)
+        }
+        let leadingId = body.first!.id
+        if body.last?.isParagraph != true || body.last!.id == leadingId {
+            body.append(.paragraph())
         }
     }
 }

@@ -293,7 +293,19 @@ struct KeepCard: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         case .media(let payload, let size):
-            InlineMediaBlockView(payload: payload, size: size, cornerRadius: 8)
+            // Phase F.1.1b'.zoom — route inline-block taps through the
+            // shared media tap handler so they get the matched-geo zoom
+            // transition (instead of the legacy slide-up fullScreenCover).
+            // `blockId` is the inline block's UUID — distinct from the
+            // note's own UUID so each inline image gets its own
+            // matched-geo source.
+            InlineMediaBlockView(
+                payload: payload,
+                size: size,
+                cornerRadius: 8,
+                mediaTapHandler: mediaTapHandler,
+                blockId: block.id
+            )
         }
     }
 
