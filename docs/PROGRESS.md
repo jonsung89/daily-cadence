@@ -1,6 +1,6 @@
 # DailyCadence — Progress
 
-**Last updated:** 2026-04-28 (Phase F.1.2.scrolledge **REVERTED** — two attempts at the Today-screen scroll-edge fade landed and both got pulled. Attempt 1 used iOS 26's `.scrollEdgeEffectStyle(.soft, for: .top)`, which compiled but produced no visible effect because the modifier requires a visible toolbar's chrome to project from and TimelineScreen hides the system toolbar for its custom date header. Attempt 2 used a manual `LinearGradient` overlay, which painted statically over the date header at scrollOffset == 0 and bisected "April 27" + the Today pill before any scrolling happened. Both wrong because the chrome is INSIDE the scroll content — there's nothing meaningful to fade until that's restructured. The proper fix (pin chrome outside the scroll via `.safeAreaInset(.top)` + `.ultraThinMaterial` backdrop, Apple's standard pattern) is now flagged in the Phase F+ TODO with the design context this round produced.)
+**Last updated:** 2026-04-28 (Phase F.1.2.bgpersist — image backgrounds now persist across app relaunches. `MockNote.Background.image(...)` round-trips through the `note-backgrounds` Supabase Storage bucket + a `backgrounds` table row whose id `notes.background_id` points at. `SupabaseStorageImpl` parameterized by bucket so backgrounds and media use the same plumbing against different buckets. `decode(_:)` became async to inline the per-row backgrounds fetch; failures log + return nil so a broken background never blocks loading the rest of the note. `.color` swatch backgrounds stay session-only this round — separate swatch ↔ `backgrounds` resolver TODO. All 88 tests pass.)
 **Current phase:** Phase 1 MVP — iOS app for Jon + wife, TestFlight distribution
 
 This is the living state of the project. Update at the end of every session.
@@ -1839,6 +1839,31 @@ Strip is ~14pt taller now. Trade is fair — the strip is the at-a-glance naviga
 
 Pre-existing bug from Phase F.1.2.refresh's caption-edit sheet: both a custom `Text("Add a caption…")` overlay AND the `TextField`'s built-in placeholder ("Caption" — passed as the title parameter) rendered simultaneously when the field was empty, producing visible overlap. Deleted the custom overlay + the wrapping ZStack and used the built-in TextField placeholder with the design copy "Add a caption…". One less moving part; SwiftUI's default placeholder color is fine.
 
+### Phase F.1.2.bgpersist — Image-background persistence (added this round)
+
+Per-note image backgrounds now survive app relaunch. Pre-this-round, `notes.background_id` was hardcoded `nil` on insert; if you picked a photo background and reopened the app, the photo was gone. Photo cards reverted to whatever swatch (or no) background, losing the user's curation.
+
+**Storage layer.** [`SupabaseStorageImpl`](apps/ios/DailyCadence/DailyCadence/Services/MediaStorage.swift) parameterized by bucket via init — was hardcoded to `note-media`, now takes `bucket: String` so backgrounds and media share the upload/sign/delete plumbing against different buckets. New `MediaStorageProvider.backgrounds` static instance binds to `note-backgrounds` (created in `20260427000002_storage_buckets.sql` with full RLS already in place — no migration needed). `MediaStorageProvider.current` continues binding to `note-media` for media-note bytes.
+
+**Encode side.** New `encodeBackground(_:userId:)` in [NotesRepository](apps/ios/DailyCadence/DailyCadence/Services/NotesRepository.swift):
+- `nil` background → returns `nil` (no row created)
+- `.color(swatchId)` → returns `nil` for now — swatch ↔ `backgrounds` resolution is a separate F+ TODO that requires either seeding library rows for design-system swatches or doing inline INSERTs per swatch encountered. Swatch backgrounds remain session-only.
+- `.image(let img)` → uploads bytes via the backgrounds storage impl (filename `{uuid}.jpg`, JPEG content type — `BackgroundPickerView` already downscales the picked photo to JPEG q=0.85 via `MediaImporter.downscale`), then INSERTs a `backgrounds` row with `kind='image'`, `image_url` = bucket-relative path, `opacity` from the payload. Returns the new row's id, which `encodeForInsert` plumbs into `NoteRowInsert.background_id`.
+
+**Decode side.** New `fetchBackground(id:)` in NotesRepository:
+- SELECTs the `backgrounds` row by id
+- For `kind='image'`: reconstructs a `MediaRef(provider: "supabase", path: row.image_url)`, gets a 50-min signed URL via the backgrounds storage impl, downloads bytes via `URLSession.shared`, returns `MockNote.Background.image(ImageBackground(imageData: data, opacity: row.opacity))`
+- For `kind='color'`: returns `nil` (swatch resolver TODO)
+- Failures (network error, missing row, decode failure) are caught + logged + return `nil` so a broken background never takes down the whole note
+
+`decode(_:)` is now `async` so `fetchBackground` can run inline — a per-row Storage fetch is required for any note that has an image background. `fetchForDay` switched from `rows.compactMap(decode(_:))` to a serial `for row in rows` loop with `await decode(row)`. Serial is fine for typical day loads (5-15 notes, mostly without backgrounds); revisit with `withTaskGroup` if heavy-bg usage causes load latency.
+
+**Update path** uses the same `encodeForInsert` so editing a note also re-runs the bg encode. **Known inefficiency**: every save re-uploads the bg bytes since `MockNote.ImageBackground` doesn't carry a ref. The old `backgrounds` row + Storage object become orphans. A future GC sweep + a `ref` field on `ImageBackground` to skip re-upload when bytes haven't changed are deferred to Phase F+.
+
+**Schema-side.** No SQL migration — `notes.background_id` FK and the `backgrounds` table both exist from the original `20260427000001_notes_init.sql`. The bucket and its RLS exist from `20260427000002_storage_buckets.sql`. This round was 100% iOS code wiring up plumbing that already existed.
+
+Build clean, 88 tests pass.
+
 ### Phase F.1.2.scrolledge — Reverted, deferred for restructure (this round)
 
 Tried twice, reverted both — captured here so the next attempt doesn't repeat the same dead ends.
@@ -1876,7 +1901,7 @@ Build clean, all 88 tests pass.
 Captured here so a fresh session can pick up the roadmap. Each line corresponds to schema fields that are reserved but unused.
 
 - ~~**Media-note Storage upload pipeline**~~ — Shipped Phase F.1.1a (`e79e152`). Standalone media notes encode via `NotesRepository.encodeMediaBlock` (uploads bytes to the `note-media` Storage bucket, returns `MediaRef`s in the body block DTO). Decode reconstructs `MediaPayload` with refs populated and inline bytes nil; `MediaResolver` lazy-fetches via signed URL. Inline media inside text notes uses the same path. Round-trip verified by inspection 2026-04-28.
-- **Image-background Storage upload + library** — same pattern as media-note bytes, with `note-backgrounds` Storage bucket. Each upload also INSERTs a `backgrounds` row that the user's library carries forward. Phase F.0.2 always writes `notes.background_id = NULL` and image-bg state is session-only.
+- ~~**Image-background Storage upload**~~ — Shipped Phase F.1.2.bgpersist (see entry above). Image backgrounds round-trip through `note-backgrounds` bucket + `backgrounds` table. Library / cross-note reuse aspect (each upload INSERTs a `backgrounds` row that the user's library carries forward + browse / re-pick UI) is still open as a follow-on — needs a Settings → Backgrounds Library screen + a `BackgroundLibraryStore` to surface saved backgrounds for re-use across notes.
 - **Swatch-background `background_id` resolution** — the migration seeds 7 `backgrounds` rows for common palette swatches (linen / sand / taupe / mint / sky / lavender / lilac). Phase F.0.2 doesn't link to them; notes carry no persistent swatch background. Resolver: load `backgrounds` rows once into a `swatchId → backgroundId` cache, set `background_id` on insert when the note's swatch matches a seeded entry. For non-seeded swatches, INSERT a new `backgrounds` row inline (system-owned for design-system swatches; user-owned for custom).
 - **AttributedString per-run styling round-trip** — gated on the Phase E.2 polish (custom `fontId` / `colorId` AttributedStringKeys). Phase F.0.2 paragraphs serialize as plain text (`String(attr.characters)`), losing per-run font + color choices on save. The body JSONB schema accommodates extension via a `runs: [...]` array on each paragraph block — no DB migration needed when E.2 polish lands.
 - **MockNote → Note rename + `occurredAt: Date` refactor** — replace `time: String` with `occurredAt: Date?` as the source of truth, with `time` as a computed display getter. Eliminates the locale-symmetric round-trip in `NotesRepository.parseDisplayTime`, makes evergreen notes (NULL occurred_at) representable, and aligns the iOS model name with the persisted entity.

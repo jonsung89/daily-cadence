@@ -592,6 +592,7 @@ Full-screen viewer presented as a `RootView` overlay (so the underlying timeline
 
 - `.color(swatchId: String)` or `.image(ImageBackground)` (`imageData` + clamped opacity).
 - Resolved to a `NoteBackgroundStyle` (UI-layer enum) for card rendering.
+- **Persistence (Phase F.1.2.bgpersist).** `.image` backgrounds round-trip through the `note-backgrounds` Supabase Storage bucket + a `backgrounds` table row that the note's `background_id` FK points at. Encode side: bytes upload via `MediaStorageProvider.backgrounds`, then a `backgrounds` row INSERT with `image_url` = bucket-relative path. Decode side: `notes.background_id` lookup → fetch the row → resolve `image_url` to a signed URL via the backgrounds storage impl → download bytes → reconstruct the `ImageBackground`. Failures during decode log + return nil so a missing background never blocks loading the rest of the note. **`.color` swatch backgrounds remain session-only** for now — they need a separate swatch ↔ `backgrounds` table resolver (Phase F+ TODO).
 
 ---
 

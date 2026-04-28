@@ -75,7 +75,16 @@ final class NotesRepository {
             .order("occurred_at", ascending: true)
             .execute()
             .value
-        let notes = rows.compactMap(decode(_:))
+        // Phase F.1.2.bgpersist — `decode` is async because notes with
+        // an `image` background do a per-row Storage fetch. Serial loop
+        // (vs `withTaskGroup` + concurrent decode) is fine for typical
+        // day loads (5-15 notes, mostly without backgrounds); revisit if
+        // we hit a use case with many image-bg notes per day.
+        var notes: [MockNote] = []
+        notes.reserveCapacity(rows.count)
+        for row in rows {
+            if let note = await decode(row) { notes.append(note) }
+        }
         log.info("Fetched \(notes.count) notes for \(startOfDay)..<\(startOfNext) (\(rows.count - notes.count) skipped)")
         return notes
     }
@@ -213,6 +222,15 @@ final class NotesRepository {
             body = [dto]
         }
 
+        // Phase F.1.2.bgpersist — encode the note's background. Image
+        // backgrounds upload bytes to the `note-backgrounds` Storage
+        // bucket and INSERT a `backgrounds` row whose id we link via
+        // `notes.background_id`. Color (swatch) backgrounds are not yet
+        // persisted — separate Phase F+ TODO for the swatch ↔ background
+        // resolver. Failures bubble up; the note insert won't fly with
+        // a half-written background.
+        let backgroundId = try await encodeBackground(note.background, userId: userId)
+
         return NoteRowInsert(
             id: note.id,
             user_id: userId,
@@ -222,9 +240,94 @@ final class NotesRepository {
             structured_data: structuredData,
             occurred_at: note.occurredAt,
             title_style: note.titleStyle.flatMap(TitleStyleDTO.init(from:)),
-            background_id: nil,
+            background_id: backgroundId,
             position: nil
         )
+    }
+
+    /// Phase F.1.2.bgpersist — uploads image-background bytes to Storage
+    /// and inserts a `backgrounds` row, returning the new row's id (which
+    /// becomes `notes.background_id`). Returns nil for `nil` and `.color`
+    /// backgrounds (the latter is deferred to a separate F+ TODO that
+    /// resolves swatches against the seeded `backgrounds` library rows).
+    ///
+    /// **Known inefficiency for this round.** Each save re-uploads the
+    /// background bytes — `MockNote.ImageBackground` doesn't carry a ref,
+    /// so encode can't tell "same bytes as last save" from "user picked
+    /// a new image." Old `backgrounds` rows + Storage objects become
+    /// orphans on every edit. Cleanup via a `pg_cron` GC job + a future
+    /// `ref` field on `ImageBackground` are deferred to Phase F+.
+    private func encodeBackground(_ background: MockNote.Background?, userId: UUID) async throws -> UUID? {
+        guard let background else { return nil }
+        switch background {
+        case .color:
+            // Swatch background_id resolution is a separate F+ TODO —
+            // requires looking up the user's matching backgrounds-library
+            // row (or seeding one). Leaving as nil keeps swatch backgrounds
+            // session-only for now (matches existing behavior).
+            return nil
+        case .image(let img):
+            let storage = MediaStorageProvider.backgrounds
+            let ref = try await storage.upload(
+                img.imageData,
+                contentType: "image/jpeg",
+                userId: userId,
+                filename: "\(UUID().uuidString.lowercased()).jpg"
+            )
+            let row = BackgroundRowInsert(
+                user_id: userId,
+                label: nil,
+                kind: "image",
+                swatch_id: nil,
+                color_hex: nil,
+                image_url: ref.path,
+                opacity: img.opacity
+            )
+            let inserted: BackgroundRow = try await AppSupabase.client
+                .from("backgrounds")
+                .insert(row, returning: .representation)
+                .select()
+                .single()
+                .execute()
+                .value
+            log.info("Inserted backgrounds row id=\(inserted.id) image_url=\(ref.path)")
+            return inserted.id
+        }
+    }
+
+    /// Phase F.1.2.bgpersist — fetches a `backgrounds` row by id and
+    /// resolves it back to a `MockNote.Background`. For `image` rows,
+    /// reconstructs a `MediaRef` from the stored bucket path, signs a
+    /// short-lived URL via the backgrounds storage impl, and downloads
+    /// the bytes. Returns nil on any failure or for `color` rows (the
+    /// latter is the swatch-resolver F+ TODO).
+    ///
+    /// Errors are caught and logged rather than thrown — a missing /
+    /// network-failed background shouldn't take down the whole note.
+    /// The note loads with no background; the user can re-pick to
+    /// recover.
+    private func fetchBackground(id: UUID) async -> MockNote.Background? {
+        do {
+            let row: BackgroundRow = try await AppSupabase.client
+                .from("backgrounds")
+                .select()
+                .eq("id", value: id)
+                .single()
+                .execute()
+                .value
+            guard row.kind == "image", let path = row.image_url else {
+                // .color resolution deferred (F+ TODO).
+                return nil
+            }
+            let ref = MediaRef(provider: SupabaseStorageImpl.id, path: path)
+            let storage = MediaStorageProvider.backgrounds
+            let signed = try await storage.signedURL(for: ref, ttlSeconds: 3000)
+            let (data, _) = try await URLSession.shared.data(from: signed)
+            return .image(MockNote.ImageBackground(imageData: data, opacity: row.opacity))
+        } catch {
+            log.warning("fetchBackground(id: \(id)) failed: \(error.localizedDescription) — note loads without background")
+            return nil
+        }
     }
 
     private func encodeBlock(_ block: TextBlock, userId: UUID) async throws -> BodyBlockDTO? {
@@ -317,7 +420,14 @@ final class NotesRepository {
 
     // MARK: - Decode (server → client)
 
-    private func decode(_ row: NoteRow) -> MockNote? {
+    /// Phase F.1.2.bgpersist — became `async` so background fetches can
+    /// happen inline with the rest of the row decode. Backgrounds need a
+    /// separate `backgrounds` table SELECT + a Storage signed-URL fetch
+    /// for image bytes; doing this here keeps the `MockNote` returned to
+    /// callers fully populated. The bg fetch is wrapped in a graceful
+    /// catch (logs + returns nil), so a failed background still returns
+    /// the note with no background — never blocks loading the rest.
+    private func decode(_ row: NoteRow) async -> MockNote? {
         guard let slug = noteTypeSlugById[row.type_id],
               let type = NoteType(rawValue: slug)
         else {
@@ -357,12 +467,17 @@ final class NotesRepository {
             content = .text(title: row.title ?? "", body: blocks)
         }
 
+        let background: MockNote.Background? = await {
+            guard let bgId = row.background_id else { return nil }
+            return await fetchBackground(id: bgId)
+        }()
+
         return MockNote(
             id: row.id,
             occurredAt: row.occurred_at,
             type: type,
             content: content,
-            background: nil,
+            background: background,
             titleStyle: row.title_style?.toTextStyle()
         )
     }
@@ -394,6 +509,7 @@ private struct NoteRow: Decodable {
     let structured_data: StructuredDataDTO?
     let occurred_at: Date?
     let title_style: TitleStyleDTO?
+    let background_id: UUID?
     let pinned_at: Date?
     let completed_at: Date?
     let cancelled_at: Date?
@@ -401,6 +517,35 @@ private struct NoteRow: Decodable {
     let position: Double?
     let created_at: Date
     let updated_at: Date
+}
+
+/// Phase F.1.2.bgpersist — mirror of the `backgrounds` table. Fetched
+/// per-note when a note's `background_id` is non-nil. Schema accommodates
+/// both color (`swatch_id` / `color_hex`) and image (`image_url`) kinds —
+/// this round only writes/reads the `image` variant; swatch resolution is
+/// a separate Phase F+ TODO.
+private struct BackgroundRow: Decodable {
+    let id: UUID
+    let user_id: UUID?
+    let label: String?
+    let kind: String          // "color" or "image"
+    let swatch_id: String?
+    let color_hex: String?
+    let image_url: String?    // Bucket-relative path in note-backgrounds, NOT a literal URL
+    let opacity: Double
+}
+
+/// Insert payload for creating a new `backgrounds` row. Server assigns
+/// `id` / `created_at` / `updated_at`; we set `user_id`, `kind`, the
+/// kind-specific payload fields, and `opacity`.
+private struct BackgroundRowInsert: Encodable {
+    let user_id: UUID
+    let label: String?
+    let kind: String
+    let swatch_id: String?
+    let color_hex: String?
+    let image_url: String?
+    let opacity: Double
 }
 
 /// Insert payload — `id` is **client-supplied** (matches `MockNote.id`)

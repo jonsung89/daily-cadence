@@ -59,16 +59,27 @@ struct MediaRef: Codable, Hashable, Sendable {
 // MARK: - Provider registry
 
 enum MediaStorageProvider {
-    /// The implementation new uploads should use. Phase F.1.1 starts at
-    /// Supabase; flipping this to an `R2StorageImpl` is the migration.
-    static let current: any MediaStorage = SupabaseStorageImpl()
+    /// The implementation new media uploads should use (note bodies +
+    /// standalone media notes). Phase F.1.1 starts at Supabase; flipping
+    /// this to an `R2StorageImpl` is the migration.
+    static let current: any MediaStorage = SupabaseStorageImpl(bucket: SupabaseStorageImpl.mediaBucket)
+
+    /// Phase F.1.2.bgpersist — separate impl bound to the
+    /// `note-backgrounds` bucket. Image-background bytes (per-note
+    /// custom photos used as a card background) live here, isolated
+    /// from media so RLS / lifecycle / migration concerns don't cross
+    /// over. Same auth + Supabase Storage backend underneath; only the
+    /// bucket parameter differs.
+    static let backgrounds: any MediaStorage = SupabaseStorageImpl(bucket: SupabaseStorageImpl.backgroundsBucket)
 
     /// Resolves a `MediaRef` to the right impl by provider id. Used on
     /// fetch — older refs from Supabase keep working even after `current`
-    /// flips to R2 because each ref carries its provider.
+    /// flips to R2 because each ref carries its provider. Note: this
+    /// doesn't disambiguate the bucket — callers that need a specific
+    /// bucket should reach for `current` / `backgrounds` directly.
     static func impl(for ref: MediaRef) -> (any MediaStorage)? {
         switch ref.provider {
-        case SupabaseStorageImpl.id: return SupabaseStorageImpl()
+        case SupabaseStorageImpl.id: return SupabaseStorageImpl(bucket: SupabaseStorageImpl.mediaBucket)
         // case R2StorageImpl.id: return R2StorageImpl()    // Phase F+
         default: return nil
         }
@@ -81,11 +92,16 @@ struct SupabaseStorageImpl: MediaStorage {
     static let id = "supabase"
     var providerId: String { Self.id }
 
-    /// `note-media` bucket — created in `supabase/migrations/20260427000002_storage_buckets.sql`.
-    /// All app media (photos, videos, posters, thumbnails) goes here under
-    /// `{userId}/...`. Per-user folder isolation is enforced by RLS on
-    /// `storage.objects` (`(storage.foldername(name))[1] = auth.uid()::text`).
-    private static let bucket = "note-media"
+    /// Buckets created in `supabase/migrations/20260427000002_storage_buckets.sql`.
+    /// Per-user folder isolation is enforced by RLS on `storage.objects`
+    /// (`(storage.foldername(name))[1] = auth.uid()::text`).
+    static let mediaBucket = "note-media"
+    static let backgroundsBucket = "note-backgrounds"
+
+    /// Bucket-scoped — one impl instance per bucket. Phase F.1.2.bgpersist
+    /// added this so backgrounds can route to a separate bucket without
+    /// duplicating the upload/sign/delete plumbing.
+    let bucket: String
 
     private static let log = Logger(
         subsystem: "com.jonsung.DailyCadence",
@@ -107,22 +123,22 @@ struct SupabaseStorageImpl: MediaStorage {
             upsert: false
         )
         try await AppSupabase.client.storage
-            .from(Self.bucket)
+            .from(bucket)
             .upload(path, data: data, options: options)
-        Self.log.info("Uploaded \(data.count) bytes → \(path)")
+        Self.log.info("Uploaded \(data.count) bytes → \(bucket)/\(path)")
         return MediaRef(provider: Self.id, path: path)
     }
 
     func signedURL(for ref: MediaRef, ttlSeconds: Int) async throws -> URL {
         try await AppSupabase.client.storage
-            .from(Self.bucket)
+            .from(bucket)
             .createSignedURL(path: ref.path, expiresIn: ttlSeconds)
     }
 
     func delete(_ ref: MediaRef) async throws {
         _ = try await AppSupabase.client.storage
-            .from(Self.bucket)
+            .from(bucket)
             .remove(paths: [ref.path])
-        Self.log.info("Deleted \(ref.path)")
+        Self.log.info("Deleted \(bucket)/\(ref.path)")
     }
 }
