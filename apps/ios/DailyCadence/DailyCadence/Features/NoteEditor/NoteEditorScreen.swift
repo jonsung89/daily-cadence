@@ -388,7 +388,18 @@ struct NoteEditorScreen: View {
             // Title field uses the user's titleStyle (or default Inter @ 22 semibold).
             // `lineLimit(1...)` lets the title grow to as many lines as needed
             // — outer ScrollView handles overflow.
-            TextField("Title", text: $draft.title, axis: .vertical)
+            TextField(
+                "",
+                text: $draft.title,
+                prompt: Text("Title")
+                    // Phase F.1.2.placeholder — `ink @ 0.4` reads as a
+                    // dynamic ghost against any canvas tint. The
+                    // previous default placeholder color (system
+                    // `secondaryLabel`) blended into warm tints like
+                    // book's coffee-brown.
+                    .foregroundColor(Color.DS.ink.opacity(0.4)),
+                axis: .vertical
+            )
                 .font(draft.titleStyle.resolvedFont(defaultFontId: "inter", size: 22, weight: .semibold))
                 .foregroundStyle(draft.titleStyle.resolvedColor(default: Color.DS.ink))
                 .lineLimit(1...)
@@ -426,7 +437,7 @@ struct NoteEditorScreen: View {
             if draft.trailerMessage.characters.isEmpty {
                 Text("Add more thoughts…")
                     .font(.DS.sans(size: 16, weight: .regular))
-                    .foregroundStyle(Color.DS.fg2.opacity(0.7))
+                    .foregroundStyle(Color.DS.ink.opacity(0.4))
                     .padding(.top, 8)
                     .padding(.leading, 4)
                     .allowsHitTesting(false)
@@ -686,7 +697,10 @@ struct NoteEditorScreen: View {
                 // one that hides as soon as the user types anything.
                 Text("What's on your mind?")
                     .font(.DS.sans(size: 16, weight: .regular))
-                    .foregroundStyle(Color.DS.fg2.opacity(0.7))
+                    // `ink @ 0.4` reads as a ghost across light/dark
+                    // schemes AND cuts through saturated type tints
+                    // (book brown, mood mauve) where `fg2` blended in.
+                    .foregroundStyle(Color.DS.ink.opacity(0.4))
                     .padding(.top, 8)
                     .padding(.leading, 4)
                     .allowsHitTesting(false)
@@ -1020,7 +1034,7 @@ struct NoteEditorScreen: View {
         return HStack(spacing: 10) {
             Image(systemName: "clock")
                 .font(.system(size: 14, weight: .regular))
-                .foregroundStyle(Color.DS.fg2)
+                .foregroundStyle(Color.DS.ink.opacity(0.55))
             Text("Time")
                 .font(.DS.body)
                 .foregroundStyle(Color.DS.ink)
@@ -1035,7 +1049,25 @@ struct NoteEditorScreen: View {
             )
             .datePickerStyle(.compact)
             .labelsHidden()
+            // Keep the system pills' text in our ink token so the
+            // selected date/time reads against the surface below.
+            .tint(Color.DS.ink)
         }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        // Phase F.1.2.placeholder — wrap the row in a `bg2` surface so
+        // the clock icon + DatePicker compact pills sit on a clean
+        // neutral ground regardless of the canvas tint behind them.
+        // Without this, the iOS-default pill greys (system fill) blend
+        // into saturated tints like book brown / mood mauve.
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.DS.bg2)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.DS.border1, lineWidth: 0.5)
+        )
         .padding(.top, 8)
     }
 }

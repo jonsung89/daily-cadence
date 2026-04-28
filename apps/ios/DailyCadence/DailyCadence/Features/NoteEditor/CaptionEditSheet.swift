@@ -37,7 +37,7 @@ struct CaptionEditSheet: View {
                 if draftCaption.isEmpty {
                     Text("Add a caption…")
                         .font(.DS.sans(size: 16, weight: .regular))
-                        .foregroundStyle(Color.DS.fg2.opacity(0.7))
+                        .foregroundStyle(Color.DS.ink.opacity(0.4))
                         .padding(.top, 8)
                         .padding(.leading, 4)
                         .allowsHitTesting(false)
