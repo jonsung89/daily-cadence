@@ -87,6 +87,8 @@ struct CardsBoardView: View {
     /// through the parent's namespace + navigation push. Optional so
     /// previews work without it (cards fall back to `.fullScreenCover`).
     var mediaTapHandler: MediaTapHandler? = nil
+    /// Phase F.1.2.caption — forwarded to media cards' long-press menu.
+    var onRequestEditCaption: ((UUID) -> Void)? = nil
 
     var body: some View {
         MasonryLayout(columns: 2, spacing: 12) {
@@ -95,7 +97,8 @@ struct CardsBoardView: View {
                     note: note,
                     onRequestDelete: { onRequestDelete($0.id) },
                     onTap: onRequestEdit.map { cb in { cb(note.id) } },
-                    mediaTapHandler: mediaTapHandler
+                    mediaTapHandler: mediaTapHandler,
+                    onRequestEditCaption: onRequestEditCaption.map { cb in { cb($0.id) } }
                 )
                 .draggable(NoteDragPayload(id: note.id))
                 .onDrop(

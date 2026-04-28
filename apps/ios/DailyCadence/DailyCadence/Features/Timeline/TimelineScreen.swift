@@ -38,6 +38,12 @@ struct TimelineScreen: View {
     /// the dialog calls `TimelineStore.shared.delete(noteId:)`.
     @State private var pendingDeleteId: UUID? = nil
 
+    /// Phase F.1.2.caption — id of the media note whose caption the
+    /// user is editing. When non-nil, presents `CaptionEditSheet`. On
+    /// save, the sheet's callback reconstructs the `MockNote` with an
+    /// updated payload and forwards to `TimelineStore.update`.
+    @State private var editingCaptionNoteId: UUID? = nil
+
     /// Phase F.1.0 — note the user has tapped to view+edit. When
     /// non-nil, presents `NoteEditorScreen(editing:)` as a sheet.
     /// Tapped from `NoteCard` / `KeepCard`'s `onTap` closures via
@@ -95,11 +101,55 @@ struct TimelineScreen: View {
         )
     }
 
+    /// Boolean projection of `editingCaptionNoteId` for the
+    /// `CaptionEditSheet`'s `isPresented:` binding.
+    private var editingCaptionPresented: Binding<Bool> {
+        Binding(
+            get: { editingCaptionNoteId != nil },
+            set: { if !$0 { editingCaptionNoteId = nil } }
+        )
+    }
+
     /// Closure passed into every card via the `onRequestDelete:` parameter.
     /// Cards call this from their `.contextMenu` Delete action; this just
     /// arms the confirmation dialog.
     private func requestDelete(_ noteId: UUID) {
         pendingDeleteId = noteId
+    }
+
+    /// Phase F.1.2.caption — closure passed to media cards' long-press
+    /// menu via `onRequestEditCaption:`. Arms the caption-edit sheet.
+    private func requestEditCaption(_ noteId: UUID) {
+        editingCaptionNoteId = noteId
+    }
+
+    /// Reconstructs the media note with the user's edited caption and
+    /// forwards to `TimelineStore.update`. No-op if the note vanished
+    /// between menu open and save (deleted in another tab, etc.).
+    private func saveCaption(noteId: UUID, newCaption: String?) {
+        guard let note = TimelineStore.shared.notes.first(where: { $0.id == noteId }),
+              let payload = note.mediaPayload
+        else { return }
+        let updatedPayload = MediaPayload(
+            kind: payload.kind,
+            data: payload.data,
+            posterData: payload.posterData,
+            thumbnailData: payload.thumbnailData,
+            aspectRatio: payload.aspectRatio,
+            caption: newCaption,
+            ref: payload.ref,
+            posterRef: payload.posterRef,
+            thumbnailRef: payload.thumbnailRef
+        )
+        let updated = MockNote(
+            id: note.id,
+            occurredAt: note.occurredAt,
+            type: note.type,
+            content: .media(updatedPayload),
+            background: note.background,
+            titleStyle: note.titleStyle
+        )
+        TimelineStore.shared.update(updated)
     }
 
     /// Phase F.1.0 — closure passed to text cards' `onTap:` parameter.
@@ -305,6 +355,22 @@ struct TimelineScreen: View {
             }
         ) {
             MediaNoteEditorScreen(initialMedia: pendingCapture)
+        }
+        // Phase F.1.2.caption — long-press → "Edit caption" sheet for
+        // media notes. Light-weight: just a multi-line caption field +
+        // Cancel/Save. Reconstructs the MockNote with the updated
+        // payload and routes through `TimelineStore.update` (which
+        // handles the optimistic in-memory swap + background persist).
+        .sheet(isPresented: editingCaptionPresented) {
+            if let id = editingCaptionNoteId,
+               let note = TimelineStore.shared.notes.first(where: { $0.id == id }) {
+                CaptionEditSheet(
+                    initialCaption: note.mediaPayload?.caption,
+                    onSave: { newCaption in
+                        saveCaption(noteId: id, newCaption: newCaption)
+                    }
+                )
+            }
         }
         // Phase F.0.3 — graphical date picker for "jump to any date."
         // Tapping the header date column opens this. `.medium` detent
@@ -579,7 +645,8 @@ struct TimelineScreen: View {
                     groups: groupedNotes,
                     onRequestDelete: { requestDelete($0) },
                     onRequestEdit: { requestEdit($0) },
-                    mediaTapHandler: mediaTapHandler
+                    mediaTapHandler: mediaTapHandler,
+                    onRequestEditCaption: { requestEditCaption($0) }
                 )
             }
         }
@@ -643,7 +710,8 @@ struct TimelineScreen: View {
                                 note: note,
                                 onRequestDelete: { requestDelete($0.id) },
                                 onTap: tapHandler(for: note),
-                                mediaTapHandler: mediaTapHandler
+                                mediaTapHandler: mediaTapHandler,
+                                onRequestEditCaption: { requestEditCaption($0.id) }
                             )
                                 .containerRelativeFrame(.horizontal, alignment: .leading) { width, _ in
                                     width * 0.55
@@ -658,7 +726,8 @@ struct TimelineScreen: View {
                     KeepCard(
                                 note: note,
                                 onRequestDelete: { requestDelete($0.id) },
-                                onTap: tapHandler(for: note)
+                                onTap: tapHandler(for: note),
+                                onRequestEditCaption: { requestEditCaption($0.id) }
                             )
                 }
             }
@@ -678,7 +747,8 @@ struct TimelineScreen: View {
             notes: CardsViewOrderStore.shared.sorted(unpinnedNotes),
             onRequestDelete: requestDelete,
             onRequestEdit: requestEdit,
-            mediaTapHandler: mediaTapHandler
+            mediaTapHandler: mediaTapHandler,
+            onRequestEditCaption: requestEditCaption
         )
     }
 
@@ -761,7 +831,8 @@ struct TimelineScreen: View {
                                 note: note,
                                 onRequestDelete: { requestDelete($0.id) },
                                 onTap: tapHandler(for: note),
-                                mediaTapHandler: mediaTapHandler
+                                mediaTapHandler: mediaTapHandler,
+                                onRequestEditCaption: { requestEditCaption($0.id) }
                             )
                                     // ~55% of the visible scroll width:
                                     // shows ~2 cards with a peek of the
@@ -833,7 +904,8 @@ struct TimelineScreen: View {
                         noteId: note.id,
                         onRequestDelete: requestDelete,
                         onTap: tapHandler(for: note),
-                        mediaTapHandler: mediaTapHandler
+                        mediaTapHandler: mediaTapHandler,
+                        onRequestEditCaption: requestEditCaption
                     )
                 }
             }

@@ -36,6 +36,8 @@ struct StackedBoardView: View {
     /// through the parent's namespace + navigation push. Optional so
     /// previews work without it.
     var mediaTapHandler: MediaTapHandler? = nil
+    /// Phase F.1.2.caption — forwarded to media cards' long-press menu.
+    var onRequestEditCaption: ((UUID) -> Void)? = nil
 
     @State private var expandedType: NoteType? = nil
     @Namespace private var stackNamespace
@@ -69,7 +71,8 @@ struct StackedBoardView: View {
                         onCollapse: { toggle(group.type) },
                         onRequestDelete: onRequestDelete,
                         onRequestEdit: onRequestEdit,
-                        mediaTapHandler: mediaTapHandler
+                        mediaTapHandler: mediaTapHandler,
+                        onRequestEditCaption: onRequestEditCaption
                     )
                 } else {
                     CollapsedStackCell(
@@ -78,7 +81,8 @@ struct StackedBoardView: View {
                         onTap: { toggle(group.type) },
                         onRequestDelete: onRequestDelete,
                         onRequestEdit: onRequestEdit,
-                        mediaTapHandler: mediaTapHandler
+                        mediaTapHandler: mediaTapHandler,
+                        onRequestEditCaption: onRequestEditCaption
                     )
                 }
             }
@@ -104,6 +108,7 @@ private struct CollapsedStackCell: View {
     var onRequestDelete: ((UUID) -> Void)? = nil
     var onRequestEdit: ((UUID) -> Void)? = nil
     var mediaTapHandler: MediaTapHandler? = nil
+    var onRequestEditCaption: ((UUID) -> Void)? = nil
 
     /// Up to 3 most-recent notes — the visible layers when collapsed.
     /// Stored newest-first; index 0 = top of stack.
@@ -170,7 +175,8 @@ private struct CollapsedStackCell: View {
                     note: note,
                     onRequestDelete: onRequestDelete.map { cb in { cb($0.id) } },
                     onTap: onRequestEdit.map { cb in { cb(note.id) } },
-                    mediaTapHandler: mediaTapHandler
+                    mediaTapHandler: mediaTapHandler,
+                    onRequestEditCaption: onRequestEditCaption.map { cb in { cb($0.id) } }
                 )
                     .fixedSize(horizontal: false, vertical: true)
                     .scaleEffect(1 - CGFloat(index) * 0.04)
@@ -227,6 +233,7 @@ private struct ExpandedColumnSection: View {
     var onRequestDelete: ((UUID) -> Void)? = nil
     var onRequestEdit: ((UUID) -> Void)? = nil
     var mediaTapHandler: MediaTapHandler? = nil
+    var onRequestEditCaption: ((UUID) -> Void)? = nil
 
     var body: some View {
         VStack(spacing: 8) {
@@ -235,7 +242,8 @@ private struct ExpandedColumnSection: View {
                     note: note,
                     onRequestDelete: onRequestDelete.map { cb in { cb($0.id) } },
                     onTap: onRequestEdit.map { cb in { cb(note.id) } },
-                    mediaTapHandler: mediaTapHandler
+                    mediaTapHandler: mediaTapHandler,
+                    onRequestEditCaption: onRequestEditCaption.map { cb in { cb($0.id) } }
                 )
                     // `fixedSize(vertical: true)` forces the card to use
                     // its intrinsic height regardless of any frame

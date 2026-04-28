@@ -44,6 +44,12 @@ struct KeepCard: View {
     /// back to its own `.fullScreenCover` — preserves preview /
     /// non-Timeline surfaces that haven't migrated.
     var mediaTapHandler: MediaTapHandler? = nil
+    /// Phase F.1.2.caption — long-press menu entry for editing the
+    /// caption of a media note. Parent screen owns the
+    /// `CaptionEditSheet` presentation + the `TimelineStore.update`
+    /// round-trip. Only surfaced when `note.isMediaNote == true` AND
+    /// this callback is set; text-note variants don't carry captions.
+    var onRequestEditCaption: ((MockNote) -> Void)? = nil
     /// When false, suppresses the pin overlay and the card-owned
     /// `.contextMenu`. Used by previews and other surfaces that want a
     /// purely presentational card.
@@ -137,6 +143,14 @@ struct KeepCard: View {
                     Self.donateContextMenuUse()
                 } label: {
                     Label(isPinned ? "Unpin" : "Pin", systemImage: isPinned ? "pin.slash" : "pin")
+                }
+                if note.isMediaNote, let onRequestEditCaption {
+                    Button {
+                        onRequestEditCaption(note)
+                        Self.donateContextMenuUse()
+                    } label: {
+                        Label("Edit caption", systemImage: "text.bubble")
+                    }
                 }
                 if let onRequestDelete {
                     Button(role: .destructive) {

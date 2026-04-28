@@ -46,6 +46,11 @@ struct NoteCard: View {
     /// "user asked to delete" notification.
     let onRequestDelete: ((UUID) -> Void)?
 
+    /// Phase F.1.2.caption — long-press menu entry for editing the
+    /// caption of a media note. Only surfaced when `media != nil` AND
+    /// this callback is set; text variants don't carry captions.
+    let onRequestEditCaption: ((UUID) -> Void)?
+
     /// Optional tap callback (Phase F.1.0). Fires on tap of the text
     /// scaffold; the media scaffold keeps its existing
     /// "tap → open `MediaViewerScreen`" behavior. Parent screens pass
@@ -78,7 +83,8 @@ struct NoteCard: View {
         noteId: UUID? = nil,
         onRequestDelete: ((UUID) -> Void)? = nil,
         onTap: (() -> Void)? = nil,
-        mediaTapHandler: MediaTapHandler? = nil
+        mediaTapHandler: MediaTapHandler? = nil,
+        onRequestEditCaption: ((UUID) -> Void)? = nil
     ) {
         self.type = type
         self.title = title
@@ -91,6 +97,7 @@ struct NoteCard: View {
         self.onRequestDelete = onRequestDelete
         self.onTap = onTap
         self.mediaTapHandler = mediaTapHandler
+        self.onRequestEditCaption = onRequestEditCaption
     }
 
     /// Reads pin state through `PinStore.shared` inside `body` so the card
@@ -166,6 +173,13 @@ struct NoteCard: View {
                     PinStore.shared.togglePin(noteId)
                 } label: {
                     Label(isPinned ? "Unpin" : "Pin", systemImage: isPinned ? "pin.slash" : "pin")
+                }
+                if media != nil, let onRequestEditCaption {
+                    Button {
+                        onRequestEditCaption(noteId)
+                    } label: {
+                        Label("Edit caption", systemImage: "text.bubble")
+                    }
                 }
                 if let onRequestDelete {
                     Button(role: .destructive) {
