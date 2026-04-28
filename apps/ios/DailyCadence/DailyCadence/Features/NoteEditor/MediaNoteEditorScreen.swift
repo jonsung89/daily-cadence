@@ -33,10 +33,27 @@ struct MediaNoteEditorScreen: View {
     /// from `CameraPicker`. The editor switches to the right
     /// `MediaImporter` adapter based on the case; everything downstream
     /// (trim sheet, crop, payload state) is shared.
-    enum InitialMedia {
-        case pickerItem(PhotosPickerItem)
-        case cameraImage(UIImage)
-        case cameraVideoURL(URL)
+    /// Phase F.1.2.cameraflow — wrapper struct gives `Identifiable`
+    /// conformance with a STABLE id per instance (a `let id = UUID()`
+    /// computed once at construction). Required for `.sheet(item:)`
+    /// presentation, which is the race-free alternative to toggling
+    /// two presentation booleans across a fullScreenCover dismiss.
+    /// The first-time-camera bug was: `isCameraPresented = false`
+    /// and `isMediaEditorPresented = true` set in the same closure
+    /// fought UIKit's modal stack — the editor sheet silently failed
+    /// to receive the captured photo. With `.sheet(item:)`, presentation
+    /// is purely data-driven; setting `pendingCapture = InitialMedia(...)`
+    /// presents the sheet exactly once with that data, and SwiftUI
+    /// handles the post-cover-dismissal timing internally.
+    struct InitialMedia: Identifiable {
+        let id = UUID()
+        let source: Source
+
+        enum Source {
+            case pickerItem(PhotosPickerItem)
+            case cameraImage(UIImage)
+            case cameraVideoURL(URL)
+        }
     }
 
     @Environment(\.dismiss) private var dismiss
@@ -81,7 +98,7 @@ struct MediaNoteEditorScreen: View {
         // Only seed the in-editor PhotosPicker binding when the initial
         // source is itself a picker item. Camera captures don't have a
         // matching `PhotosPickerItem` representation.
-        if case .pickerItem(let item) = initialMedia {
+        if case .pickerItem(let item) = initialMedia?.source {
             self._pickerItem = State(initialValue: item)
         } else {
             self._pickerItem = State(initialValue: nil)
@@ -117,7 +134,7 @@ struct MediaNoteEditorScreen: View {
                 // initial seeded value, so the `.task` above owns the
                 // first import.
                 guard let newItem else { return }
-                Task { await importMedia(.pickerItem(newItem)) }
+                Task { await importMedia(InitialMedia(source: .pickerItem(newItem))) }
             }
             .sheet(item: $trimSource) { source in
                 VideoTrimSheet(
@@ -338,7 +355,7 @@ struct MediaNoteEditorScreen: View {
         }
         do {
             let result: MediaImporter.ImportResult
-            switch source {
+            switch source.source {
             case .pickerItem(let item):
                 result = try await MediaImporter.makePayload(from: item)
             case .cameraImage(let image):

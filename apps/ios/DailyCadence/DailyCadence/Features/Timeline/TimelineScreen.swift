@@ -23,24 +23,22 @@ struct TimelineScreen: View {
     /// "Photo or video" from the FAB menu (Phase E.3).
     @State private var isMediaPickerPresented = false
     @State private var mediaPickerItem: PhotosPickerItem?
-    @State private var isMediaEditorPresented = false
 
     /// Phase F.1.1b'.camera — drives the camera capture flow when the
     /// user picks "Take Photo or Video" from the FAB menu. The captured
     /// asset (image OR video URL) seeds `pendingCapture`; the editor
     /// opens with that as its initial source.
     @State private var isCameraPresented = false
-    @State private var pendingCapture: MediaNoteEditorScreen.InitialMedia?
 
-    /// Phase F.1.2.cameraflow — flips to true inside `CameraPicker.onPick`
-    /// when the user accepts a capture. Read in `.fullScreenCover.onDismiss`
-    /// to trigger the editor sheet ONCE the camera cover has fully
-    /// dismissed. UIKit's modal stack rejects "present sheet while
-    /// dismissing cover" — without this defer, the first-ever capture
-    /// silently fails to open the editor (the sheet's `isPresented`
-    /// flips but UIKit ignores it because a dismissal is in flight),
-    /// and the user has to cancel + re-capture.
-    @State private var presentEditorAfterCameraDismiss = false
+    /// Phase F.1.2.cameraflow — drives the media editor's presentation
+    /// via `.sheet(item:)`. When non-nil, SwiftUI presents the editor
+    /// with this initial source. Setting this to a fresh
+    /// `InitialMedia(source: ...)` is the ONLY way to open the editor —
+    /// no separate `isMediaEditorPresented` boolean. Data-driven
+    /// presentation eliminates the cover-dismiss / sheet-present race
+    /// that lost the captured photo on first-ever camera trips
+    /// (UIKit's modal stack rejected the simultaneous transition).
+    @State private var pendingCapture: MediaNoteEditorScreen.InitialMedia?
 
     /// The note id the user has asked to delete (Phase E.5.15). When
     /// non-nil, drives the `.confirmationDialog`. The card's
@@ -322,43 +320,28 @@ struct TimelineScreen: View {
         )
         .onChange(of: mediaPickerItem) { _, newItem in
             // PhotosPicker dismisses on selection — wrap the picked
-            // item in `InitialMedia.pickerItem` and open the editor
-            // sheet so the user can add a caption + type before saving.
+            // item in InitialMedia and assign to pendingCapture; the
+            // .sheet(item:) binding below presents the editor with that
+            // data. No separate isPresented boolean to coordinate.
             if let newItem {
-                pendingCapture = .pickerItem(newItem)
-                isMediaEditorPresented = true
+                pendingCapture = MediaNoteEditorScreen.InitialMedia(source: .pickerItem(newItem))
             }
         }
-        // Phase F.1.1b'.camera — full-screen `UIImagePickerController`
-        // for direct camera capture. On capture, route to the same
-        // editor sheet as the picker path; on cancel, just dismiss.
-        //
-        // Phase F.1.2.cameraflow — present the editor sheet from
-        // `onDismiss` (after the cover has fully dismissed) rather than
-        // from inside `onPick` (mid-dismissal). UIKit doesn't allow
-        // simultaneous present + dismiss on the same view controller;
-        // setting both `isCameraPresented = false` and
-        // `isMediaEditorPresented = true` in the same closure caused
-        // the very first capture to silently fail to open the editor.
-        .fullScreenCover(
-            isPresented: $isCameraPresented,
-            onDismiss: {
-                if presentEditorAfterCameraDismiss {
-                    presentEditorAfterCameraDismiss = false
-                    isMediaEditorPresented = true
-                }
-            }
-        ) {
+        // Phase F.1.1b'.camera — full-screen UIImagePickerController for
+        // direct camera capture. On accept, just set pendingCapture; the
+        // .sheet(item:) binding presents the editor automatically once
+        // the cover finishes dismissing. SwiftUI handles the timing —
+        // no manual onDismiss-defer dance needed.
+        .fullScreenCover(isPresented: $isCameraPresented) {
             CameraPicker { capture in
                 isCameraPresented = false
                 guard let capture else { return }
                 switch capture {
                 case .image(let image):
-                    pendingCapture = .cameraImage(image)
+                    pendingCapture = MediaNoteEditorScreen.InitialMedia(source: .cameraImage(image))
                 case .video(let url):
-                    pendingCapture = .cameraVideoURL(url)
+                    pendingCapture = MediaNoteEditorScreen.InitialMedia(source: .cameraVideoURL(url))
                 }
-                presentEditorAfterCameraDismiss = true
             }
             .ignoresSafeArea()
         }
@@ -374,14 +357,14 @@ struct TimelineScreen: View {
         .sheet(item: $editingNote) { note in
             NoteEditorScreen(editing: note)
         }
-        .sheet(
-            isPresented: $isMediaEditorPresented,
-            onDismiss: {
-                mediaPickerItem = nil
-                pendingCapture = nil
-            }
-        ) {
-            MediaNoteEditorScreen(initialMedia: pendingCapture)
+        // Phase F.1.2.cameraflow — data-driven media-editor presentation
+        // via .sheet(item:) replaces the boolean toggling that lost the
+        // first camera capture. Setting `pendingCapture = InitialMedia(...)`
+        // anywhere presents this sheet exactly once with that source.
+        // `mediaPickerItem` cleanup also lives here so a re-pick of the
+        // same Photos asset re-fires onChange.
+        .sheet(item: $pendingCapture, onDismiss: { mediaPickerItem = nil }) { capture in
+            MediaNoteEditorScreen(initialMedia: capture)
         }
         // Phase F.1.2.caption — long-press → "Edit caption" sheet for
         // media notes. Light-weight: just a multi-line caption field +
