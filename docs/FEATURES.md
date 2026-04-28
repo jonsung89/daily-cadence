@@ -79,10 +79,6 @@ Catching a doc/code drift later is much harder than keeping them in step.
 
 The day's notes, viewable as a Timeline rail or a Board grid.
 
-### Scroll-edge fade (Phase F.1.2.scrolledge)
-
-Content fades smoothly into the top edge as the user scrolls — Apple Messages / Mail / Notes pattern. **Manual `LinearGradient` overlay** layered above the `ScrollView`: cream (`Color.DS.bg1`) at the top edge, fading to `bg1.opacity(0)` 36pt down, with `.allowsHitTesting(false)` so taps pass through. iOS 26's `.scrollEdgeEffectStyle(.soft, for: .top)` would be the declarative path for this, but it requires a visible toolbar to project from — TimelineScreen hides the system toolbar in favor of its custom date header, so the manual overlay is what's required. The `LoadingBar` overlay is layered ABOVE the gradient (added second in source order) so it stays fully opaque during a fetch.
-
 ### Header
 
 Two-row layout introduced in Phase F.0.3:

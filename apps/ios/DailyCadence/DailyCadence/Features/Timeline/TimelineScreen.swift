@@ -223,28 +223,6 @@ struct TimelineScreen: View {
             .contentMargins(.bottom, 120, for: .scrollContent)
             .background(Color.DS.bg1)
             .toolbar(.hidden, for: .navigationBar)
-            // Phase F.1.2.scrolledge — Apple Messages-style soft fade
-            // along the top edge so cards / week strip fade out as
-            // they scroll up off-screen instead of crashing crisply
-            // into the status-bar boundary. iOS 26's
-            // `.scrollEdgeEffectStyle` ties to a visible toolbar; we
-            // hide the toolbar here for the custom date header, so we
-            // do the manual gradient overlay (the pre-iOS-26 pattern,
-            // still required for any custom-header design). bg1 →
-            // bg1.opacity(0) over 36pt produces the soft fade.
-            // `allowsHitTesting(false)` so taps pass through to the
-            // scrolling content beneath. Source-ordered BEFORE the
-            // LoadingBar overlay so the loading bar renders ABOVE the
-            // fade and stays fully opaque while a fetch is in flight.
-            .overlay(alignment: .top) {
-                LinearGradient(
-                    colors: [Color.DS.bg1, Color.DS.bg1.opacity(0)],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-                .frame(height: 36)
-                .allowsHitTesting(false)
-            }
             // Phase F.0.3 — thin animated indeterminate progress bar at
             // the very top of the timeline while the day fetch is in
             // flight. Replaces the prior redacted-skeleton approach,
