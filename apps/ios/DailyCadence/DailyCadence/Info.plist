@@ -5,13 +5,21 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<!--
-	Phase F.1.2.appicon — alternate-icon manifest. Required because we
-	use a static Info.plist (`GENERATE_INFOPLIST_FILE = NO`); without
-	this, the `ASSETCATALOG_COMPILER_ALTERNATE_APP_ICON_NAMES` build
-	setting compiles the icons into the bundle but iOS can't find them
-	at runtime — `setAlternateIconName(_:)` fails with "the feature is
-	not supported." Each alternate's name here MUST match an
-	`.appiconset` folder under `Assets.xcassets/`.
+	Phase F.1.2.appicon — alternate-icon manifest. Bundle-root file
+	approach (legacy + reliable). Each alternate's CFBundleIconFiles
+	entry points at a basename like "Blush"; iOS auto-resolves to
+	`<basename>@2x.png` (120×120) and `<basename>@3x.png` (180×180)
+	from the bundle root.
+
+	Why NOT also CFBundleIconName + Asset Catalog alternates: tried
+	both in tandem and Springboard intermittently rendered blank
+	icons after a background → foreground transition (asset catalog
+	and bundle-root cached states diverged). Removing the asset
+	catalog alternates + the `ASSETCATALOG_COMPILER_ALTERNATE_APP_ICON_NAMES`
+	build setting and committing to bundle-root files only fixed it.
+	The PRIMARY icon (Sage) still goes through the asset catalog
+	(needed for the App Store + auto-generated install sizes); only
+	alternates use the file-based path.
 	-->
 	<key>CFBundleIcons</key>
 	<dict>
@@ -24,8 +32,6 @@
 		<dict>
 			<key>Blush</key>
 			<dict>
-				<key>CFBundleIconName</key>
-				<string>Blush</string>
 				<key>CFBundleIconFiles</key>
 				<array>
 					<string>Blush</string>
@@ -35,8 +41,6 @@
 			</dict>
 			<key>Coral</key>
 			<dict>
-				<key>CFBundleIconName</key>
-				<string>Coral</string>
 				<key>CFBundleIconFiles</key>
 				<array>
 					<string>Coral</string>
@@ -46,8 +50,6 @@
 			</dict>
 			<key>Mulberry</key>
 			<dict>
-				<key>CFBundleIconName</key>
-				<string>Mulberry</string>
 				<key>CFBundleIconFiles</key>
 				<array>
 					<string>Mulberry</string>
@@ -57,8 +59,6 @@
 			</dict>
 			<key>Taupe</key>
 			<dict>
-				<key>CFBundleIconName</key>
-				<string>Taupe</string>
 				<key>CFBundleIconFiles</key>
 				<array>
 					<string>Taupe</string>
@@ -68,8 +68,6 @@
 			</dict>
 			<key>Lavender</key>
 			<dict>
-				<key>CFBundleIconName</key>
-				<string>Lavender</string>
 				<key>CFBundleIconFiles</key>
 				<array>
 					<string>Lavender</string>
@@ -79,8 +77,6 @@
 			</dict>
 			<key>Storm</key>
 			<dict>
-				<key>CFBundleIconName</key>
-				<string>Storm</string>
 				<key>CFBundleIconFiles</key>
 				<array>
 					<string>Storm</string>
@@ -90,8 +86,6 @@
 			</dict>
 			<key>Teal</key>
 			<dict>
-				<key>CFBundleIconName</key>
-				<string>Teal</string>
 				<key>CFBundleIconFiles</key>
 				<array>
 					<string>Teal</string>
