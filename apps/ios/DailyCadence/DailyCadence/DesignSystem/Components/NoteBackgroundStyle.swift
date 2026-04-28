@@ -19,7 +19,12 @@ import Foundation
 enum NoteBackgroundStyle: Equatable {
     case none
     case color(Swatch)
-    case image(data: Data, opacity: Double)
+    /// `cacheKey` is the stable identifier (`backgrounds.id.uuidString`
+    /// for server-fetched backgrounds) used by `BackgroundImageCache`
+    /// to skip re-decode on re-render. `nil` for client-side images
+    /// that haven't been uploaded yet (editor preview); those bypass
+    /// the cache.
+    case image(data: Data, opacity: Double, cacheKey: String?)
 
     var hasCustomBackground: Bool {
         switch self {

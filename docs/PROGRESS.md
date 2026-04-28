@@ -1,6 +1,6 @@
 # DailyCadence — Progress
 
-**Last updated:** 2026-04-28 (Phase F.1.2.daycache — eliminates the empty-state flash when navigating between days. `TimelineStore` gains an in-memory `notesByDay: [Date: [MockNote]]` cache that hydrates `notes` immediately on `selectDate` if the day's been seen this session. `hasLoaded` stays false on hydration so the background refetch still runs (the cache is a render hint, not a fetch-skip). `load()` was switched from `notes = fetched` (full replace) to a `mergeFetched` surgical reconciliation — removes gone notes, updates existing in place, appends new ones. SwiftUI's id-keyed diffing keeps unchanged cards stable; only changed entries animate. Mutations (`add` / `update` / `delete`) mirror into the cache and invalidate cross-day cache entries when notes move between days. +2 tests (90/90 pass). Future hooks: `clearDayCache()` ready for the auth-change wiring when Sign in with Apple ships.)
+**Last updated:** 2026-04-28 (Phase F.1.2.bgcache — kills the post-refetch flicker on image-background cards. New `BackgroundImageCache` singleton wraps `NSCache<NSString, UIImage>` keyed by `backgrounds.id.uuidString` (stable). Card render paths (NoteCard, KeepCard, NoteEditorScreen canvas + toolbar icon) replaced `Image(uiImage: UIImage(data:))` — which re-decodes the JPEG bytes on every body re-evaluation — with `BackgroundImageCache.shared.image(forKey: cacheKey, data:)`, which decodes once per session per image and returns cached `UIImage` on every subsequent render. Same pattern Apple's UIKit / SDWebImage / Kingfisher / Nuke use for their decoded-image tier. `MockNote.ImageBackground` gains `cacheKey: String?` populated in `fetchBackground` from the row id; `nil` for client-side images (editor preview before save) which fall through to direct decode. 90/90 tests pass.)
 **Current phase:** Phase 1 MVP — iOS app for Jon + wife, TestFlight distribution
 
 This is the living state of the project. Update at the end of every session.
@@ -1838,6 +1838,22 @@ Strip is ~14pt taller now. Trade is fair — the strip is the at-a-glance naviga
 ### Phase F.1.2.captionfix — Edit Caption double-placeholder (added this round)
 
 Pre-existing bug from Phase F.1.2.refresh's caption-edit sheet: both a custom `Text("Add a caption…")` overlay AND the `TextField`'s built-in placeholder ("Caption" — passed as the title parameter) rendered simultaneously when the field was empty, producing visible overlap. Deleted the custom overlay + the wrapping ZStack and used the built-in TextField placeholder with the design copy "Add a caption…". One less moving part; SwiftUI's default placeholder color is fine.
+
+### Phase F.1.2.bgcache — Decoded image-background cache (added this round)
+
+Tight follow-on to F.1.2.daycache (above). The day-cache eliminated the empty-state flash on day-switch, but the image-background card still flickered a beat after returning to a day — the post-refetch `hasLoaded = true` cascaded through `TimelineScreen.body`, which observed `isLoadingNotes`, which forced all `KeepCard`s to rebuild (their closure parameters defeat SwiftUI's Equatable optimization). Each rebuild called `Image(uiImage: UIImage(data: imageData))` — re-decoding the JPEG even though the bytes were unchanged. Sub-perceptible per render but visible when stacked under the cascade.
+
+**The fix.** Skip the re-decode entirely. New [BackgroundImageCache](apps/ios/DailyCadence/DailyCadence/DesignSystem/Components/BackgroundImageCache.swift) singleton wraps `NSCache<NSString, UIImage>`. Cards call `BackgroundImageCache.shared.image(forKey: cacheKey, data:)`; the cache decodes once on first hit and returns the cached `UIImage` on every subsequent render. `NSCache` auto-evicts under memory pressure — no manual size management.
+
+**Cache keys.** `MockNote.ImageBackground` gains `cacheKey: String?` populated in `fetchBackground` from the `backgrounds.id.uuidString` (immutable per row — each `backgrounds` row's `image_url` never changes; on edit we INSERT a new row rather than UPDATE, so a given key always resolves to the same bytes forever). `MockNote.Background.image(...)` and `NoteBackgroundStyle.image(...)` both gained the field as a passthrough.
+
+**Client-side images.** Editor preview path (just-picked image, not yet uploaded) carries `cacheKey: nil` and bypasses the cache via direct decode. The editor session is short enough (user picks → tweaks opacity → saves in seconds) that the lack of caching is invisible. After save and refetch, the saved background gets a populated cacheKey and benefits going forward.
+
+**Pattern.** This is the canonical iOS approach — Apple's UIKit uses NSCache extensively, every major image library (SDWebImage / Kingfisher / Nuke) implements the same shape, SwiftUI's `AsyncImage` does it internally for URL-based images. Not hacky.
+
+**Render sites updated**: NoteCard line 376 (Timeline standalone-media path), KeepCard line 228 (Board), NoteEditorScreen line 292 (canvas preview) + line 328 (18pt toolbar `🖼` icon thumb). The shape change to `NoteBackgroundStyle.image(data:opacity:cacheKey:)` rippled into 1 test which I updated.
+
+90/90 tests pass.
 
 ### Phase F.1.2.daycache — Per-day note cache (added this round)
 

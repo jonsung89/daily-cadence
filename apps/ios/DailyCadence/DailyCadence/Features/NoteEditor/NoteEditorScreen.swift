@@ -289,8 +289,8 @@ struct NoteEditorScreen: View {
             case .color(let swatch):
                 // Full opacity — matches saved KeepCard / NoteCard rendering.
                 swatch.color()
-            case .image(let data, let opacity):
-                if let uiImage = UIImage(data: data) {
+            case .image(let data, let opacity, let cacheKey):
+                if let uiImage = BackgroundImageCache.shared.image(forKey: cacheKey, data: data) {
                     Image(uiImage: uiImage)
                         .resizable()
                         .scaledToFill()
@@ -311,7 +311,7 @@ struct NoteEditorScreen: View {
             }
             return .none
         case .image(let img):
-            return .image(data: img.imageData, opacity: img.opacity)
+            return .image(data: img.imageData, opacity: img.opacity, cacheKey: img.cacheKey)
         }
     }
 
@@ -325,8 +325,8 @@ struct NoteEditorScreen: View {
             Circle().fill(draft.selectedType.color)
         case .color(let swatch):
             Circle().fill(swatch.color())
-        case .image(let data, _):
-            if let uiImage = UIImage(data: data) {
+        case .image(let data, _, let cacheKey):
+            if let uiImage = BackgroundImageCache.shared.image(forKey: cacheKey, data: data) {
                 Image(uiImage: uiImage)
                     .resizable()
                     .scaledToFill()

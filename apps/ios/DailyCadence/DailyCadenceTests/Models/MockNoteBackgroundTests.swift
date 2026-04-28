@@ -118,12 +118,14 @@ struct MockNoteBackgroundTests {
             content: .text(title: "Resolves"),
             background: .image(MockNote.ImageBackground(imageData: bytes, opacity: 0.4))
         )
-        guard case .image(let data, let opacity) = note.resolvedBackgroundStyle else {
+        guard case .image(let data, let opacity, let cacheKey) = note.resolvedBackgroundStyle else {
             Issue.record("Expected resolvedBackgroundStyle to be .image")
             return
         }
         #expect(data == bytes)
         #expect(abs(opacity - 0.4) < 0.0001)
+        #expect(cacheKey == nil,
+                "Client-side images (no upload yet) carry no cacheKey — they bypass BackgroundImageCache")
     }
 
     @Test func resolvedBackgroundStyleForColor() {

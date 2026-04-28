@@ -88,10 +88,20 @@ struct MockNote: Identifiable, Hashable {
         /// 0.0 ... 1.0. The image is rendered over `bg-2` so high opacity
         /// reads "photo on cream", lower opacity reads "subtle texture."
         var opacity: Double
+        /// Phase F.1.2.bgcache — stable identifier used as the
+        /// `BackgroundImageCache` key. For server-fetched backgrounds
+        /// this is the `backgrounds.id.uuidString` (immutable per row).
+        /// `nil` for client-side images that haven't been uploaded yet
+        /// (editor preview before save) — those bypass the cache and
+        /// render via direct decode each time. Once the note is saved
+        /// + refetched, the populated `cacheKey` enables zero-decode
+        /// re-renders.
+        let cacheKey: String?
 
-        init(imageData: Data, opacity: Double = 1.0) {
+        init(imageData: Data, opacity: Double = 1.0, cacheKey: String? = nil) {
             self.imageData = imageData
             self.opacity = max(0, min(1, opacity))
+            self.cacheKey = cacheKey
         }
     }
 
@@ -151,7 +161,7 @@ struct MockNote: Identifiable, Hashable {
             }
             return .none
         case .image(let img):
-            return .image(data: img.imageData, opacity: img.opacity)
+            return .image(data: img.imageData, opacity: img.opacity, cacheKey: img.cacheKey)
         }
     }
 

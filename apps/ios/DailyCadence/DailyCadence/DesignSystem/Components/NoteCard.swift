@@ -373,8 +373,13 @@ struct NoteCard: View {
             // demands it. Same change as KeepCard.
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .fill(swatch.color())
-        case .image(let data, let opacity):
-            if let uiImage = UIImage(data: data) {
+        case .image(let data, let opacity, let cacheKey):
+            // Phase F.1.2.bgcache — go through the shared decoded-image
+            // cache so post-navigation re-renders don't re-decode the
+            // JPEG bytes. cacheKey nil → bypass cache (newly-picked,
+            // not-yet-uploaded image in the editor; rare in card render
+            // surfaces).
+            if let uiImage = BackgroundImageCache.shared.image(forKey: cacheKey, data: data) {
                 Image(uiImage: uiImage)
                     .resizable()
                     .scaledToFill()

@@ -348,7 +348,15 @@ final class NotesRepository {
                 let storage = MediaStorageProvider.backgrounds
                 let signed = try await storage.signedURL(for: ref, ttlSeconds: 3000)
                 let (data, _) = try await URLSession.shared.data(from: signed)
-                return .image(MockNote.ImageBackground(imageData: data, opacity: row.opacity))
+                // Phase F.1.2.bgcache — pass the row id as the
+                // `BackgroundImageCache` key so card re-renders skip
+                // the re-decode (sub-perceptible per render but stacks
+                // visibly under refetch-induced cascades).
+                return .image(MockNote.ImageBackground(
+                    imageData: data,
+                    opacity: row.opacity,
+                    cacheKey: row.id.uuidString
+                ))
             case "color":
                 guard let swatchId = row.swatch_id else { return nil }
                 return .color(swatchId: swatchId)

@@ -225,8 +225,11 @@ struct KeepCard: View {
                 // toolbar (Apple Notes / Bear pattern).
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .fill(swatch.color())
-            case .image(let data, let opacity):
-                if let uiImage = UIImage(data: data) {
+            case .image(let data, let opacity, let cacheKey):
+                // Phase F.1.2.bgcache — shared decoded-image cache so
+                // re-renders triggered by parent state changes (e.g.,
+                // hasLoaded after refetch) don't re-decode the JPEG.
+                if let uiImage = BackgroundImageCache.shared.image(forKey: cacheKey, data: data) {
                     Image(uiImage: uiImage)
                         .resizable()
                         .scaledToFill()
