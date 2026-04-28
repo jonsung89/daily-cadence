@@ -1,6 +1,6 @@
 # DailyCadence — Progress
 
-**Last updated:** 2026-04-27 (Phase F.1.2.zoomdrag — drag-to-dismiss on the photo zoom viewer fixed. Root cause was `DragGesture()` defaulting to `.local` coord space while the gesture's own writes drove `.scaleEffect` + `.offset` on the same view — translation oscillated as local coords shifted under the finger, manifesting as violent shake / image-splits-left-right. One-line fix: `DragGesture(minimumDistance: 10, coordinateSpace: .global)`. Video was unaffected because `UIPanGestureRecognizer.translation(in:)` reports absolute pixel deltas regardless of view transform — that asymmetry was the clue that ruled out the cascade theory three earlier fix attempts had chased.)
+**Last updated:** 2026-04-28 (Phase F.1.2.todaypolish — Today screen no longer goes stale at midnight, week strip gains a day-of-month row, dot bumped 6→9pt, and the Edit Caption sheet's double-placeholder bug is fixed. New `TimelineStore.currentDay` (observed) updates from `UIApplication.significantTimeChangeNotification` + a `scenePhase == .active` re-check; `isViewingToday` and `WeekStripView` compare against it instead of calling `Calendar.current.isDateInToday(_:)` directly. Within-week rollovers slide the today ring between columns via `matchedGeometryEffect`; cross-week rollovers fade it out. selectedDate not auto-advanced — Today pill is the explicit way back. +3 tests.)
 **Current phase:** Phase 1 MVP — iOS app for Jon + wife, TestFlight distribution
 
 This is the living state of the project. Update at the end of every session.
@@ -1781,6 +1781,42 @@ Drag-down-to-dismiss on `MediaViewerScreen` was broken for photos — image dupl
 **iOS** — one-line change in [ImageMediaContent.swift](apps/ios/DailyCadence/DailyCadence/Features/MediaViewer/ImageMediaContent.swift): `DragGesture()` → `DragGesture(minimumDistance: 10, coordinateSpace: .global)`. Pinch-zoom + pan-while-zoomed unaffected (different gesture; the panning math runs in local `offset` state which is stable when zoomed-and-panning).
 
 **Lesson** captured in feedback memory `feedback_debug_enumerate_working_paths.md`: when a fix theory has failed twice, stop iterating on the theory and instead enumerate adjacent paths that work. The contrast between working and broken siblings constrains the search far better than another variation on the same hypothesis. The "video drag works" fact lived in Jon's head, not in the WIP memory file — which is why three sessions kept refining the wrong hypothesis. The WIP memory has been updated to capture both the resolution and the meta-lesson.
+
+### Phase F.1.2.midnight — Day rollover at midnight (added this round)
+
+Before this round: with the app open across midnight, the date header stayed "Today · Saturday" instead of flipping to "Yesterday · Saturday," the Today pill didn't surface, and the week strip's today ring didn't move. The bug: `Calendar.current.isDateInToday(_:)` reads `Date()` each invocation but isn't observed by SwiftUI — when no `@Observable` property changes, no view body re-runs, and the relative-date checks stay frozen at last-render time.
+
+**iOS — store.** [TimelineStore](apps/ios/DailyCadence/DailyCadence/Services/TimelineStore.swift):
+- New `currentDay: Date` property (observed via the class-level `@Observable` macro). Source of truth for "what is today's local-calendar day."
+- `init` subscribes to `UIApplication.significantTimeChangeNotification` — Apple's canonical signal for day rollover, time-zone change, DST shift, and manual clock changes. Same notification Calendar / Reminders / Stocks consume. Singleton lives forever, so the closure-based observer is never removed (no deinit ever runs).
+- `refreshCurrentDay()` is idempotent: compares stored day to `startOfDay(.now)`, no-ops on equality, otherwise wraps the write in `withAnimation(.smooth(duration: 0.5))` so every observer crossfades / slides instead of snapping.
+- `isViewingToday` compares `selectedDate == currentDay` (was: `isDateInToday(selectedDate)`).
+- **selectedDate is not auto-advanced.** The user explicitly chose a day; midnight shouldn't yank them. The Today pill becomes their explicit way back to today.
+
+**iOS — app lifecycle.** [RootView](apps/ios/DailyCadence/DailyCadence/Navigation/RootView.swift) observes `@Environment(\.scenePhase)` and calls `TimelineStore.shared.refreshCurrentDay()` on every `.active` transition. Belt-and-suspenders for the suspended-across-midnight case (iOS may not deliver the system notification reliably across long suspension). The handler is idempotent so the foreground re-check is free when nothing changed.
+
+**iOS — consumers.** Three consumers stopped calling `Calendar.current.isDateInToday(_:)` and now compare against `currentDay`:
+- [TimelineScreen.dayOfWeek](apps/ios/DailyCadence/DailyCadence/Features/Timeline/TimelineScreen.swift) — relative-day labels ("Today · Monday" / "Yesterday · Monday" / "Tomorrow · Monday") use `date == today` / `date == cal.date(byAdding: .day, value: -1, to: today)` etc.
+- [WeekStripView.column(for:)](apps/ios/DailyCadence/DailyCadence/DesignSystem/Components/WeekStripView.swift) — accepts `currentDay: Date` as a new init parameter; `isToday` is `cal.isDate(day, inSameDayAs: currentDay)`. TimelineScreen's `weekStrip` builder forwards `TimelineStore.shared.currentDay`.
+- `TimelineStore.isViewingToday` itself.
+
+**The animation flourish.** [WeekStripView](apps/ios/DailyCadence/DailyCadence/DesignSystem/Components/WeekStripView.swift) — the today-column ring is wrapped in `matchedGeometryEffect(id: "today-ring", in: namespace)`. When midnight rolls over within the displayed week (e.g., Mon → Tue), SwiftUI **slides** the sage ring between adjacent columns instead of fading out + fading in — looks like the today marker is physically walking forward. When the new today is outside the displayed week (cross-week rollover, e.g., user is viewing last week's Saturday and midnight ticks to Sunday of the new week), the ring just fades out — there's no destination column in the rendered view to slide to.
+
+**Per Jon's edge-case request.** The cross-week rollover behaves correctly: if the user is viewing a date in the previous week (e.g., last Saturday) and midnight advances `currentDay` to a date outside the displayed week, the today indicator simply disappears from the strip. The user's selectedDate is preserved; they can navigate back to today via the Today pill.
+
+**Tests** — `TimelineStoreTests` gains 3 cases: `currentDayInitialisedToStartOfToday`, `isViewingTodayDerivesFromCurrentDay`, `refreshCurrentDayIsIdempotent`. All 87 tests pass.
+
+### Phase F.1.2.weekstrip.dates — Week strip date column + dot bump (added this round)
+
+The week strip's dot was 6pt, getting visually lost against the 11pt letter and the pill chrome — a small detail but the dot is the strip's personality (the "did I write today" affordance). Bumped to 9pt (frame 8→11pt for proportional padding) so it holds its own.
+
+Added a day-of-month number row between the letter and the dot — three-row layout matching Apple Calendar's week-strip pattern. Each column now reads (top to bottom): weekday letter (10pt, bold for today) / day number (13pt, semibold for today) / 9pt dot. `.monospacedDigit()` on the number so single-digit days (1-9) and double-digit (10-31) don't shift the column center as the week walks. VStack spacing tightened from 6pt → 4pt to keep the three rows reading as one column.
+
+Strip is ~14pt taller now. Trade is fair — the strip is the at-a-glance navigator and earns the height for at-a-glance day numbers. Today still reads first via the letter+number bold treatment + the existing sage ring.
+
+### Phase F.1.2.captionfix — Edit Caption double-placeholder (added this round)
+
+Pre-existing bug from Phase F.1.2.refresh's caption-edit sheet: both a custom `Text("Add a caption…")` overlay AND the `TextField`'s built-in placeholder ("Caption" — passed as the title parameter) rendered simultaneously when the field was empty, producing visible overlap. Deleted the custom overlay + the wrapping ZStack and used the built-in TextField placeholder with the design copy "Add a caption…". One less moving part; SwiftUI's default placeholder color is fine.
 
 ### Phase F+ feature TODO (designed-for, not-built)
 

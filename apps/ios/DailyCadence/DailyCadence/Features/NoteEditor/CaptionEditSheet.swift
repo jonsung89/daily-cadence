@@ -33,25 +33,15 @@ struct CaptionEditSheet: View {
 
     var body: some View {
         NavigationStack {
-            ZStack(alignment: .topLeading) {
-                if draftCaption.isEmpty {
-                    Text("Add a caption…")
-                        .font(.DS.sans(size: 16, weight: .regular))
-                        .foregroundStyle(Color.DS.ink.opacity(0.4))
-                        .padding(.top, 8)
-                        .padding(.leading, 4)
-                        .allowsHitTesting(false)
-                }
-                TextField(
-                    "Caption",
-                    text: $draftCaption,
-                    axis: .vertical
-                )
-                .font(.DS.sans(size: 16, weight: .regular))
-                .foregroundStyle(Color.DS.ink)
-                .lineLimit(3...10)
-                .textFieldStyle(.plain)
-            }
+            TextField(
+                "Add a caption…",
+                text: $draftCaption,
+                axis: .vertical
+            )
+            .font(.DS.sans(size: 16, weight: .regular))
+            .foregroundStyle(Color.DS.ink)
+            .lineLimit(3...10)
+            .textFieldStyle(.plain)
             .padding(.horizontal, 20)
             .padding(.top, 16)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)

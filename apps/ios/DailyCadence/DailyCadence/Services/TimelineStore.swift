@@ -1,6 +1,8 @@
 import Foundation
 import Observation
 import OSLog
+import SwiftUI
+import UIKit
 
 /// In-memory store for the user's notes.
 ///
@@ -43,6 +45,30 @@ final class TimelineStore {
     /// in views compare cleanly across re-renders.
     private(set) var selectedDate: Date = Calendar.current.startOfDay(for: .now)
 
+    /// Phase F.1.2.midnight — observable source of truth for "what is
+    /// today's local-calendar day." Views that ask "is X today?" read
+    /// this and compare instead of calling `Calendar.current.isDateInToday(_:)`
+    /// directly — the latter reads `Date()` each invocation but isn't
+    /// observed, so views go stale at midnight. This is observed via
+    /// the `@Observable` macro on the class, so reading it inside a
+    /// view's `body` registers the dependency and triggers a re-render
+    /// when `refreshCurrentDay()` advances it.
+    ///
+    /// **Update sources** (subscribed in `init`):
+    /// - `UIApplication.significantTimeChangeNotification` — iOS posts
+    ///   this at midnight, on time-zone change, on DST shift, and on
+    ///   manual clock changes. Same notification Apple's own date-aware
+    ///   apps (Calendar, Reminders, Stocks) consume. Fires while the app
+    ///   is foreground; queued and delivered at next foreground
+    ///   transition when the app is suspended.
+    /// - `RootView` calls `refreshCurrentDay()` on `scenePhase == .active`
+    ///   to belt-and-suspender the suspended-across-midnight case.
+    ///
+    /// `selectedDate` is **not** auto-advanced when this changes. The
+    /// user explicitly chose what day to view; midnight shouldn't yank
+    /// them. The Today pill becomes their way back.
+    private(set) var currentDay: Date = Calendar.current.startOfDay(for: .now)
+
     /// `true` once a load has completed for the **current** `selectedDate`.
     /// Reset to `false` on every `selectDate(_:)` so the skeleton shows
     /// briefly on day-switches (matches the cold-launch loading UX).
@@ -62,6 +88,34 @@ final class TimelineStore {
         let isPreview = ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1"
         self.notes = initialNotes ?? (isPreview ? MockNotes.today : [])
         self.repository = repository
+
+        // Phase F.1.2.midnight — system-driven day rollover. Singleton
+        // lives forever, so we never need to remove this observer (no
+        // deinit ever runs). Closure-based `addObserver` keeps the
+        // handler off the SwiftUI view layer where it belongs.
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.significantTimeChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.refreshCurrentDay()
+        }
+    }
+
+    /// Idempotent — compares the stored `currentDay` to the system's
+    /// real-now day; no-ops when they match, animates the rollover when
+    /// they don't. Safe to call from any code path that suspects the
+    /// day might have shifted: the system midnight notification, app
+    /// foreground transitions, manual time-zone changes. Wrapping the
+    /// write in `withAnimation` lets every observer (date header, Today
+    /// pill, week strip) crossfade / slide rather than snap.
+    func refreshCurrentDay() {
+        let actualDay = Calendar.current.startOfDay(for: .now)
+        guard actualDay != currentDay else { return }
+        log.info("currentDay rollover: \(self.currentDay) → \(actualDay)")
+        withAnimation(.smooth(duration: 0.5)) {
+            currentDay = actualDay
+        }
     }
 
     // MARK: - Day navigation
@@ -97,8 +151,15 @@ final class TimelineStore {
 
     /// `true` when `selectedDate` is today's local-calendar day. Drives the
     /// "Today" pill's visibility.
+    ///
+    /// Phase F.1.2.midnight — compares against the observed `currentDay`
+    /// instead of `Calendar.current.isDateInToday(selectedDate)`. The
+    /// latter reads `Date()` each call but isn't observed, so the pill's
+    /// visibility wouldn't update at midnight. With this comparison,
+    /// every observer of `currentDay` re-evaluates `isViewingToday`
+    /// when midnight rolls over.
     var isViewingToday: Bool {
-        Calendar.current.isDateInToday(selectedDate)
+        selectedDate == currentDay
     }
 
     // MARK: - Live load

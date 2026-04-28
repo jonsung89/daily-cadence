@@ -8,6 +8,41 @@ import Testing
 /// mutate the array, the editor flow silently drops new notes.
 struct TimelineStoreTests {
 
+    @Test @MainActor func currentDayInitialisedToStartOfToday() {
+        // Phase F.1.2.midnight — `currentDay` is the observable source
+        // of truth for "what is today" so views re-render at midnight.
+        let store = TimelineStore(initialNotes: [])
+        let expected = Calendar.current.startOfDay(for: .now)
+        #expect(store.currentDay == expected,
+                "currentDay should initialize to startOfDay(for: .now) so date-aware views render correctly on cold launch")
+    }
+
+    @Test @MainActor func isViewingTodayDerivesFromCurrentDay() {
+        // Phase F.1.2.midnight — `isViewingToday` compares selectedDate
+        // against the observed `currentDay` instead of calling
+        // `Calendar.current.isDateInToday(_:)` directly. Verifying the
+        // semantic: equality means "viewing today," anything else
+        // means "viewing some other day."
+        let store = TimelineStore(initialNotes: [])
+        #expect(store.isViewingToday,
+                "Fresh store with selectedDate == startOfDay(.now) should be viewing today")
+
+        let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: store.currentDay)!
+        store.selectDate(yesterday)
+        #expect(!store.isViewingToday,
+                "After navigating to a previous day, isViewingToday must flip to false so the Today pill surfaces")
+    }
+
+    @Test @MainActor func refreshCurrentDayIsIdempotent() {
+        // Same-day call → no-op. Prevents triggering needless animations
+        // every time scenePhase becomes .active without a real day change.
+        let store = TimelineStore(initialNotes: [])
+        let before = store.currentDay
+        store.refreshCurrentDay()
+        #expect(store.currentDay == before,
+                "Calling refreshCurrentDay when nothing has changed should leave currentDay alone")
+    }
+
     @Test func initialNotesMatchInjectedSeed() {
         let seed = [
             MockNote(occurredAt: .now, type: .mood, content: .text(title: "Test")),

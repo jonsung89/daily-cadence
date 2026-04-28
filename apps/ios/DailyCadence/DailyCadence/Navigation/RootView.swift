@@ -19,6 +19,14 @@ import SwiftUI
 struct RootView: View {
     @State private var selection: RootTab = .today
 
+    /// Phase F.1.2.midnight — covers the "app was suspended across
+    /// midnight" gap. `significantTimeChangeNotification` fires at
+    /// midnight while the app is foreground; iOS may not deliver it
+    /// reliably across suspension. On every active transition, ask the
+    /// store to recompute — idempotent, no-ops when the day hasn't
+    /// changed.
+    @Environment(\.scenePhase) private var scenePhase
+
     /// Drives the open animation + steady-state viewer. Set/cleared
     /// alongside `openProgress` for the matched-geo zoom feel.
     @State private var presentedMedia: PresentedMedia?
@@ -96,6 +104,11 @@ struct RootView: View {
                     userId: userId,
                     day: TimelineStore.shared.selectedDate
                 )
+            }
+            .onChange(of: scenePhase) { _, newPhase in
+                if newPhase == .active {
+                    TimelineStore.shared.refreshCurrentDay()
+                }
             }
     }
 

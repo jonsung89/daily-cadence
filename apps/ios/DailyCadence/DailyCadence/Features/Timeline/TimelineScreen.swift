@@ -496,13 +496,16 @@ struct TimelineScreen: View {
     /// Wraps `WeekStripView` with bindings to the live stores.
     /// `WeekStripStore.daysWithNotes` is read inside `body` so the
     /// Observation framework re-renders the strip when a note add /
-    /// delete / week-change updates the set.
+    /// delete / week-change updates the set. Phase F.1.2.midnight —
+    /// also reads `TimelineStore.currentDay` so the today indicator
+    /// re-positions when midnight rolls over.
     private var weekStrip: some View {
         let selected = TimelineStore.shared.selectedDate
         let days = WeekStripView.days(forWeekContaining: selected)
         return WeekStripView(
             days: days,
             selectedDay: selected,
+            currentDay: TimelineStore.shared.currentDay,
             filledDays: WeekStripStore.shared.daysWithNotes,
             onTap: { tapped in
                 TimelineStore.shared.selectDate(tapped)
@@ -575,14 +578,20 @@ struct TimelineScreen: View {
     private var dayOfWeek: String {
         let date = TimelineStore.shared.selectedDate
         let weekday = date.formatted(.dateTime.weekday(.wide))
+        // Phase F.1.2.midnight — relative-day labels compare against the
+        // observed `currentDay` rather than calling
+        // `Calendar.current.isDateInToday(_:)` etc. The latter reads
+        // `Date()` each invocation but isn't observed, so the label
+        // wouldn't update at midnight. Reading `currentDay` here
+        // registers TimelineScreen as an observer; midnight rollover
+        // crossfades the label via the `withAnimation` in the store.
+        let today = TimelineStore.shared.currentDay
         let cal = Calendar.current
-        // Render as "Today · Monday" / "Yesterday · Sunday" / etc. so the
-        // user keeps the weekday context for the relative-day labels.
-        // `.textCase(.uppercase)` on the Text view uppercases at render
-        // time; the strings here use mixed-case for readability.
-        if cal.isDateInToday(date)     { return "Today · \(weekday)" }
-        if cal.isDateInYesterday(date) { return "Yesterday · \(weekday)" }
-        if cal.isDateInTomorrow(date)  { return "Tomorrow · \(weekday)" }
+        if date == today { return "Today · \(weekday)" }
+        if let yesterday = cal.date(byAdding: .day, value: -1, to: today),
+           date == yesterday { return "Yesterday · \(weekday)" }
+        if let tomorrow = cal.date(byAdding: .day, value: 1, to: today),
+           date == tomorrow { return "Tomorrow · \(weekday)" }
         return weekday
     }
 

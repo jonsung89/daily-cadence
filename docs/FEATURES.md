@@ -99,9 +99,9 @@ Two-row layout introduced in Phase F.0.3:
 
 Minimal motivational indicator slotted between the date header and the view toggle. Renders the current week as 7 columns (locale-aware first-day-of-week from `Calendar.current.firstWeekday`).
 
-- Each column: single-letter day abbreviation on top (`Calendar.veryShortWeekdaySymbols` — "S M T W T F S" in en_US), small dot below.
+- Each column: three rows top-to-bottom — single-letter weekday abbreviation (`Calendar.veryShortWeekdaySymbols` — "S M T W T F S" in en_US, 10pt), day-of-month number (13pt, `.monospacedDigit()` so 1-digit and 2-digit numbers don't shift the column center), 9pt dot.
 - **Dot fill** — sage when the day has at least one non-deleted note, hollow ring (1pt `fg2` @ 0.4) otherwise.
-- **Today** — column gets a 1pt sage-tinted ring around its 8pt rounded background.
+- **Today** — column gets a 1pt sage-tinted ring around its 8pt rounded background. Phase F.1.2.midnight — when midnight rolls over within the displayed week (Mon → Tue, etc.), the ring **slides** between adjacent columns via `matchedGeometryEffect` instead of fading out / fading in. Cross-week rollovers (the new today is outside the displayed week) just fade the ring out — no destination to slide to. Driven by `TimelineStore.currentDay`, which updates from `UIApplication.significantTimeChangeNotification` and a `scenePhase == .active` re-check.
 - **Selected day** — sage-soft pill background fills the column. Today + selected = pill + ring stacked.
 - **Tappable** — tap a column → `TimelineStore.shared.selectDate(...)`. Doubles as week-level navigation alongside the chevrons.
 - Sized ~36pt tall total. Padded 12pt horizontal so the columns spread across the screen evenly.
