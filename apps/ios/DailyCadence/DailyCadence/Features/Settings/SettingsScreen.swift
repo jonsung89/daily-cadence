@@ -201,22 +201,17 @@ struct NoteTypesRow: View {
             Text(summary)
                 .font(.DS.body)
                 .foregroundStyle(Color.DS.fg2)
-                // Prevent the trailing detail from wrapping ("6 customized"
-                // → "6 custo / mized" on two lines once the leading dots
-                // grew past 7). `fixedSize` keeps the summary's natural
-                // width; the leading label can truncate before this does.
                 .lineLimit(1)
-                .fixedSize(horizontal: true, vertical: false)
         }
     }
 
     private var summary: String {
         let count = NoteTypeStyleStore.shared.overrides.count
-        switch count {
-        case 0: return "Default"
-        case 1: return "1 customized"
-        default: return "\(count) customized"
-        }
+        // "Default" reads as a meaningful state when no overrides are
+        // set; once the user customizes any type the trailing detail
+        // becomes a bare count so the row stays compact and "Note Types"
+        // (the row's identity) never has to truncate.
+        return count == 0 ? "Default" : "\(count)"
     }
 }
 
