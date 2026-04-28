@@ -10,9 +10,10 @@ import SwiftUI
 ///   the type is represented by a single chip near the title. The user
 ///   never has to interact with a type picker just to start typing.
 /// - **B. Searchable sheet.** Tap the chip → this sheet presents.
-///   Search field at the top + 2-column grid of all types. Type to
-///   filter live, tap any type to commit + dismiss. Scales to N types
-///   without changing the UI.
+///   Search field at the top + a wrapping flow of all types (chips
+///   sized to their natural width, evenly spread per row). Type to
+///   filter live, tap any type to commit + dismiss. Scales to N
+///   types without changing the UI.
 ///
 /// Returns the chosen type via `onSelect`. Cancel via the toolbar
 /// dismisses without changing the selection.
@@ -27,15 +28,10 @@ struct NoteTypePickerSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var query: String = ""
 
-    private let columns: [GridItem] = [
-        GridItem(.flexible(), spacing: 12),
-        GridItem(.flexible(), spacing: 12),
-    ]
-
     var body: some View {
         NavigationStack {
             ScrollView {
-                LazyVGrid(columns: columns, spacing: 12) {
+                FlowLayout(spacing: 12, rowSpacing: 12, alignment: .center) {
                     ForEach(filteredTypes) { type in
                         TypeChip(
                             type: type,
@@ -45,7 +41,6 @@ struct NoteTypePickerSheet: View {
                                 dismiss()
                             }
                         )
-                        .frame(maxWidth: .infinity)
                     }
                 }
                 .padding(.horizontal, 16)
