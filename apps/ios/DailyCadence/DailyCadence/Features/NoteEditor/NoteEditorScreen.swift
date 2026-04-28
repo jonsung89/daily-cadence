@@ -69,9 +69,6 @@ struct NoteEditorScreen: View {
             initialDraft = .shared
         }
         self._draft = State(wrappedValue: initialDraft)
-        self._typePickerExpanded = State(
-            wrappedValue: editing == nil && initialDraft.isEmpty
-        )
     }
 
     @State private var isBackgroundPickerPresented = false
@@ -86,18 +83,11 @@ struct NoteEditorScreen: View {
     /// momentarily drops (e.g. when presenting the Background sheet).
     @State private var lastEditedField: NoteEditorField = .title
 
-    /// Whether the type picker is showing its full row of options or
-    /// collapsed to a single chip (the current selection).
-    ///
-    /// **Default — based on draft state**: when the user is starting a
-    /// fresh note (`draft.isEmpty`) we show the full row so the available
-    /// categories are immediately discoverable. When they're resuming a
-    /// retained draft (drag-dismissed earlier and re-opened) we collapse
-    /// to the chosen chip — they've already committed.
-    /// Edit mode collapses to the chip (the user already committed to a
-    /// type). Create mode expands when the draft is empty (discoverability)
-    /// and collapses when resuming a draft (the user already chose).
-    @State private var typePickerExpanded: Bool
+    /// Phase F.1.2.picker — drives the searchable type picker sheet.
+    /// The editor opens straight to writing (no picker visible);
+    /// tapping the type chip near the title presents the sheet.
+    /// "Combo A+B" rationale captured in PROGRESS.md.
+    @State private var isTypePickerSheetPresented: Bool = false
 
     /// Drives the Cancel-button confirmation dialog. Skipped entirely
     /// when there's nothing to lose (draft is empty).
@@ -184,6 +174,15 @@ struct NoteEditorScreen: View {
             }
             .sheet(isPresented: $isBackgroundPickerPresented) {
                 BackgroundPickerView(selection: $draft.background)
+            }
+            // Phase F.1.2.picker — searchable note-type picker. Tapping
+            // the type chip near the title presents this; cancel keeps
+            // the existing selection.
+            .sheet(isPresented: $isTypePickerSheetPresented) {
+                NoteTypePickerSheet(
+                    selectedType: draft.selectedType,
+                    onSelect: { picked in draft.selectedType = picked }
+                )
             }
             .photosPicker(
                 isPresented: $isImagePickerPresented,
@@ -337,37 +336,23 @@ struct NoteEditorScreen: View {
         }
     }
 
-    // MARK: - Type picker
+    // MARK: - Type picker (Phase F.1.2.picker — combo A+B)
     //
-    // Collapsed (default): a single chip showing the selected type. Tapping
-    // it expands the full row.
-    // Expanded: every type listed; tapping any one of them — including the
-    // currently-selected one — re-collapses. That makes the selected chip
-    // its own "close" affordance, no extra X button required.
+    // Single chip showing the current selected type. Tap → presents
+    // `NoteTypePickerSheet` (searchable + scrollable grid). The editor
+    // opens straight to writing; the user only interacts with the type
+    // picker when they explicitly want to change it. Scales to 7, 17,
+    // or 70 types without changing this UI.
 
     private var typePicker: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                if typePickerExpanded {
-                    ForEach(NoteType.textEditorPickable) { type in
-                        TypeChip(type: type, isSelected: draft.selectedType == type) {
-                            draft.selectedType = type
-                            withAnimation(.easeOut(duration: 0.2)) {
-                                typePickerExpanded = false
-                            }
-                        }
-                    }
-                } else {
-                    TypeChip(type: draft.selectedType, isSelected: true) {
-                        withAnimation(.easeOut(duration: 0.2)) {
-                            typePickerExpanded = true
-                        }
-                    }
-                }
+        HStack {
+            TypeChip(type: draft.selectedType, isSelected: true) {
+                isTypePickerSheetPresented = true
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
+            Spacer()
         }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
     }
 
     // MARK: - Form

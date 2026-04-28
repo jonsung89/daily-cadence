@@ -216,13 +216,15 @@ Sheet presented from the FAB menu's **Text Note** option.
 - Cancel / Save in nav bar.
 - Whole content is wrapped in a `ScrollView(.vertical)` with `.scrollDismissesKeyboard(.interactively)` so the canvas can be panned even when the keyboard is up.
 
-### Type picker (top of editor)
+### Type picker (top of editor) — Phase F.1.2.picker
 
-- Default state on a fresh open: **expanded** showing all `NoteType.textEditorPickable` chips (6: General + the five categories — `.media` is excluded since text notes aren't media). On a resumed-draft open: **collapsed** to the chosen chip.
-- Tapping a chip selects it and collapses the row to just that chip.
-- Tapping the collapsed chip re-expands the full row.
-- Tapping any chip in expanded mode (including the currently-selected one) collapses.
-- Default selected type: `.general` (neutral, warm-gray pigment, generic note icon — added so quick notes don't get implicitly tagged).
+**Defer the decision + searchable sheet** (combo A+B from the captured TODO discussion). The editor opens straight to writing — the type is represented by a single chip near the title field showing the current selection. The user never has to interact with a type picker just to start typing.
+
+- Default selected type: `.general` (neutral, warm-gray pigment, generic note icon — quick notes don't get implicitly tagged).
+- Tap the chip → presents `NoteTypePickerSheet` (`.medium` / `.large` detents) with a search field at the top + 2-column grid of all `NoteType.textEditorPickable` (`.media` excluded — auto-tagged on bare-media saves).
+- Type to filter live — `title.lowercased().contains(query.lowercased())` against the type's display name.
+- Tap a grid cell → commits the selection + dismisses. Cancel via toolbar dismisses without changing.
+- Scales to N types without changing the UI — handles the existing 7 system types, future custom user types, and any new system types added via migration.
 
 ### Title field
 
