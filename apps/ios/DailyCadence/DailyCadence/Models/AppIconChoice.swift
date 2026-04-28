@@ -98,11 +98,13 @@ extension AppIconChoice {
 
     /// Glyph color follows the same per-theme rule the renderer used:
     /// - Most tiles: warm taupe (#EAE6E1) — brand-consistent off-white.
-    /// - Blush: pure white (#FFFFFF) — taupe was muddy against the cool pink.
+    /// - Blush: near-white (#FAFAFA) — visually reads as white on cool pink
+    ///   without tripping Springboard's "low color variety = template
+    ///   icon → render blank" heuristic that pure #FFFFFF triggered.
     /// - Taupe theme: ink (#2C2620) — taupe glyph on taupe tile would blend.
     var glyphColor: Color {
         switch self {
-        case .blush:    return Color(hex: 0xFFFFFF)
+        case .blush:    return Color(hex: 0xFAFAFA)
         case .taupe:    return Color(hex: 0x2C2620)
         default:        return Color(hex: 0xEAE6E1)
         }
