@@ -1,6 +1,6 @@
 # DailyCadence — Progress
 
-**Last updated:** 2026-04-28 (Phase F.1.2.bgcache — kills the post-refetch flicker on image-background cards. New `BackgroundImageCache` singleton wraps `NSCache<NSString, UIImage>` keyed by `backgrounds.id.uuidString` (stable). Card render paths (NoteCard, KeepCard, NoteEditorScreen canvas + toolbar icon) replaced `Image(uiImage: UIImage(data:))` — which re-decodes the JPEG bytes on every body re-evaluation — with `BackgroundImageCache.shared.image(forKey: cacheKey, data:)`, which decodes once per session per image and returns cached `UIImage` on every subsequent render. Same pattern Apple's UIKit / SDWebImage / Kingfisher / Nuke use for their decoded-image tier. `MockNote.ImageBackground` gains `cacheKey: String?` populated in `fetchBackground` from the row id; `nil` for client-side images (editor preview before save) which fall through to direct decode. 90/90 tests pass.)
+**Last updated:** 2026-04-28 (Phase F.1.2.appicon — brand app icon installed (sage tile + Manrope opening-quote glyph) + 7 alternate icons (one per primary theme color: Blush, Coral, Mulberry, Taupe, Lavender, Storm, Teal) registered as Asset Catalog alternates. New Settings → App Icon picker (8-cell grid, current selection highlighted) calls `UIApplication.setAlternateIconName(_:)` on tap. Icons rendered via Core Graphics + Core Text (no SwiftUI ImageRenderer — needed an NSApplication runloop the script couldn't easily provide); rendering script lives at `/tmp/render-app-icons.swift`. Phase 4 (auto-prompt on theme change with "Don't ask again") not shipped this session — captured as a TODO. Sign in with Apple wiring also captured as a TODO since Apple Developer enrollment is now complete and that's the next critical-path item before TestFlight.)
 **Current phase:** Phase 1 MVP — iOS app for Jon + wife, TestFlight distribution
 
 This is the living state of the project. Update at the end of every session.
@@ -1978,9 +1978,52 @@ Schema is reserved-but-not-yet-rendered. Future structured-data renderer (captur
 
 Build clean, all 88 tests pass.
 
+### Phase F.1.2.appicon — Brand app icon + per-theme alternates (added this round)
+
+Two pieces in one round:
+
+**1. Brand icon installed** — sage tile (`#5A7B6D`) with the Manrope-ExtraBold opening-quote glyph (`\u{201C}`), 1.03× tile size, ink-centered. Replaces the empty Xcode-default AppIcon set. Renders at 1024×1024 (Asset Catalog auto-derives all device sizes). Solid square — no rounded corners, no transparency — iOS clips its own continuous-corner mask at render time, so providing pre-rounded corners would compound visibly.
+
+**2. Per-theme alternates** — 7 additional icon variants (one per primary theme: Blush, Coral, Mulberry, Taupe, Lavender, Storm, Teal) registered as Asset Catalog alternates via `ASSETCATALOG_COMPILER_ALTERNATE_APP_ICON_NAMES` (set in both Debug + Release configs in `project.pbxproj`). User picks via Settings → App Icon → 8-cell grid, current selection ringed in sage. Tap calls `UIApplication.setAlternateIconName(_:)` — iOS shows its own "DailyCadence has changed icons" confirmation alert.
+
+**Glyph color rule**: warm taupe (`#EAE6E1`) on darker tiles for brand-consistent off-white. Two exceptions:
+- **Blush** uses pure white (`#FFFFFF`) — taupe was muddy against the cool pink.
+- **Taupe theme** uses ink (`#2C2620`) — taupe-on-taupe would blend.
+
+**Render pipeline** — pure Core Graphics + Core Text (`/tmp/render-app-icons.swift`). First attempt used SwiftUI `ImageRenderer` but it hangs in a Swift script context (needs an NSApplication runloop the script can't easily provide). CG version registers Manrope.ttf via `CTFontManagerRegisterFontsForURL`, fills tile, draws the glyph ink-centered via `CTLineGetImageBounds`. No optical-center nudge needed in the CG version (SwiftUI Text positions by typographic bounds which leaves quote-mark ink visually high — that's why the in-app `DailyCadenceLogomark` applies a 0.185em downward offset; CG with ink-centered bounds doesn't need it).
+
+**Files**:
+- [Models/AppIconChoice.swift](apps/ios/DailyCadence/DailyCadence/Models/AppIconChoice.swift) — enum mapping primary theme id ↔ alternate icon name + display name + tile/glyph colors for the picker preview rendering.
+- [Features/Settings/AppIconPickerScreen.swift](apps/ios/DailyCadence/DailyCadence/Features/Settings/AppIconPickerScreen.swift) — picker UI + `ThemeIconPreview` view that re-renders the same shape at any size for the picker thumbnails (no `UIImage(named:)` fetch — alternate-icon assets aren't exposed via that API).
+- [Services/AppPreferencesStore.swift](apps/ios/DailyCadence/DailyCadence/Services/AppPreferencesStore.swift) — adds `iconSyncPromptDismissed: Bool` for the future theme-change → icon-suggest prompt's "Don't ask again" persistence.
+- [Features/Settings/SettingsScreen.swift](apps/ios/DailyCadence/DailyCadence/Features/Settings/SettingsScreen.swift) — adds `AppIconRow` + `NavigationLink` in the Appearance section.
+
+**Phase 4 not shipped this round** — captured as a TODO below: theme-change → icon-suggest prompt with three buttons (Update | Not now | Don't ask again). The picker is fully usable manually without it.
+
 ### Phase F+ feature TODO (designed-for, not-built)
 
 Captured here so a fresh session can pick up the roadmap. Each line corresponds to schema fields that are reserved but unused.
+
+- **Sign in with Apple — critical path to TestFlight.** Apple Developer enrollment cleared 2026-04-28 — this is now the next blocker. Steps:
+  1. **Apple Developer web** (developer.apple.com) — Identifiers → click `com.jonsung.DailyCadence` → enable the **Sign in with Apple** capability checkbox → Save. Then create a new **Services ID** (e.g., `com.jonsung.DailyCadence.signin`) → enable Sign in with Apple → configure with the App ID's primary domain. Then Keys → "+" → register a key with **Sign in with Apple** enabled → download the `.p8` file (one-time download, save to 1Password). Note the Key ID + Team ID.
+  2. **Supabase dashboard** → Authentication → Providers → **Apple** → enable → paste Services ID, Team ID, Key ID, .p8 contents. Save.
+  3. **Xcode** — DailyCadence target → Signing & Capabilities → "+" Capability → **Sign in with Apple**.
+  4. **iOS code** — `import AuthenticationServices`. Build a `SignInWithAppleButton` in Settings → Account section. Wire to `ASAuthorizationAppleIDProvider().createRequest()` with `.fullName, .email` scopes. On success, take the `identityToken` from the credential and call `AppSupabase.client.auth.signInWithIdToken(provider: .apple, idToken: tokenString, nonce: nonce)`. **Anon-link path** (critical — preserves existing notes): if `AuthStore.currentUserId` exists from anonymous bootstrap, use the link-identity flow (`auth.linkIdentity(...)`) instead of a fresh sign-in so the anon user's notes carry over to the new Apple-backed identity.
+  5. **AuthStore extensions** — add `signInWithApple(...) async throws` method that handles the link-vs-fresh decision internally. Update `lastError` on failure.
+  6. **Settings UI** — under "Account" section, replace/augment the "User ID" row with "Sign in with Apple" button (when anon) or "Signed in as: jon@example.com / Sign Out" (when Apple-linked).
+  7. **Test paths**: cold launch as anon → sign in with Apple → notes preserved. Sign out → cold launch → app shows sign-in prompt or anon-rebootstrap (decide UX). New device, sign in with Apple → notes appear from server (RLS already scopes by `auth.uid()`).
+
+  Once SIWA is shipped + verified on simulator + a real device, we can finally do the first TestFlight upload (also captured below).
+
+- **Phase F.1.2.appicon Phase 4 — theme-change → icon-suggest prompt (alert with "Don't ask again").** The picker (Settings → App Icon) ships fully functional in the previous round. This is the convenience layer that auto-suggests an icon update when the user picks a new theme color in Settings → Appearance → Theme color. Implementation:
+  - Hook into theme changes — easiest spot is `PrimaryColorPickerScreen.swift` where the user actually commits a new primary swatch (NOT in `ThemeStore` itself, which would also fire on programmatic / launch-time selections we don't want to prompt for).
+  - On commit, check `AppPreferencesStore.shared.iconSyncPromptDismissed` (already wired) — if true, skip silently.
+  - Also skip if the matching icon (`AppIconChoice(rawValue: themeId)`) is already installed (`UIApplication.shared.alternateIconName == matchingChoice.alternateIconName`) — no point asking when there's nothing to change.
+  - Otherwise, show a SwiftUI `.alert(...)` with title like "Update app icon to match \(themeName)?" and three actions: **"Update"** (calls `setAlternateIconName(matchingChoice.alternateIconName)`), **"Not now"** (no-op), **"Don't ask again"** (sets `iconSyncPromptDismissed = true`). Use `Alert.Button.default/.cancel/.destructive` for visual hierarchy.
+  - Also flip the Settings → App Icon → "Ask when theme color changes" toggle's behavior so it controls the SAME `iconSyncPromptDismissed` flag (already wired in the picker — verify the flow end-to-end).
+  - Test path: change theme → prompt fires → tap Update → iOS confirmation alert → icon updates. Change theme again → tap "Don't ask again" → flip to a different theme → no prompt. Toggle the "Ask when theme color changes" switch on → next theme change prompts again.
+
+- **TestFlight first build + Eunji invite.** Gated on Sign in with Apple landing (since the build needs to ship with real auth, not just anon). Steps once SIWA works: Xcode → Product → Destination "Any iOS Device" → Product → Archive → Organizer → Distribute App → App Store Connect → Upload. First upload triggers a ~10-30 min automated review; once it passes, the build appears in App Store Connect → TestFlight. Eunji's already invited (accepted the team invite per 2026-04-28 session); she'll see the build appear in her TestFlight app once Jon adds it to the Internal Testing group. Privacy manifest (`PrivacyInfo.xcprivacy`) is also needed before upload — Apple flags missing manifests since iOS 17.4. ~10-line file declaring `NSPrivacyAccessedAPITypes` for the few "required reason" APIs the project touches (file timestamps, UserDefaults, system boot time, disk space — the usual suspects).
 
 - ~~**Media-note Storage upload pipeline**~~ — Shipped Phase F.1.1a (`e79e152`). Standalone media notes encode via `NotesRepository.encodeMediaBlock` (uploads bytes to the `note-media` Storage bucket, returns `MediaRef`s in the body block DTO). Decode reconstructs `MediaPayload` with refs populated and inline bytes nil; `MediaResolver` lazy-fetches via signed URL. Inline media inside text notes uses the same path. Round-trip verified by inspection 2026-04-28.
 - ~~**Image-background Storage upload**~~ — Shipped Phase F.1.2.bgpersist (see entry above). Image backgrounds round-trip through `note-backgrounds` bucket + `backgrounds` table. Library / cross-note reuse aspect (each upload INSERTs a `backgrounds` row that the user's library carries forward + browse / re-pick UI) is still open as a follow-on — needs a Settings → Backgrounds Library screen + a `BackgroundLibraryStore` to surface saved backgrounds for re-use across notes.

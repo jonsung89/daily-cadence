@@ -62,6 +62,14 @@ struct SettingsScreen: View {
                 NoteTypesRow()
             }
             .listRowBackground(Color.DS.bg2)
+
+            // Phase F.1.2.appicon — Settings → App Icon picker.
+            NavigationLink {
+                AppIconPickerScreen()
+            } label: {
+                AppIconRow()
+            }
+            .listRowBackground(Color.DS.bg2)
         } header: {
             Text("Appearance")
         }
@@ -212,6 +220,30 @@ struct NoteTypesRow: View {
         // becomes a bare count so the row stays compact and "Note Types"
         // (the row's identity) never has to truncate.
         return count == 0 ? "Default" : "\(count)"
+    }
+}
+
+/// Phase F.1.2.appicon — Settings → App Icon row. Shows the
+/// currently-installed icon as a tiny preview tile + name. Reads
+/// `UIApplication.shared.alternateIconName` directly so the row stays
+/// in sync with whatever the user picked (or whatever the
+/// theme-change prompt installed).
+struct AppIconRow: View {
+    var body: some View {
+        let current = AppIconChoice.from(
+            alternateIconName: UIApplication.shared.alternateIconName
+        )
+        return HStack(spacing: 14) {
+            ThemeIconPreview(choice: current, size: 28)
+                .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+            Text("App Icon")
+                .font(.DS.body)
+                .foregroundStyle(Color.DS.ink)
+            Spacer(minLength: 8)
+            Text(current.displayName)
+                .font(.DS.body)
+                .foregroundStyle(Color.DS.fg2)
+        }
     }
 }
 

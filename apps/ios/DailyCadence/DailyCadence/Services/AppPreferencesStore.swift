@@ -29,6 +29,21 @@ final class AppPreferencesStore {
         }
     }
 
+    // MARK: - App icon (Phase F.1.2.appicon)
+
+    private static let iconSyncPromptDismissedKey = "DailyCadence.iconSyncPromptDismissed"
+
+    /// True once the user picked **"Don't ask again"** on the
+    /// theme-change → icon-suggest prompt. When true, `ThemeStore`
+    /// silently skips the prompt on subsequent theme changes; the user
+    /// can still pick an icon manually via Settings → App Icon, and
+    /// can re-enable the prompt from the same screen.
+    var iconSyncPromptDismissed: Bool = false {
+        didSet {
+            UserDefaults.standard.set(iconSyncPromptDismissed, forKey: Self.iconSyncPromptDismissedKey)
+        }
+    }
+
     init(defaults: UserDefaults = .standard) {
         if let raw = defaults.string(forKey: Self.defaultTodayViewKey),
            let mode = Self.parse(raw) {
@@ -36,6 +51,7 @@ final class AppPreferencesStore {
         } else {
             self.defaultTodayView = .timeline
         }
+        self.iconSyncPromptDismissed = defaults.bool(forKey: Self.iconSyncPromptDismissedKey)
     }
 
     // MARK: - Codec
