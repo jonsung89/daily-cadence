@@ -120,16 +120,28 @@ struct ImageMediaContent: View {
     private var panOrDismissGesture: some Gesture {
         DragGesture()
             .onChanged { value in
-                if scale > 1 {
-                    offset = CGSize(
-                        width: lastOffset.width + value.translation.width,
-                        height: lastOffset.height + value.translation.height
-                    )
-                } else if value.translation.height > 0 {
-                    let progress = min(value.translation.height / dismissProgressDenominator, 1.0)
-                    dismissOffset = value.translation
-                    dismissProgress = progress
-                    dismissScale = 1.0 - progress * 0.3
+                // Phase F.1.2.zoomfix — explicitly disable animations
+                // on the gesture's binding writes. Without this, an
+                // ambient SwiftUI transaction (from a parent's
+                // `.animation` modifier or a still-resolving
+                // `withAnimation` from the open zoom) could attach to
+                // the writes and interpolate offset/scale toward each
+                // new gesture target — manifesting as duplicate-image
+                // shake during the drag.
+                var noAnimation = Transaction()
+                noAnimation.disablesAnimations = true
+                withTransaction(noAnimation) {
+                    if scale > 1 {
+                        offset = CGSize(
+                            width: lastOffset.width + value.translation.width,
+                            height: lastOffset.height + value.translation.height
+                        )
+                    } else if value.translation.height > 0 {
+                        let progress = min(value.translation.height / dismissProgressDenominator, 1.0)
+                        dismissOffset = value.translation
+                        dismissProgress = progress
+                        dismissScale = 1.0 - progress * 0.3
+                    }
                 }
             }
             .onEnded { value in
