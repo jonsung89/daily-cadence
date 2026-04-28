@@ -1,6 +1,6 @@
 # DailyCadence — Progress
 
-**Last updated:** 2026-04-28 (Phase F.1.2.scrolledge — Apple Messages-style soft fade as content scrolls under the status bar on the Today screen. iOS 26 `.scrollEdgeEffectStyle(.soft, for: .top)` on TimelineScreen's main ScrollView. The LoadingBar overlay is a sibling outside the ScrollView in the view tree, so it stays above the fade and remains fully opaque while a fetch is in flight. Other scroll surfaces (Settings List, placeholder screens) use their own platform-native chrome and didn't need the modifier this round.)
+**Last updated:** 2026-04-28 (Phase F.1.2.scrolledge — Apple Messages-style soft fade as content scrolls toward the top edge of the Today screen. **Manual `LinearGradient` overlay**, not iOS 26's `.scrollEdgeEffectStyle` — the latter ties to a visible toolbar's chrome, but TimelineScreen explicitly hides the navigation bar for its custom date header. The gradient is a 36pt cream-to-clear top-edge overlay layered above the ScrollView and below the LoadingBar overlay, with `.allowsHitTesting(false)` so taps pass through. Pre-iOS-26 pattern, still required for any custom-header design.)
 **Current phase:** Phase 1 MVP — iOS app for Jon + wife, TestFlight distribution
 
 This is the living state of the project. Update at the end of every session.
@@ -1839,15 +1839,17 @@ Strip is ~14pt taller now. Trade is fair — the strip is the at-a-glance naviga
 
 Pre-existing bug from Phase F.1.2.refresh's caption-edit sheet: both a custom `Text("Add a caption…")` overlay AND the `TextField`'s built-in placeholder ("Caption" — passed as the title parameter) rendered simultaneously when the field was empty, producing visible overlap. Deleted the custom overlay + the wrapping ZStack and used the built-in TextField placeholder with the design copy "Add a caption…". One less moving part; SwiftUI's default placeholder color is fine.
 
-### Phase F.1.2.scrolledge — Apple Messages-style scroll-edge soft fade (added this round)
+### Phase F.1.2.scrolledge — Top-edge soft fade on the Today scroll (added this round)
 
-Today screen content now fades smoothly into the status bar area as the user scrolls — matches the pattern Apple ships in Messages, Mail, and Notes. Before this round content scrolled cleanly through the status bar, which read fine for plain backgrounds but would have looked rough against any future content (header text scrolling under the time / battery indicators).
+Today screen content fades smoothly into the top edge as the user scrolls — matches the visual pattern Apple ships in Messages / Mail / Notes. Before this round, the date header and week strip scrolled cleanly off the top edge with a hard cut against the status-bar boundary.
 
-**iOS** — single-line addition in [TimelineScreen.swift](apps/ios/DailyCadence/DailyCadence/Features/Timeline/TimelineScreen.swift): `.scrollEdgeEffectStyle(.soft, for: .top)` on the main outer `ScrollView`. iOS 26's declarative API for this — added at WWDC25 specifically for the soft-fade pattern. Three style values available: `.automatic` (system-chosen default), `.soft` (the fade), `.hard` (a thin separator). Soft is the right call for a calm Today-screen vibe; hard is more for technical / form-style screens.
+**Why we couldn't use iOS 26's native API.** First attempt this round was `.scrollEdgeEffectStyle(.soft, for: .top)` — Apple's declarative API for this exact pattern, added at WWDC25. It compiled but produced no visible effect because the modifier ties to a **visible toolbar's chrome**, and TimelineScreen explicitly hides the navigation bar (`.toolbar(.hidden, for: .navigationBar)`) for its custom date header. iOS 26's API is for screens that use a system toolbar — not for custom-header designs like this one.
 
-**Layer ordering.** The [LoadingBar](apps/ios/DailyCadence/DailyCadence/DesignSystem/Components/LoadingBar.swift) overlay sits at the top of the screen as an `.overlay(alignment: .top)` on the NavigationStack — outside the ScrollView in the view tree, so the soft fade doesn't dim it. The bar stays fully opaque against the status bar even while content fades behind it during a fetch. Same applies to any future top-pinned chrome.
+**What landed instead.** A manual `LinearGradient` overlay along the top edge: cream (`Color.DS.bg1`) at the very top, fading to `bg1.opacity(0)` 36pt down. `.allowsHitTesting(false)` so taps pass through. Pre-iOS-26 pattern, still standard for any screen that doesn't use a system toolbar — Apple Calendar's day view does the same thing.
 
-**Out of scope this round** — Settings (uses `List` with its own platform appearance), placeholder screens (CalendarScreen, DashboardScreen, LibraryScreen — stubs without scrollable content yet), the editor sheets (presented modally with their own handle chrome). Each can adopt the same modifier when they get real content.
+**Layer ordering.** Two `.overlay(alignment: .top)` modifiers on the ScrollView — gradient added FIRST in source order so it sits beneath the [LoadingBar](apps/ios/DailyCadence/DailyCadence/DesignSystem/Components/LoadingBar.swift) overlay (which is added second). The loading bar stays fully opaque above the fade during a fetch.
+
+**Out of scope this round** — Settings (uses `List` with its own platform appearance), placeholder screens (CalendarScreen, DashboardScreen, LibraryScreen — stubs without scrollable content yet), the editor sheets. Each can adopt the same `LinearGradient` overlay pattern when needed.
 
 ### Phase F.1.2.recipe — Recipe note type (added this round)
 
