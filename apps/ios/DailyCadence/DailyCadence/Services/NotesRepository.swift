@@ -260,12 +260,36 @@ final class NotesRepository {
     private func encodeBackground(_ background: MockNote.Background?, userId: UUID) async throws -> UUID? {
         guard let background else { return nil }
         switch background {
-        case .color:
-            // Swatch background_id resolution is a separate F+ TODO —
-            // requires looking up the user's matching backgrounds-library
-            // row (or seeding one). Leaving as nil keeps swatch backgrounds
-            // session-only for now (matches existing behavior).
-            return nil
+        case .color(let swatchId):
+            // Phase F.1.2.swatchpersist — find-or-INSERT a per-user
+            // `backgrounds` row for this swatch. SELECT first (most users
+            // re-pick the same handful of swatches, so the cache hit rate
+            // is high in practice); if missing, INSERT a new row keyed
+            // by the design-system swatch id. Future enhancement: an
+            // in-memory `swatchId → backgrounds.id` cache to skip the
+            // SELECT after the first hit per session. Phase 1 lookups
+            // are 1 row each, RLS-scoped to the user — cheap enough.
+            if let existing = try await fetchBackgroundIdForSwatch(swatchId, userId: userId) {
+                return existing
+            }
+            let row = BackgroundRowInsert(
+                user_id: userId,
+                label: nil,
+                kind: "color",
+                swatch_id: swatchId,
+                color_hex: nil,
+                image_url: nil,
+                opacity: 1.0
+            )
+            let inserted: BackgroundRow = try await AppSupabase.client
+                .from("backgrounds")
+                .insert(row, returning: .representation)
+                .select()
+                .single()
+                .execute()
+                .value
+            log.info("Inserted swatch backgrounds row id=\(inserted.id) swatch=\(swatchId)")
+            return inserted.id
         case .image(let img):
             let storage = MediaStorageProvider.backgrounds
             let ref = try await storage.upload(
@@ -295,12 +319,14 @@ final class NotesRepository {
         }
     }
 
-    /// Phase F.1.2.bgpersist — fetches a `backgrounds` row by id and
-    /// resolves it back to a `MockNote.Background`. For `image` rows,
-    /// reconstructs a `MediaRef` from the stored bucket path, signs a
-    /// short-lived URL via the backgrounds storage impl, and downloads
-    /// the bytes. Returns nil on any failure or for `color` rows (the
-    /// latter is the swatch-resolver F+ TODO).
+    /// Phase F.1.2.bgpersist + F.1.2.swatchpersist — fetches a
+    /// `backgrounds` row by id and resolves it back to a
+    /// `MockNote.Background`. Image rows reconstruct a `MediaRef` from
+    /// the stored bucket path, sign a short-lived URL, and download
+    /// bytes. Color (swatch) rows resolve to `.color(swatchId)` directly
+    /// from the row's `swatch_id` column — the iOS palette repository
+    /// renders the actual color from the design-system swatch JSON, so
+    /// the row only needs to remember the swatch id.
     ///
     /// Errors are caught and logged rather than thrown — a missing /
     /// network-failed background shouldn't take down the whole note.
@@ -315,19 +341,46 @@ final class NotesRepository {
                 .single()
                 .execute()
                 .value
-            guard row.kind == "image", let path = row.image_url else {
-                // .color resolution deferred (F+ TODO).
+            switch row.kind {
+            case "image":
+                guard let path = row.image_url else { return nil }
+                let ref = MediaRef(provider: SupabaseStorageImpl.id, path: path)
+                let storage = MediaStorageProvider.backgrounds
+                let signed = try await storage.signedURL(for: ref, ttlSeconds: 3000)
+                let (data, _) = try await URLSession.shared.data(from: signed)
+                return .image(MockNote.ImageBackground(imageData: data, opacity: row.opacity))
+            case "color":
+                guard let swatchId = row.swatch_id else { return nil }
+                return .color(swatchId: swatchId)
+            default:
                 return nil
             }
-            let ref = MediaRef(provider: SupabaseStorageImpl.id, path: path)
-            let storage = MediaStorageProvider.backgrounds
-            let signed = try await storage.signedURL(for: ref, ttlSeconds: 3000)
-            let (data, _) = try await URLSession.shared.data(from: signed)
-            return .image(MockNote.ImageBackground(imageData: data, opacity: row.opacity))
         } catch {
             log.warning("fetchBackground(id: \(id)) failed: \(error.localizedDescription) — note loads without background")
             return nil
         }
+    }
+
+    /// Phase F.1.2.swatchpersist — looks up an existing `backgrounds`
+    /// row for the given swatch id, scoped to the user (RLS will only
+    /// return their own rows). Returns nil if no row exists yet — the
+    /// caller then INSERTs a fresh one. Picks the oldest matching row
+    /// if duplicates exist (shouldn't happen but defensive — race with
+    /// concurrent inserts could in theory create dupes; we just stick
+    /// with whichever wins, no harm).
+    private func fetchBackgroundIdForSwatch(_ swatchId: String, userId: UUID) async throws -> UUID? {
+        struct IdRow: Decodable { let id: UUID }
+        let rows: [IdRow] = try await AppSupabase.client
+            .from("backgrounds")
+            .select("id")
+            .eq("user_id", value: userId)
+            .eq("kind", value: "color")
+            .eq("swatch_id", value: swatchId)
+            .order("created_at", ascending: true)
+            .limit(1)
+            .execute()
+            .value
+        return rows.first?.id
     }
 
     private func encodeBlock(_ block: TextBlock, userId: UUID) async throws -> BodyBlockDTO? {
