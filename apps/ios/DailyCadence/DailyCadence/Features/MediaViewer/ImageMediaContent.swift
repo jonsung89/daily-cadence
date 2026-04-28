@@ -118,7 +118,18 @@ struct ImageMediaContent: View {
     /// - **scale == 1**: downward drag enters dismiss mode (writes to
     ///   the lifted `dismiss*` bindings).
     private var panOrDismissGesture: some Gesture {
-        DragGesture()
+        // `.global` coord space — translation tracks absolute finger
+        // movement in window coords, immune to the outer .scaleEffect /
+        // .offset that this gesture's own writes drive. With the
+        // default `.local`, value.translation is reported in the
+        // image's own (transformed) frame — as the view shrinks and
+        // shifts under the finger, translation oscillates and feeds
+        // back into the next dismissOffset write. Manifests as
+        // violent shake + image-splits-left/right (the two "solutions"
+        // rendered in the same frame). Video doesn't hit this because
+        // UIPanGestureRecognizer.translation(in:) reports absolute
+        // pixels regardless of view transform.
+        DragGesture(minimumDistance: 10, coordinateSpace: .global)
             .onChanged { value in
                 // Phase F.1.2.zoomfix — explicitly disable animations
                 // on the gesture's binding writes. Without this, an

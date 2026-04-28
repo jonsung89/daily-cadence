@@ -1,6 +1,6 @@
 # DailyCadence — Progress
 
-**Last updated:** 2026-04-27 (Phase F.1.2.book — 8th system note type for reading logs. New `NoteType.book` case + `book.closed.fill` icon + `Color.DS.book` / `Color.DS.bookSoft` (coffee-brown). Migration `20260427000006_add_book_note_type.sql` seeds the row with `structured_data_schema` populated for `title` / `author` / `progress` / `is_finished` — the future structured-data renderer will surface them as scaffolding above the free-form body.)
+**Last updated:** 2026-04-27 (Phase F.1.2.zoomdrag — drag-to-dismiss on the photo zoom viewer fixed. Root cause was `DragGesture()` defaulting to `.local` coord space while the gesture's own writes drove `.scaleEffect` + `.offset` on the same view — translation oscillated as local coords shifted under the finger, manifesting as violent shake / image-splits-left-right. One-line fix: `DragGesture(minimumDistance: 10, coordinateSpace: .global)`. Video was unaffected because `UIPanGestureRecognizer.translation(in:)` reports absolute pixel deltas regardless of view transform — that asymmetry was the clue that ruled out the cascade theory three earlier fix attempts had chased.)
 **Current phase:** Phase 1 MVP — iOS app for Jon + wife, TestFlight distribution
 
 This is the living state of the project. Update at the end of every session.
@@ -1769,6 +1769,18 @@ Schema is reserved-but-not-yet-rendered. The future structured-data renderer (ca
 **Run via `supabase db push` or paste into the SQL editor** before saving a book-typed note — until the row exists, `NotesRepository.insert` throws `unknownNoteTypeSlug("book")`.
 
 Build clean, 84/84 tests passing.
+
+### Phase F.1.2.zoomdrag — Drag-to-dismiss coord-space fix (added this round)
+
+Drag-down-to-dismiss on `MediaViewerScreen` was broken for photos — image duplicated, shook violently, split into two copies drifting opposite directions, screen flickered. Severity scaled with timeline card count. Bug had been live since the matched-geo zoom shipped (Phase F.1.1b'.zoom) and survived three fix attempts that all targeted a (wrong) re-render-cascade theory: `MediaTapHandler: Equatable` (a12d9b2), moving `sourceFrames` to a non-observed `CardFrameStore` singleton (3aa2480), and wrapping gesture writes in `withTransaction(disablesAnimations: true)` (2e21e4d). None helped because the bug wasn't in re-render frequency.
+
+**The diagnostic we missed for three sessions:** drag-to-dismiss was always working fine for **video**. Both image and video write to the SAME drag-dismiss bindings on `MediaViewerScreen`, traverse the SAME envelope, hit the SAME @State. If the bug were in bindings/cascade/state, it would affect both. The image-only failure pointed straight at the one thing that's different: SwiftUI `DragGesture` (image) vs UIKit `UIPanGestureRecognizer` (video).
+
+**Root cause.** `DragGesture()` defaults to `coordinateSpace: .local` — translation reported in the modified view's own frame. The image was being `.scaleEffect`'d (1.0 → 0.7) and `.offset`'d by the gesture's own writes; as the view shrunk and shifted under the finger, the gesture's local coordinate space shifted with it. `value.translation` became a moving target, oscillating each gesture event. That oscillation fed the next `dismissOffset` write — positive feedback loop at ~60 Hz. The visible "two images splitting left/right" was the renderer painting both oscillating "solutions" within a single frame as the rapid back-and-forth resolved. UIKit `UIPanGestureRecognizer.translation(in:)` reports absolute pixel deltas of the touch since the gesture started, immune to any transform applied to the view after — which is why video never had the bug.
+
+**iOS** — one-line change in [ImageMediaContent.swift](apps/ios/DailyCadence/DailyCadence/Features/MediaViewer/ImageMediaContent.swift): `DragGesture()` → `DragGesture(minimumDistance: 10, coordinateSpace: .global)`. Pinch-zoom + pan-while-zoomed unaffected (different gesture; the panning math runs in local `offset` state which is stable when zoomed-and-panning).
+
+**Lesson** captured in feedback memory `feedback_debug_enumerate_working_paths.md`: when a fix theory has failed twice, stop iterating on the theory and instead enumerate adjacent paths that work. The contrast between working and broken siblings constrains the search far better than another variation on the same hypothesis. The "video drag works" fact lived in Jon's head, not in the WIP memory file — which is why three sessions kept refining the wrong hypothesis. The WIP memory has been updated to capture both the resolution and the meta-lesson.
 
 ### Phase F+ feature TODO (designed-for, not-built)
 

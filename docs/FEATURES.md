@@ -460,6 +460,7 @@ Full-screen viewer presented as a `RootView` overlay (so the underlying timeline
 
 - Pinch to zoom 1×–5×, double-tap to toggle 1×↔2.5×, pan-when-zoomed.
 - **Drag-down to dismiss** at scale 1: image follows finger (vertical + horizontal), backdrop fades proportionally over 200pt, scales toward 0.7×. Commit threshold: translation > 120pt OR predicted velocity > 600pt. Below threshold, springs back via `.spring(response: 0.35, dampingFraction: 0.85)`.
+- The `DragGesture` uses `.global` coordinate space (not the SwiftUI default `.local`). The gesture's own writes drive `.scaleEffect` + `.offset` on the same view, so a `.local` space would shift under the finger and `value.translation` would oscillate — a positive feedback loop manifesting as violent shake / image splitting. `.global` reports translation in stable window coords. Ports must replicate this — the video equivalent uses `UIPanGestureRecognizer.translation(in:)` which is naturally screen-stable.
 - Thumbnail bytes (~80 KB HEIC) are sync-decoded in `init` so the very first zoom-in frame paints; full-resolution decode runs in `.task` and swaps in when ready.
 
 ### Video content (`VideoMediaContent`)
