@@ -33,6 +33,59 @@ struct TimelineStoreTests {
                 "After navigating to a previous day, isViewingToday must flip to false so the Today pill surfaces")
     }
 
+    @Test @MainActor func dayCacheRehydratesNotesOnReturn() {
+        // Phase F.1.2.daycache — navigating to a day that's been seen
+        // before in this session should hydrate `notes` from the
+        // in-memory cache so the empty state doesn't flash. The cache
+        // is an initial-render hint, NOT a fetch-skip — `hasLoaded`
+        // stays false on hydration so the background refetch still
+        // fires and surgically merges any updates.
+        let store = TimelineStore(initialNotes: [])
+        let today = store.currentDay
+        let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: today)!
+
+        // Add a note on today — populates the cache for today.
+        let todayNote = MockNote(occurredAt: today, type: .mood, content: .text(title: "Today's note"))
+        store.add(todayNote)
+        #expect(store.notes.count == 1)
+
+        // Navigate to yesterday: cache miss → empty.
+        store.selectDate(yesterday)
+        #expect(store.notes.isEmpty,
+                "First visit to a never-loaded day should clear notes (cache miss)")
+
+        // Return to today: cache HIT → notes restored, no empty flash.
+        // hasLoaded stays false so the background refetch still runs.
+        store.selectDate(today)
+        #expect(store.notes.count == 1,
+                "Returning to a previously-loaded day should hydrate notes from cache (no empty flash)")
+        #expect(store.notes.first?.timelineTitle == "Today's note")
+        #expect(!store.hasLoaded,
+                "hasLoaded stays false on hydration so the background refetch still fires — cache is a render hint, not a fetch-skip")
+    }
+
+    @Test @MainActor func clearDayCacheDropsAllEntries() {
+        // Phase F.1.2.daycache — `clearDayCache()` exists for future
+        // auth-change wiring (so user A's cached days don't leak into
+        // user B's session). Verifying the contract: after clear,
+        // returning to a previously-cached day should NOT have its
+        // notes hydrated.
+        let store = TimelineStore(initialNotes: [])
+        let today = store.currentDay
+        store.add(MockNote(occurredAt: today, type: .mood, content: .text(title: "X")))
+
+        let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: today)!
+        store.selectDate(yesterday)
+        store.selectDate(today)
+        #expect(store.notes.count == 1, "Sanity check: round-trip rehydrates from cache")
+
+        store.clearDayCache()
+        store.selectDate(yesterday)
+        store.selectDate(today)
+        #expect(store.notes.isEmpty,
+                "After clearDayCache(), returning to a previously-cached day should be a cache miss (notes empty until refetch)")
+    }
+
     @Test @MainActor func refreshCurrentDayIsIdempotent() {
         // Same-day call → no-op. Prevents triggering needless animations
         // every time scenePhase becomes .active without a real day change.

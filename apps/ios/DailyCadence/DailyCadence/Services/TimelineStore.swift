@@ -78,6 +78,27 @@ final class TimelineStore {
     /// to render a toast or banner; cleared on the next successful op.
     private(set) var lastError: String?
 
+    /// Phase F.1.2.daycache — in-memory cache of previously-loaded days
+    /// keyed by `startOfDay`. Hydrating from this on `selectDate` skips
+    /// the empty-flash that used to appear when navigating between days
+    /// (clear → fetch → render). Pattern: stale-while-cached. Mutations
+    /// (`add` / `update` / `delete`) mirror into this map so it stays
+    /// consistent with the live `notes` array. Cleared via
+    /// `clearDayCache()` when a new user signs in (called from
+    /// `AuthStore` — when real auth ships; today's anon-only flow never
+    /// hits user-change).
+    ///
+    /// **Not observed.** Plain dict, not `@Observable`-projected — the
+    /// observable surface stays `notes` (the currently-shown day). The
+    /// cache is internal plumbing.
+    ///
+    /// **No TTL** for Phase 1: in-session navigations always read from
+    /// cache when present, so a user looking at yesterday won't see
+    /// changes made by another device until they sign out + back in.
+    /// Acceptable until pull-to-refresh / realtime sync ship — both
+    /// will provide explicit invalidation hooks.
+    private var notesByDay: [Date: [MockNote]] = [:]
+
     private let repository: NotesRepository
     private let log = Logger(subsystem: "com.jonsung.DailyCadence", category: "TimelineStore")
 
@@ -120,19 +141,37 @@ final class TimelineStore {
 
     // MARK: - Day navigation
 
-    /// Switches the timeline to a different local-calendar day and triggers
-    /// a re-fetch. No-op if the new date normalizes to the already-selected
-    /// day. Clearing `notes` immediately on switch (rather than waiting for
-    /// the fetch to return) lets the skeleton show right away — feels more
-    /// responsive than seeing the previous day's notes for ~200ms.
+    /// Switches the timeline to a different local-calendar day. Phase
+    /// F.1.2.daycache — if we've already loaded this day in this
+    /// session, hydrate from `notesByDay` immediately so the empty
+    /// state doesn't flash. **`hasLoaded` stays false** so the
+    /// background refetch still fires (the cache is an initial-render
+    /// hint, not a fetch-skip); the resulting `load()` does a surgical
+    /// merge against the hydrated notes so unchanged items don't churn.
+    /// Cache miss falls back to the original behavior (empty + fetch +
+    /// empty state shown until fetch returns).
     func selectDate(_ date: Date) {
         let normalized = Calendar.current.startOfDay(for: date)
         guard normalized != selectedDate else { return }
         log.info("selectDate: \(self.selectedDate) → \(normalized)")
         selectedDate = normalized
-        notes = []
+        if let cached = notesByDay[normalized] {
+            notes = cached
+        } else {
+            notes = []
+        }
         hasLoaded = false
         lastError = nil
+    }
+
+    /// Phase F.1.2.daycache — drops every cached day. Intended for
+    /// auth changes (real Sign in with Apple ships in a future round
+    /// and will need this hook so user A's cached days don't bleed into
+    /// user B's session). No-op-safe today since the anon-only flow
+    /// never changes user.
+    func clearDayCache() {
+        notesByDay.removeAll()
+        log.info("Cleared day cache")
     }
 
     /// Convenience: jumps to today. Used by the "Today" pill that appears
@@ -169,11 +208,28 @@ final class TimelineStore {
     /// pull-to-refresh later).
     func load(userId: UUID) async {
         do {
-            let fetched = try await repository.fetchForDay(userId: userId, day: selectedDate)
-            notes = fetched
-            hasLoaded = true
-            lastError = nil
-            log.info("Loaded \(fetched.count) notes for user \(userId)")
+            let day = selectedDate
+            let fetched = try await repository.fetchForDay(userId: userId, day: day)
+            // Race guard: the user could have switched days while the
+            // fetch was in flight. Apply only when the request matches
+            // the still-selected day; the cache update is keyed by `day`
+            // either way so a stale fetch still warms the cache for the
+            // day it was about (no harm, no UI thrash).
+            notesByDay[day] = fetched
+            if day == selectedDate {
+                // Phase F.1.2.daycache — surgical merge against the
+                // currently-rendered notes (which may have come from
+                // the cache hydration in selectDate). Updates affected
+                // notes in place, removes ones that no longer exist on
+                // the server, inserts new ones. Avoids a full-array
+                // replace so SwiftUI's diffing has minimal work and
+                // the UI doesn't churn when the fetch returns a
+                // mostly-unchanged set.
+                mergeFetched(fetched)
+                hasLoaded = true
+                lastError = nil
+            }
+            log.info("Loaded \(fetched.count) notes for user \(userId) day=\(day)")
         } catch is CancellationError {
             // SwiftUI's `.task(id:)` cancels the prior task when the id
             // transitions (e.g., AuthStore's currentUserId settles
@@ -200,6 +256,15 @@ final class TimelineStore {
     func add(_ note: MockNote) {
         notes.append(note)
         sortByOccurredAtAscending()
+        notesByDay[selectedDate] = notes  // Phase F.1.2.daycache — keep cache in lock-step
+        // Cross-day add (rare — editor defaults to selectedDate, but the
+        // user can change the picker): invalidate the destination day's
+        // cache so when they navigate there it refetches and includes
+        // this note. Without this, stale cache would hide the new note.
+        let noteDay = note.occurredAt.map { Calendar.current.startOfDay(for: $0) }
+        if let noteDay, noteDay != selectedDate {
+            notesByDay.removeValue(forKey: noteDay)
+        }
         log.info("Added note locally: type=\(note.type.rawValue) title=\(note.timelineTitle)")
         // Phase F.1.2.weekstrip — keep the week-strip indicator in
         // sync with the in-memory mutation. Same-week adds fill the
@@ -225,13 +290,22 @@ final class TimelineStore {
         let previous = notes[index]
         notes[index] = updated
         sortByOccurredAtAscending()
+        notesByDay[selectedDate] = notes  // Phase F.1.2.daycache — keep cache in lock-step
+        // Cross-day update (user changed `occurredAt` to a different
+        // day): invalidate the destination day's cache so the moved
+        // note will appear when the user navigates there.
+        let oldDay = previous.occurredAt.map { Calendar.current.startOfDay(for: $0) }
+        let newDay = updated.occurredAt.map { Calendar.current.startOfDay(for: $0) }
+        if oldDay != newDay, let newDay {
+            notesByDay.removeValue(forKey: newDay)
+        }
         log.info("Updated note locally: id=\(updated.id) type=\(updated.type.rawValue)")
         // Phase F.1.2.weekstrip — if the user changed `occurredAt`
         // during edit, the strip's dot positions may need to shift.
         // Compute the OLD day's remaining count (excluding this note,
         // since we already swapped it) so the store knows whether to
-        // empty that day's dot.
-        let oldDay = previous.occurredAt.map { Calendar.current.startOfDay(for: $0) }
+        // empty that day's dot. (`oldDay` declared above for the
+        // cache-invalidation path; reused here.)
         let oldDayRemaining = oldDay.map { day in
             notes.filter {
                 $0.id != updated.id &&
@@ -260,6 +334,50 @@ final class TimelineStore {
         }
     }
 
+    /// Phase F.1.2.daycache — surgical reconciliation of the server's
+    /// fetched set against the currently-rendered `notes`. Replaces
+    /// the historical `notes = fetched` full-array swap with a
+    /// per-id diff that:
+    ///
+    /// - **Removes** notes whose ids no longer exist on the server
+    ///   (deleted from another device, etc.)
+    /// - **Updates in place** notes whose ids match — overwrites with
+    ///   the server's version so any field changes propagate. SwiftUI's
+    ///   ForEach keeps view identity by id, so unchanged-rendered-output
+    ///   updates are graceful (no scroll jump, no insertion / removal
+    ///   animations).
+    /// - **Appends** notes that exist on the server but not yet locally,
+    ///   then re-sorts to land them in the right chronological slot.
+    ///
+    /// On a cold load (notes was empty), this collapses to "append
+    /// everything and sort" — same effective output as the prior
+    /// `notes = fetched` for the empty-start case, just routed through
+    /// the same code path.
+    private func mergeFetched(_ fetched: [MockNote]) {
+        let fetchedById = Dictionary(uniqueKeysWithValues: fetched.map { ($0.id, $0) })
+
+        // Drop notes the server no longer has.
+        notes.removeAll { fetchedById[$0.id] == nil }
+
+        // Overwrite existing notes with the server's version + track
+        // which ids are already present so the next pass only inserts
+        // the genuinely new ones.
+        var presentIds: Set<UUID> = []
+        for i in notes.indices {
+            if let fresh = fetchedById[notes[i].id] {
+                notes[i] = fresh
+                presentIds.insert(fresh.id)
+            }
+        }
+
+        // Insert anything new.
+        for note in fetched where !presentIds.contains(note.id) {
+            notes.append(note)
+        }
+
+        sortByOccurredAtAscending()
+    }
+
     /// Removes the note locally (and forgets its pin state) and soft-deletes
     /// on the server in the background. No-op if the id isn't present.
     /// Phase E.5.15 — invoked from the per-card `.contextMenu` Delete action
@@ -267,12 +385,22 @@ final class TimelineStore {
     func delete(noteId: UUID) {
         guard let index = notes.firstIndex(where: { $0.id == noteId }) else { return }
         let removed = notes.remove(at: index)
+        notesByDay[selectedDate] = notes  // Phase F.1.2.daycache — keep cache in lock-step
+        // Defensive: if the deleted note was on a different day (rare —
+        // pre-existing edge case where a note can be in `notes` despite
+        // having a different `occurredAt`), invalidate that day's cache
+        // too so the deletion takes effect on next navigation.
+        let removedDay = removed.occurredAt.map { Calendar.current.startOfDay(for: $0) }
+        if let removedDay, removedDay != selectedDate {
+            notesByDay.removeValue(forKey: removedDay)
+        }
         PinStore.shared.forget(noteId)
         log.info("Deleted note locally: type=\(removed.type.rawValue) title=\(removed.timelineTitle)")
         // Phase F.1.2.weekstrip — if this was the last note on its
         // day, drop the day from the filled set so the strip's dot
         // empties. Day count is computed AFTER the local removal.
-        let removedDay = removed.occurredAt.map { Calendar.current.startOfDay(for: $0) }
+        // (`removedDay` declared above for the cache-invalidation path;
+        // reused here.)
         let dayRemaining = removedDay.map { day in
             notes.filter {
                 $0.occurredAt.map(Calendar.current.startOfDay(for:)) == day

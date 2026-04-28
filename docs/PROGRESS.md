@@ -1,6 +1,6 @@
 # DailyCadence — Progress
 
-**Last updated:** 2026-04-28 (Phase F.1.2.inlinevideo — first-tap-to-play muted inline playback for video cards. New `InlineVideoPlayer` component (`UIViewRepresentable` over `AVPlayerLayer`) plays once muted on first tap, returns to the poster + play-button state when playback ends, and tears down via `dismantleUIView` when the card hides it. Tap during playback opens the fullscreen viewer with audio (and resets inline state so two players never run against the same source). `onDisappear` cleanup releases the player + deletes the temp file when the card scrolls out. Wired into NoteCard, KeepCard, and InlineMediaBlockView (the three video-card surfaces). Closes the F.1.1b' media UX bundle. 88/88 tests pass.)
+**Last updated:** 2026-04-28 (Phase F.1.2.daycache — eliminates the empty-state flash when navigating between days. `TimelineStore` gains an in-memory `notesByDay: [Date: [MockNote]]` cache that hydrates `notes` immediately on `selectDate` if the day's been seen this session. `hasLoaded` stays false on hydration so the background refetch still runs (the cache is a render hint, not a fetch-skip). `load()` was switched from `notes = fetched` (full replace) to a `mergeFetched` surgical reconciliation — removes gone notes, updates existing in place, appends new ones. SwiftUI's id-keyed diffing keeps unchanged cards stable; only changed entries animate. Mutations (`add` / `update` / `delete`) mirror into the cache and invalidate cross-day cache entries when notes move between days. +2 tests (90/90 pass). Future hooks: `clearDayCache()` ready for the auth-change wiring when Sign in with Apple ships.)
 **Current phase:** Phase 1 MVP — iOS app for Jon + wife, TestFlight distribution
 
 This is the living state of the project. Update at the end of every session.
@@ -1838,6 +1838,31 @@ Strip is ~14pt taller now. Trade is fair — the strip is the at-a-glance naviga
 ### Phase F.1.2.captionfix — Edit Caption double-placeholder (added this round)
 
 Pre-existing bug from Phase F.1.2.refresh's caption-edit sheet: both a custom `Text("Add a caption…")` overlay AND the `TextField`'s built-in placeholder ("Caption" — passed as the title parameter) rendered simultaneously when the field was empty, producing visible overlap. Deleted the custom overlay + the wrapping ZStack and used the built-in TextField placeholder with the design copy "Add a caption…". One less moving part; SwiftUI's default placeholder color is fine.
+
+### Phase F.1.2.daycache — Per-day note cache (added this round)
+
+Pre-this-round, navigating between days cleared `notes` to `[]` and forced a fresh fetch on every `selectDate`. Returning to a previously-viewed day showed the empty state for the ~300-500 ms the fetch took before notes reappeared. Visible "blank → cards" flash on every back-navigation.
+
+**The fix.** [TimelineStore](apps/ios/DailyCadence/DailyCadence/Services/TimelineStore.swift) gains a `notesByDay: [Date: [MockNote]]` in-memory cache keyed by `startOfDay`. On `selectDate`:
+- Cache hit → `notes = cached` immediately (no empty flash).
+- Cache miss → `notes = []` (same as before — first visit to a day shows the empty state briefly).
+
+**Cache is a render hint, not a fetch-skip.** Per Jon's clarification: `hasLoaded` stays false on hydration, so RootView's `.task(id:)` still fires the background refetch. The user sees cached cards instantly + a thin loading bar at the top while the fetch happens in the background — Apple Mail / News pattern.
+
+**Surgical merge replaces full-array swap.** Switched `load()` from `notes = fetched` to a new `mergeFetched(_:)` helper that:
+- **Removes** notes whose ids no longer exist on the server (deleted from another device, etc.)
+- **Updates in place** notes whose ids match — overwrites with the server's version so any field changes propagate. SwiftUI's `ForEach` keeps view identity by id, so unchanged-rendered-output updates are graceful.
+- **Appends** notes that exist on the server but not yet locally, then re-sorts to land them in chronological position.
+
+On a cold load (notes was empty), this collapses to "append everything and sort" — identical effective output to the prior `notes = fetched` for the empty-start case, just routed through the same code path.
+
+**Cache invalidation on mutations.** `add` / `update` / `delete` mirror into `notesByDay[selectedDate]` so subsequent navigations see the latest state. Cross-day cases (rare — user creates a note dated for a different day, or edits a note's `occurredAt` to move it across days) invalidate the destination day's cache so the moved note appears on next visit there.
+
+**Future hooks.** `clearDayCache()` exists but isn't wired yet — it's intended for the auth-change path so user A's cached days don't bleed into user B's session when real Sign in with Apple ships. Today's anon-only flow doesn't need it.
+
+**Race guard.** Day-switch during an in-flight fetch is handled: the fetch result still warms `notesByDay[fetchedDay]` (so a future return to that day benefits) but only updates `notes` if `selectedDate` still matches the fetched day at completion time.
+
+**Tests** — `TimelineStoreTests` gains `dayCacheRehydratesNotesOnReturn` (cache HIT after round-trip, hasLoaded stays false) and `clearDayCacheDropsAllEntries` (clear contract). 90/90 pass.
 
 ### Phase F.1.2.inlinevideo — First-tap inline video playback (added this round)
 
