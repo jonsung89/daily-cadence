@@ -273,7 +273,7 @@ Phase E.5.18a. `NoteDraftStore.insertMedia(...)` maintains the structural invari
 
 ### Card rendering of inline media (Board view)
 
-`KeepCard` walks the `.text` content's body block-by-block: paragraphs render as `Text(AttributedString)`, media blocks render via `InlineMediaBlockView` at the user's chosen size (centered for Small / Medium, full-width for Large). Tapping a media block in a card opens `MediaViewerScreen` full-screen (pinch-zoom for images, AVPlayer for videos). On the Timeline (`NoteCard`), inline media is intentionally *not* rendered — `MockNote.timelineMessage` flattens paragraph blocks to a single AttributedString and skips media (the dense rail favors text-only summaries; the full block layout is the Board view's job).
+`KeepCard` walks the `.text` content's body block-by-block: paragraphs render as `Text(AttributedString)`, media blocks render via `InlineMediaBlockView` at the user's chosen size (centered for Small / Medium, full-width for Large). Tapping an **image** block opens `MediaViewerScreen` full-screen with pinch-zoom. Tapping a **video** block (Phase F.1.2.inlinevideo) starts muted inline playback in-card (single shot, no loop); tap during playback opens fullscreen with audio. On the Timeline (`NoteCard`), inline media is intentionally *not* rendered — `MockNote.timelineMessage` flattens paragraph blocks to a single AttributedString and skips media (the dense rail favors text-only summaries; the full block layout is the Board view's job).
 
 ### Style toolbar (compact icon bar above keyboard)
 
@@ -542,7 +542,8 @@ Full-screen viewer presented as a `RootView` overlay (so the underlying timeline
 | `TabBar.swift` | Custom 5-column bottom navigation. |
 | `TypeBadge.swift` | 10pt colored dot + 11pt uppercase type label (rendered in `type.color`) + optional time in mono `fg2`. Phase E.5.14 bump from 8pt/10pt-grey for stronger type signal on Timeline cards. |
 | `PinButton.swift` | 13pt `pin` / `pin.fill` SF Symbol in honey-yellow with 32pt hit area. (Phase E.5.15 introduced; E.5.16 made it a status indicator — only shown on pinned cards. Tapping the visible glyph unpins.) The unpinned-state visual is retained for any future read-only contexts. |
-| `InlineMediaBlockView.swift` | Inline photo/video block (Phase E.5.18) used by KeepCard and NoteEditorScreen's attachments strip. Sizes via `MediaBlockSize.widthFraction` (~45% / ~75% / 100%); `isInteractive` toggle controls whether tapping opens fullscreen (cards) or is suppressed for a parent Menu (editor). |
+| `InlineMediaBlockView.swift` | Inline photo/video block (Phase E.5.18) used by KeepCard and NoteEditorScreen's attachments strip. Sizes via `MediaBlockSize.widthFraction` (~45% / ~75% / 100%); `isInteractive` toggle controls whether tapping opens fullscreen (cards) or is suppressed for a parent Menu (editor). Video blocks support first-tap muted inline playback (Phase F.1.2.inlinevideo) — tap once to play, tap again to open fullscreen. |
+| `InlineVideoPlayer.swift` | Phase F.1.2.inlinevideo. Minimal `UIViewRepresentable` over `AVPlayerLayer` for in-card muted single-shot playback. Distinct from the fullscreen `VideoMediaContent` — no AVKit chrome, no drag-dismiss, no scrubber. Cards (NoteCard, KeepCard, InlineMediaBlockView) own the play state and render this view only while it should be active; `dismantleUIView` pauses + cleans up automatically. |
 | `TypeChip.swift` | Note-type picker chip (icon + label, ink-filled when selected). |
 | `TimelineItem.swift` | Time column + sage-dotted rail + trailing card slot for the Timeline view. |
 

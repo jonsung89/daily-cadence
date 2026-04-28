@@ -1,6 +1,6 @@
 # DailyCadence — Progress
 
-**Last updated:** 2026-04-28 (Phase F.1.2.swatchpersist — finishes the background-persistence story by adding swatch (color) backgrounds to the round-trip. `MockNote.Background.color(swatchId:)` now find-or-INSERTs a per-user `backgrounds` row keyed by the design-system swatch id, plumbs that id into `notes.background_id`, and reconstructs `.color(swatchId:)` on decode by reading the row's `swatch_id` column. Combined with last round's image-background persistence (F.1.2.bgpersist), all background variants now survive app relaunch. No SQL migration — uses the existing `backgrounds.swatch_id text` column from the original schema. 88/88 tests pass.)
+**Last updated:** 2026-04-28 (Phase F.1.2.inlinevideo — first-tap-to-play muted inline playback for video cards. New `InlineVideoPlayer` component (`UIViewRepresentable` over `AVPlayerLayer`) plays once muted on first tap, returns to the poster + play-button state when playback ends, and tears down via `dismantleUIView` when the card hides it. Tap during playback opens the fullscreen viewer with audio (and resets inline state so two players never run against the same source). `onDisappear` cleanup releases the player + deletes the temp file when the card scrolls out. Wired into NoteCard, KeepCard, and InlineMediaBlockView (the three video-card surfaces). Closes the F.1.1b' media UX bundle. 88/88 tests pass.)
 **Current phase:** Phase 1 MVP — iOS app for Jon + wife, TestFlight distribution
 
 This is the living state of the project. Update at the end of every session.
@@ -1839,6 +1839,28 @@ Strip is ~14pt taller now. Trade is fair — the strip is the at-a-glance naviga
 
 Pre-existing bug from Phase F.1.2.refresh's caption-edit sheet: both a custom `Text("Add a caption…")` overlay AND the `TextField`'s built-in placeholder ("Caption" — passed as the title parameter) rendered simultaneously when the field was empty, producing visible overlap. Deleted the custom overlay + the wrapping ZStack and used the built-in TextField placeholder with the design copy "Add a caption…". One less moving part; SwiftUI's default placeholder color is fine.
 
+### Phase F.1.2.inlinevideo — First-tap inline video playback (added this round)
+
+Tapping a video poster in a card now starts muted inline playback (plays once from start), instead of jumping straight to the fullscreen viewer. Tap during playback opens fullscreen with audio. When the single playback finishes, the card resets to its initial state (poster + play button overlay). Closes the last open item from the F.1.1b' media UX bundle.
+
+**iOS — new component.** [InlineVideoPlayer](apps/ios/DailyCadence/DailyCadence/DesignSystem/Components/InlineVideoPlayer.swift) — minimal `UIViewRepresentable` over an `AVPlayerLayer`-backed view. Distinct from `VideoMediaContent` (the fullscreen viewer): no AVKit chrome, no drag-dismiss, no scrubber, just muted single-shot playback. `actionAtItemEnd = .pause` so the player stops at the last frame; the card sees the `AVPlayerItemDidPlayToEndTime` notification and flips `isInlinePlaying` to false. The `dismantleUIView` hook pauses the player and removes the observer when SwiftUI hides the view (card setting state false, or `.onDisappear` on scroll-out).
+
+**iOS — URL resolution.** `InlineVideoPlayer.resolveURL(for:)` static helper returns a `Source { url, isTempFile }` struct. Prefers a streaming signed URL when the payload has a `ref` (saves writing the full video to disk); falls back to a temp file from inline `data` for newly imported clips that haven't uploaded yet. The `isTempFile` flag drives caller-side cleanup.
+
+**Card wiring** — same pattern in three places: [NoteCard](apps/ios/DailyCadence/DailyCadence/DesignSystem/Components/NoteCard.swift), [KeepCard](apps/ios/DailyCadence/DailyCadence/DesignSystem/Components/KeepCard.swift), [InlineMediaBlockView](apps/ios/DailyCadence/DailyCadence/DesignSystem/Components/InlineMediaBlockView.swift). Each card gets three `@State` properties (`isInlinePlaying`, `inlineVideoURL`, `inlineVideoIsTempFile`) plus `startInlineVideo` / `stopInlineVideo` helpers. Tap behavior:
+
+- Image media: unchanged (single tap → fullscreen).
+- Video media, not playing: `startInlineVideo` (resolve URL async → set state → render `InlineVideoPlayer`).
+- Video media, playing: `stopInlineVideo` (release the player) → fire `mediaTapHandler.onTap` to open fullscreen.
+
+`.onDisappear { stopInlineVideo() }` on the media row releases the player when the card scrolls out — important for memory and battery, especially on the Board view where many cards are off-screen.
+
+**Why stop inline before fullscreen.** The fullscreen viewer creates its own `AVPlayer` with audio enabled. If the inline player kept running while the viewer's player started, the user would hear the same audio twice (or worse, see frame stutter from two decoders against the same source). Stopping inline first is the cheap, correct fix.
+
+**Out of scope.** Autoplay-in-view (Instagram pattern), looping, scroll-aware play-pause based on visible-fraction, in-card scrubber. The `InlineVideoPlayer` is intentionally minimal — these are easy to add later if the UX warrants it.
+
+Build clean, 88 tests pass.
+
 ### Phase F.1.2.swatchpersist — Swatch (color) background persistence (added this round)
 
 Closes the bg-persistence story: `MockNote.Background.color(swatchId:)` now round-trips alongside `.image(...)`. Pre-this-round, picking a swatch background still vanished on relaunch because last round's `encodeBackground` returned nil for the `.color` case (deferred as a separate F+ TODO; this is that follow-on).
@@ -2010,7 +2032,7 @@ Captured here so a fresh session can pick up the roadmap. Each line corresponds 
 
 ## 🚧 In flight
 
-**Phase F.1.1b' (media UX polish) — three items shipped.** Video trim sheet (over-60s rejection → trim flow), Apple Photos zoom + drag-dismiss for both image and video, and camera capture from FAB. Remaining bundle items per `project_media_storage.md`: inline video playback in cards, timeline media-width design call. None are ordered — pick any next.
+**Phase F.1.1b' (media UX polish) — bundle complete.** Video trim sheet (over-60s rejection → trim flow), Apple Photos zoom + drag-dismiss for both image and video, camera capture from FAB, and inline video playback in cards (Phase F.1.2.inlinevideo) all shipped. Timeline media-width design call still pending — design decision more than build work.
 
 **Phase F (Supabase persistence) — text/stat/list/quote round-trip live; media + backgrounds + run-styling deferred.** `AppSupabase.client` + `AuthStore` + `NotesRepository` + the wired `TimelineStore` are all in place. The app signs in anonymously on launch, fetches the user's notes once `AuthStore.currentUserId` settles, and persists subsequent adds/deletes optimistically. Open Phase F+ persistence work captured in the Phase F+ TODO section: media-note Storage upload pipeline, image-background uploads, swatch-background-id resolution, AttributedString per-run styling round-trip (gated on Phase E.2 polish).
 

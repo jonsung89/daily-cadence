@@ -69,6 +69,15 @@ struct KeepCard: View {
     }
 
     @State private var isMediaViewerPresented = false
+
+    /// Phase F.1.2.inlinevideo — first-tap-to-play inline state for
+    /// video cards. URL is resolved asynchronously (signed URL OR
+    /// temp-file write); the `isTempFile` flag drives cleanup when
+    /// playback ends or the card disappears.
+    @State private var isInlinePlaying = false
+    @State private var inlineVideoURL: URL?
+    @State private var inlineVideoIsTempFile = false
+
     /// Phase E.5.22 — drives the scheme-aware default-tint opacity so
     /// dark-mode cards don't read as muddy.
     @Environment(\.colorScheme) private var colorScheme
@@ -432,7 +441,15 @@ struct KeepCard: View {
                         .frame(width: width, height: height)
                         .clipped()
                 }
-                if media.kind == .video {
+                // Phase F.1.2.inlinevideo — see NoteCard for the same
+                // pattern. Tap-to-play once muted; tap during playback
+                // opens fullscreen; auto-resets to poster when the
+                // single playback completes.
+                if media.kind == .video, isInlinePlaying, let url = inlineVideoURL {
+                    InlineVideoPlayer(url: url, onEnded: stopInlineVideo)
+                        .frame(width: width, height: height)
+                }
+                if media.kind == .video, !isInlinePlaying {
                     ZStack {
                         Circle()
                             .fill(.ultraThinMaterial)
@@ -450,6 +467,7 @@ struct KeepCard: View {
         .frame(maxWidth: .infinity)
         .contentShape(Rectangle())
         .onTapGesture { handleMediaTap(media) }
+        .onDisappear { stopInlineVideo() }
         .modifier(MatchedGeometryModifier(handler: mediaTapHandler, id: note.id))
         .accessibilityLabel(media.kind == .video ? "Play video" : "Open photo")
         .accessibilityAddTraits(.isButton)
@@ -459,12 +477,42 @@ struct KeepCard: View {
     /// `mediaTapHandler`, fires its callback (parent presents via
     /// NavigationStack push with native zoom transition). Otherwise
     /// falls back to the card-local `.fullScreenCover`.
+    ///
+    /// Phase F.1.2.inlinevideo — for video media, first tap starts inline
+    /// muted playback; subsequent tap opens fullscreen.
     private func handleMediaTap(_ media: MediaPayload) {
+        if media.kind == .video, !isInlinePlaying {
+            startInlineVideo(media)
+            return
+        }
+        // Stop inline playback before the fullscreen viewer takes over
+        // so we don't have two players against the same source.
+        stopInlineVideo()
         if let handler = mediaTapHandler {
             handler.onTap(media, note.id)
         } else {
             isMediaViewerPresented = true
         }
+    }
+
+    private func startInlineVideo(_ media: MediaPayload) {
+        Task {
+            guard let resolved = await InlineVideoPlayer.resolveURL(for: media) else { return }
+            await MainActor.run {
+                inlineVideoURL = resolved.url
+                inlineVideoIsTempFile = resolved.isTempFile
+                isInlinePlaying = true
+            }
+        }
+    }
+
+    private func stopInlineVideo() {
+        if inlineVideoIsTempFile, let url = inlineVideoURL {
+            try? FileManager.default.removeItem(at: url)
+        }
+        inlineVideoURL = nil
+        inlineVideoIsTempFile = false
+        isInlinePlaying = false
     }
 
     /// Returns the displayable poster image for a media payload.

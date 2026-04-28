@@ -36,6 +36,13 @@ struct InlineMediaBlockView: View {
 
     @State private var isViewerPresented = false
 
+    /// Phase F.1.2.inlinevideo — first-tap-to-play state for inline
+    /// video blocks. Same lifecycle as the standalone-media variants in
+    /// NoteCard / KeepCard.
+    @State private var isInlinePlaying = false
+    @State private var inlineVideoURL: URL?
+    @State private var inlineVideoIsTempFile = false
+
     var body: some View {
         GeometryReader { geo in
             let contentWidth = geo.size.width
@@ -62,7 +69,14 @@ struct InlineMediaBlockView: View {
                         // renders an empty white box.
                         ResolvedMediaPoster(payload: payload)
                     }
-                    if payload.kind == .video {
+                    // Phase F.1.2.inlinevideo — same first-tap-to-play
+                    // pattern as the standalone-media cards. Plays once
+                    // muted; tap during playback opens fullscreen with
+                    // audio; resets to poster on completion.
+                    if payload.kind == .video, isInlinePlaying, let url = inlineVideoURL {
+                        InlineVideoPlayer(url: url, onEnded: stopInlineVideo)
+                    }
+                    if payload.kind == .video, !isInlinePlaying {
                         ZStack {
                             Circle()
                                 .fill(.ultraThinMaterial)
@@ -84,6 +98,7 @@ struct InlineMediaBlockView: View {
                 .onTapGesture {
                     if isInteractive { handleTap() }
                 }
+                .onDisappear { stopInlineVideo() }
                 // Publish this block's frame to the matched-geo source-frame
                 // map and gate opacity during the open/close so the viewer's
                 // image renders in this slot, not over it. Falls through to
@@ -129,12 +144,42 @@ struct InlineMediaBlockView: View {
 
     /// Routes a tap to the parent's zoom-transition handler when one is
     /// provided; otherwise falls through to the legacy fullScreenCover.
+    ///
+    /// Phase F.1.2.inlinevideo — for video media, first tap starts inline
+    /// muted playback; subsequent tap opens fullscreen.
     private func handleTap() {
+        if payload.kind == .video, !isInlinePlaying {
+            startInlineVideo()
+            return
+        }
+        // Stop inline before fullscreen so we don't have two players
+        // running against the same source.
+        stopInlineVideo()
         if let handler = mediaTapHandler, let blockId {
             handler.onTap(payload, blockId)
         } else {
             isViewerPresented = true
         }
+    }
+
+    private func startInlineVideo() {
+        Task {
+            guard let resolved = await InlineVideoPlayer.resolveURL(for: payload) else { return }
+            await MainActor.run {
+                inlineVideoURL = resolved.url
+                inlineVideoIsTempFile = resolved.isTempFile
+                isInlinePlaying = true
+            }
+        }
+    }
+
+    private func stopInlineVideo() {
+        if inlineVideoIsTempFile, let url = inlineVideoURL {
+            try? FileManager.default.removeItem(at: url)
+        }
+        inlineVideoURL = nil
+        inlineVideoIsTempFile = false
+        isInlinePlaying = false
     }
 
     /// Synchronous inline-bytes lookup — kind-aware, mirrors
