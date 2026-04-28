@@ -18,7 +18,7 @@ import SwiftUI
 ///
 /// Each card forwards its tap to `onTap(payload, sourceID)` so RootView
 /// can build the `PresentedMedia` snapshot and animate `openProgress`.
-struct MediaTapHandler {
+struct MediaTapHandler: Equatable {
     /// Drives matched-geo `isSource` — the ANIMATION trigger.
     /// Reflects `presentedMedia` only (NOT the dismiss-deferred
     /// `hidingMedia`), so it flips synchronously at dismiss start to
@@ -31,6 +31,22 @@ struct MediaTapHandler {
     /// shrinking back, producing a visible double-image effect.
     let visibleID: UUID?
     let onTap: (MediaPayload, UUID) -> Void
+
+    /// Equatable comparison ignores `onTap` — closures aren't
+    /// equatable, but the closure's identity is irrelevant for
+    /// downstream view invalidation. What matters for invalidation is
+    /// the two ids. Without this, `RootView.mediaTapHandler` (a
+    /// computed property creating a fresh closure-bearing struct each
+    /// body run) caused SwiftUI to consider the environment value
+    /// "different" on every RootView re-render and cascade re-renders
+    /// through every card's `MatchedGeometryModifier` — which in turn
+    /// re-published frame preferences via `CardFrameKey`, mutating
+    /// `sourceFrames` and re-invalidating RootView. The feedback loop
+    /// stuttered the close animation. With Equatable, SwiftUI skips
+    /// the env injection when only the closure changed.
+    static func == (lhs: MediaTapHandler, rhs: MediaTapHandler) -> Bool {
+        lhs.activeID == rhs.activeID && lhs.visibleID == rhs.visibleID
+    }
 }
 
 /// Snapshot of "what's being shown in the viewer." Carries the
