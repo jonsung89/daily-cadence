@@ -32,6 +32,16 @@ struct TimelineScreen: View {
     @State private var isCameraPresented = false
     @State private var pendingCapture: MediaNoteEditorScreen.InitialMedia?
 
+    /// Phase F.1.2.cameraflow — flips to true inside `CameraPicker.onPick`
+    /// when the user accepts a capture. Read in `.fullScreenCover.onDismiss`
+    /// to trigger the editor sheet ONCE the camera cover has fully
+    /// dismissed. UIKit's modal stack rejects "present sheet while
+    /// dismissing cover" — without this defer, the first-ever capture
+    /// silently fails to open the editor (the sheet's `isPresented`
+    /// flips but UIKit ignores it because a dismissal is in flight),
+    /// and the user has to cancel + re-capture.
+    @State private var presentEditorAfterCameraDismiss = false
+
     /// The note id the user has asked to delete (Phase E.5.15). When
     /// non-nil, drives the `.confirmationDialog`. The card's
     /// `.contextMenu` Delete action sets this; user confirmation in
@@ -322,7 +332,23 @@ struct TimelineScreen: View {
         // Phase F.1.1b'.camera — full-screen `UIImagePickerController`
         // for direct camera capture. On capture, route to the same
         // editor sheet as the picker path; on cancel, just dismiss.
-        .fullScreenCover(isPresented: $isCameraPresented) {
+        //
+        // Phase F.1.2.cameraflow — present the editor sheet from
+        // `onDismiss` (after the cover has fully dismissed) rather than
+        // from inside `onPick` (mid-dismissal). UIKit doesn't allow
+        // simultaneous present + dismiss on the same view controller;
+        // setting both `isCameraPresented = false` and
+        // `isMediaEditorPresented = true` in the same closure caused
+        // the very first capture to silently fail to open the editor.
+        .fullScreenCover(
+            isPresented: $isCameraPresented,
+            onDismiss: {
+                if presentEditorAfterCameraDismiss {
+                    presentEditorAfterCameraDismiss = false
+                    isMediaEditorPresented = true
+                }
+            }
+        ) {
             CameraPicker { capture in
                 isCameraPresented = false
                 guard let capture else { return }
@@ -332,7 +358,7 @@ struct TimelineScreen: View {
                 case .video(let url):
                     pendingCapture = .cameraVideoURL(url)
                 }
-                isMediaEditorPresented = true
+                presentEditorAfterCameraDismiss = true
             }
             .ignoresSafeArea()
         }
