@@ -26,6 +26,10 @@
 			<dict>
 				<key>CFBundleIconName</key>
 				<string>Blush</string>
+				<key>CFBundleIconFiles</key>
+				<array>
+					<string>Blush</string>
+				</array>
 				<key>UIPrerenderedIcon</key>
 				<false/>
 			</dict>
@@ -33,6 +37,10 @@
 			<dict>
 				<key>CFBundleIconName</key>
 				<string>Coral</string>
+				<key>CFBundleIconFiles</key>
+				<array>
+					<string>Coral</string>
+				</array>
 				<key>UIPrerenderedIcon</key>
 				<false/>
 			</dict>
@@ -40,6 +48,10 @@
 			<dict>
 				<key>CFBundleIconName</key>
 				<string>Mulberry</string>
+				<key>CFBundleIconFiles</key>
+				<array>
+					<string>Mulberry</string>
+				</array>
 				<key>UIPrerenderedIcon</key>
 				<false/>
 			</dict>
@@ -47,6 +59,10 @@
 			<dict>
 				<key>CFBundleIconName</key>
 				<string>Taupe</string>
+				<key>CFBundleIconFiles</key>
+				<array>
+					<string>Taupe</string>
+				</array>
 				<key>UIPrerenderedIcon</key>
 				<false/>
 			</dict>
@@ -54,6 +70,10 @@
 			<dict>
 				<key>CFBundleIconName</key>
 				<string>Lavender</string>
+				<key>CFBundleIconFiles</key>
+				<array>
+					<string>Lavender</string>
+				</array>
 				<key>UIPrerenderedIcon</key>
 				<false/>
 			</dict>
@@ -61,6 +81,10 @@
 			<dict>
 				<key>CFBundleIconName</key>
 				<string>Storm</string>
+				<key>CFBundleIconFiles</key>
+				<array>
+					<string>Storm</string>
+				</array>
 				<key>UIPrerenderedIcon</key>
 				<false/>
 			</dict>
@@ -68,6 +92,10 @@
 			<dict>
 				<key>CFBundleIconName</key>
 				<string>Teal</string>
+				<key>CFBundleIconFiles</key>
+				<array>
+					<string>Teal</string>
+				</array>
 				<key>UIPrerenderedIcon</key>
 				<false/>
 			</dict>
