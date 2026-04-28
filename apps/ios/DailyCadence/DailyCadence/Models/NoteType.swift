@@ -42,6 +42,7 @@ enum NoteType: String, CaseIterable, Identifiable, Hashable, Codable {
     case mood
     case activity
     case pets
+    case book
     case media
 
     var id: String { rawValue }
@@ -66,6 +67,7 @@ enum NoteType: String, CaseIterable, Identifiable, Hashable, Codable {
         case .mood:     return "Mood"
         case .activity: return "Activity"
         case .pets:     return "Pets"
+        case .book:     return "Book"
         case .media:    return "Media"
         }
     }
@@ -93,6 +95,7 @@ enum NoteType: String, CaseIterable, Identifiable, Hashable, Codable {
         case .mood:     return .DS.mood
         case .activity: return .DS.activity
         case .pets:     return .DS.blush
+        case .book:     return .DS.book
         case .media:    return .DS.periwinkle
         }
     }
@@ -107,6 +110,7 @@ enum NoteType: String, CaseIterable, Identifiable, Hashable, Codable {
         case .mood:     return .DS.moodSoft
         case .activity: return .DS.activitySoft
         case .pets:     return .DS.blushSoft
+        case .book:     return .DS.bookSoft
         case .media:    return .DS.periwinkleSoft
         }
     }
@@ -139,6 +143,7 @@ enum NoteType: String, CaseIterable, Identifiable, Hashable, Codable {
         case .mood:     return "heart"
         case .activity: return "figure.walk"
         case .pets:     return "pawprint.fill"
+        case .book:     return "book.closed.fill"
         case .media:    return "photo.on.rectangle"
         }
     }

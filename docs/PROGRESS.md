@@ -1,6 +1,6 @@
 # DailyCadence — Progress
 
-**Last updated:** 2026-04-27 (Phase F.1.2.weekstrip — minimal week-strip motivational indicator on Today screen. 7 columns with locale-aware day letters + filled-or-hollow dots showing which days have notes. Today highlighted with a sage ring; selected day gets a sage-soft pill; tap any column to navigate. Backed by new `NotesRepository.fetchDaysWithNotes` + `WeekStripStore`. Optimistic updates from `TimelineStore.add` / `update` / `delete` keep dot fills in sync without a refetch.)
+**Last updated:** 2026-04-27 (Phase F.1.2.book — 8th system note type for reading logs. New `NoteType.book` case + `book.closed.fill` icon + `Color.DS.book` / `Color.DS.bookSoft` (coffee-brown). Migration `20260427000006_add_book_note_type.sql` seeds the row with `structured_data_schema` populated for `title` / `author` / `progress` / `is_finished` — the future structured-data renderer will surface them as scaffolding above the free-form body.)
 **Current phase:** Phase 1 MVP — iOS app for Jon + wife, TestFlight distribution
 
 This is the living state of the project. Update at the end of every session.
@@ -1752,6 +1752,24 @@ Minimal motivational indicator slotted between the date header and the Timeline 
 
 Build clean, 84/84 tests passing.
 
+### Phase F.1.2.book — Book note type (added this round)
+
+Adds an 8th system note type for reading logs. Use case: "I read 2 chapters of X tonight — jot down thoughts and a quick summary." Same shape as the pets type from earlier this round but with structured-data fields populated for the future renderer.
+
+**iOS** — single-file change in [NoteType.swift](apps/ios/DailyCadence/DailyCadence/Models/NoteType.swift): new `book` case + 4 switch arms (`title` / `defaultColor` / `softColor` / `systemImage`). Icon is `book.closed.fill`. Pigment is the new `Color.DS.book` / `Color.DS.bookSoft` pair — coffee-brown light (#6B4F3A) / muted warm tan dark (#A38971), reads as scholarly / quiet, distinct from meal's amber and workout's terracotta at small dot sizes. Tokens added to [Tokens/Colors.swift](apps/ios/DailyCadence/DailyCadence/DesignSystem/Tokens/Colors.swift) alongside the existing semantic note-type pigments.
+
+**Database** — [supabase/migrations/20260427000006_add_book_note_type.sql](supabase/migrations/20260427000006_add_book_note_type.sql): single `INSERT` row with `structured_data_schema` populated for four optional fields:
+- `title` — book title (string)
+- `author` — book author (string)
+- `progress` — free-form ("Ch 3–5", "p. 122–187") so the user isn't constrained to one format
+- `is_finished` — toggle for marking a book complete
+
+Schema is reserved-but-not-yet-rendered. The future structured-data renderer (captured in Phase F+ TODO) will surface these as light scaffolding above the free-form body — book notes are still primarily about free-writing thoughts; the fields are guides, not a cage. Existing clients without the renderer ignore the schema and edit the body normally.
+
+**Run via `supabase db push` or paste into the SQL editor** before saving a book-typed note — until the row exists, `NotesRepository.insert` throws `unknownNoteTypeSlug("book")`.
+
+Build clean, 84/84 tests passing.
+
 ### Phase F+ feature TODO (designed-for, not-built)
 
 Captured here so a fresh session can pick up the roadmap. Each line corresponds to schema fields that are reserved but unused.
@@ -1779,7 +1797,7 @@ Captured here so a fresh session can pick up the roadmap. Each line corresponds 
 - **Per-note-type editing UI (rename + icon picker, in addition to color)** — Settings → Note Types currently lets the user pick a color override per type via [TextColorPickerScreen](apps/ios/DailyCadence/DailyCadence/Features/Settings/NoteTypePickerScreen.swift) (despite the misleading name — it's a color picker for note types, not text color). Expand into a full `NoteTypeEditScreen` with three editable fields per type: (1) display name (text field — currently hardcoded in `NoteType.title`), (2) icon (picker showing the SF Symbol catalog for note-type-appropriate symbols, **plus** an emoji input alternative — Jon explicitly wants emoji as a fallback for users who can't find the right symbol), (3) color (existing palette picker). Storage: `NoteTypeStyleStore` already keyed by `rawValue`, extend it to store a `NoteTypeOverrides` struct (name + iconName + swatchId) instead of just `swatchId`. Schema-side, the `note_types` table already has `display_name`, `icon`, `color_hex`, `structured_data_schema` columns; user overrides could write to per-user rows (`created_by_user_id = self`) instead of mutating the system row, OR live in a new `user_note_type_overrides` table. Rename `TextColorPickerScreen` → `NoteTypeEditScreen` while we're there. SF Symbol catalog for the picker: Apple ships `SFSymbolEffect` listing on macOS but iOS apps typically use a curated subset — start with ~30–50 SF Symbols that read as note categories (heart, dumbbell, fork.knife, moon, figure.walk, pawprint, photo, book, leaf, cup, etc.) plus the emoji fallback.
 - ~~**Rename "Primary color" in Settings → Appearance**~~ — Shipped as "Theme color" (Phase F.1.2.refresh).
 - ~~**`pets` note type with paw icon**~~ — Shipped (Phase F.1.2.pets). See entry above.
-- **`book` note type for reading logs.** New 8th system note type. Use case (per Jon at 2026-04-27): "I read 2 chapters of X tonight — jot down thoughts and a quick summary." Schema: `note_types` row with slug=`book`, icon=`book.closed.fill` or `books.vertical.fill` (SF Symbol), color TBD (avoid existing pigments — could use a fresh "ochre" / "ink" / parchment-leaning swatch, or reuse `taupe` family for a quiet earthy feel). `structured_data_schema` fields: `title` (string, the book title), `author` (optional string), `progress` (free-form like "Ch 3–5" or page range — flexible string, not numeric, so the user isn't constrained to one format), `is_finished` (bool, toggle). Body is the free-form thoughts/summary — full rich-text editor, no character limit, supports inline images (e.g., a snap of a passage). UX guidance: editor for book notes shows title + author at the top, optional finished toggle in the toolbar area, and an unstructured rich-text body — the goal is "free write with no limitation" with structure as scaffolding, not a cage.
+- ~~**`book` note type for reading logs**~~ — Shipped (Phase F.1.2.book). See entry above. The structured-data fields renderer that surfaces `title` / `author` / `progress` / `is_finished` is still a separate Phase F+ task (covers all types with populated schemas, not just book).
 - **`recipe` note type with screenshot + tags.** New 9th system note type. Use case: snap a recipe screenshot, add a title + food type + tags so it's findable later. Schema: `note_types` row with slug=`recipe`, icon=`fork.knife.circle` or `frying.pan.fill`, color TBD (distinct from `meal`'s amber — maybe a fresh terracotta or sage-deep). `structured_data_schema` fields: `title` (string, recipe name), `food_type` (string, e.g., "Korean"), `tags` (text[], free-form like "spicy", "soup", "weeknight"). Body: image attachments (the screenshot) + optional notes. Cross-cutting search work captured separately below — this entry is the schema + editor; the search UX uses what this writes.
 - **Real-time cross-note search with multi-level filters.** Cross-cutting feature. Use case (driven by recipes but applies to all notes): search for "Korean" → results, then within those, filter by tag "spicy" → narrows live, no "Search" button press. UX shape: search field at the top of the timeline / library / dedicated search screen; results update on each keystroke; chips below the field show active filters (note type, tag, food type) the user can stack. Schema additions needed: `tags text[]` column on `notes` (or a `note_tags` join table — text[] is simpler and supports GIN index for fast `&&` queries). `notes.search_text` generated column for full-text search across title + body? OR Postgres `to_tsvector` with a GIN index on the fly. Phase 1 can ship with `ILIKE '%query%'` against `title || body` — slower but no schema change beyond tags.
 - ~~**FAB menu copy refresh**~~ — Shipped (Phase F.1.2.refresh). Final picks: "Write a thought" / "Add from Photos" / "Snap something".

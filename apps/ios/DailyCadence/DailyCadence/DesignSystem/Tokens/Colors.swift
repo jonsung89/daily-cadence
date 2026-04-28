@@ -72,6 +72,11 @@ extension Color {
         static let moodSoft     = dynamicColor(light: 0xE5D9E2, dark: 0x342A33)
         static let activity     = dynamicColor(light: 0x7B8B52, dark: 0xA2B277)
         static let activitySoft = dynamicColor(light: 0xE1E5D0, dark: 0x2B3020)
+        // Book — coffee-brown evoking leather binding. Distinct from
+        // meal's amber (orange-yellow) and workout's terracotta
+        // (red-brown) at small dot sizes; reads as scholarly / quiet.
+        static let book         = dynamicColor(light: 0x6B4F3A, dark: 0xA38971)
+        static let bookSoft     = dynamicColor(light: 0xEFE7DC, dark: 0x332A22)
 
         // MARK: - Foreground / background roles
         //
