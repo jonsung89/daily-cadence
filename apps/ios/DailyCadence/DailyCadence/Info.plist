@@ -4,6 +4,75 @@
 <dict>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
+	<!--
+	Phase F.1.2.appicon — alternate-icon manifest. Required because we
+	use a static Info.plist (`GENERATE_INFOPLIST_FILE = NO`); without
+	this, the `ASSETCATALOG_COMPILER_ALTERNATE_APP_ICON_NAMES` build
+	setting compiles the icons into the bundle but iOS can't find them
+	at runtime — `setAlternateIconName(_:)` fails with "the feature is
+	not supported." Each alternate's name here MUST match an
+	`.appiconset` folder under `Assets.xcassets/`.
+	-->
+	<key>CFBundleIcons</key>
+	<dict>
+		<key>CFBundlePrimaryIcon</key>
+		<dict>
+			<key>CFBundleIconName</key>
+			<string>AppIcon</string>
+		</dict>
+		<key>CFBundleAlternateIcons</key>
+		<dict>
+			<key>Blush</key>
+			<dict>
+				<key>CFBundleIconName</key>
+				<string>Blush</string>
+				<key>UIPrerenderedIcon</key>
+				<false/>
+			</dict>
+			<key>Coral</key>
+			<dict>
+				<key>CFBundleIconName</key>
+				<string>Coral</string>
+				<key>UIPrerenderedIcon</key>
+				<false/>
+			</dict>
+			<key>Mulberry</key>
+			<dict>
+				<key>CFBundleIconName</key>
+				<string>Mulberry</string>
+				<key>UIPrerenderedIcon</key>
+				<false/>
+			</dict>
+			<key>Taupe</key>
+			<dict>
+				<key>CFBundleIconName</key>
+				<string>Taupe</string>
+				<key>UIPrerenderedIcon</key>
+				<false/>
+			</dict>
+			<key>Lavender</key>
+			<dict>
+				<key>CFBundleIconName</key>
+				<string>Lavender</string>
+				<key>UIPrerenderedIcon</key>
+				<false/>
+			</dict>
+			<key>Storm</key>
+			<dict>
+				<key>CFBundleIconName</key>
+				<string>Storm</string>
+				<key>UIPrerenderedIcon</key>
+				<false/>
+			</dict>
+			<key>Teal</key>
+			<dict>
+				<key>CFBundleIconName</key>
+				<string>Teal</string>
+				<key>UIPrerenderedIcon</key>
+				<false/>
+			</dict>
+		</dict>
+	</dict>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
