@@ -471,13 +471,17 @@ struct TimelineScreen: View {
 
                 chevronButton(.right)
 
-                Spacer(minLength: 0)
-            }
+                Spacer(minLength: 8)
 
-            if !TimelineStore.shared.isViewingToday {
-                todayPill
-                    .padding(.top, 4)
-                    .transition(.opacity.combined(with: .move(edge: .top)))
+                // Phase F.1.2.weekstrip — Today pill moved inline next
+                // to the chevrons so it doesn't add a dedicated row of
+                // vertical space when the user is on a non-today date.
+                // The chevron row's 40pt height comfortably hosts the
+                // ~30pt pill on the trailing edge.
+                if !TimelineStore.shared.isViewingToday {
+                    todayPill
+                        .transition(.opacity.combined(with: .scale(scale: 0.85)))
+                }
             }
 
             // Phase F.1.2.weekstrip — minimal motivational indicator.
