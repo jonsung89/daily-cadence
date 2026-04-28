@@ -28,13 +28,20 @@ enum AppIconChoice: String, CaseIterable, Identifiable, Hashable {
 
     var id: String { rawValue }
 
-    /// The asset-catalog alternate-icon name. Nil means "primary
-    /// AppIcon" (Sage). Matches what `UIApplication.setAlternateIconName(_:)`
-    /// expects.
+    /// The alternate-icon name passed to `UIApplication.setAlternateIconName(_:)`.
+    /// Nil means "primary AppIcon" (Sage). Other names MUST match
+    /// `CFBundleAlternateIcons` keys in Info.plist + the bundle-root
+    /// `<name>@2x.png` / `<name>@3x.png` filenames.
+    ///
+    /// Note: `.blush` returns `"BlushPink"` (not `"Blush"`) — the
+    /// original "Blush" name was permanently cached as blank in
+    /// Springboard's OS-level icon cache on Jon's dev device after
+    /// early-iteration broken builds. Renaming bypasses the poisoned
+    /// cache. Functionally identical icon; just a different lookup key.
     var alternateIconName: String? {
         switch self {
         case .sage: return nil
-        case .blush:    return "Blush"
+        case .blush:    return "BlushPink"
         case .coral:    return "Coral"
         case .mulberry: return "Mulberry"
         case .taupe:    return "Taupe"

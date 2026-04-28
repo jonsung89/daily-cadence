@@ -30,11 +30,21 @@
 		</dict>
 		<key>CFBundleAlternateIcons</key>
 		<dict>
-			<key>Blush</key>
+			<!--
+			Renamed from "Blush" because Springboard's icon cache on
+			Jon's dev device persistently rendered "Blush" as blank
+			even after multiple re-renders + app reinstalls. The cache
+			lives at OS level (not app-level) so app deletion didn't
+			clear it. Renaming forces Springboard to evaluate this
+			alternate as a brand-new entry with no cached state.
+			Functionally identical to the original Blush; just a
+			different lookup key.
+			-->
+			<key>BlushPink</key>
 			<dict>
 				<key>CFBundleIconFiles</key>
 				<array>
-					<string>Blush</string>
+					<string>BlushPink</string>
 				</array>
 				<key>UIPrerenderedIcon</key>
 				<false/>
