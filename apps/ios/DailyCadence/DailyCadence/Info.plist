@@ -103,6 +103,61 @@
 				<key>UIPrerenderedIcon</key>
 				<false/>
 			</dict>
+			<!--
+			Plant variants (Phase F.5.planticons): hand-drawn growing
+			plant rendered in each theme color, companion to the
+			quote-glyph alternates above. Same bundle-root file
+			convention; iOS rounds corners on display so we ship
+			full-bleed squares.
+			-->
+			<key>PlantSage</key>
+			<dict>
+				<key>CFBundleIconFiles</key>
+				<array><string>PlantSage</string></array>
+				<key>UIPrerenderedIcon</key><false/>
+			</dict>
+			<key>PlantBlush</key>
+			<dict>
+				<key>CFBundleIconFiles</key>
+				<array><string>PlantBlush</string></array>
+				<key>UIPrerenderedIcon</key><false/>
+			</dict>
+			<key>PlantCoral</key>
+			<dict>
+				<key>CFBundleIconFiles</key>
+				<array><string>PlantCoral</string></array>
+				<key>UIPrerenderedIcon</key><false/>
+			</dict>
+			<key>PlantMulberry</key>
+			<dict>
+				<key>CFBundleIconFiles</key>
+				<array><string>PlantMulberry</string></array>
+				<key>UIPrerenderedIcon</key><false/>
+			</dict>
+			<key>PlantTaupe</key>
+			<dict>
+				<key>CFBundleIconFiles</key>
+				<array><string>PlantTaupe</string></array>
+				<key>UIPrerenderedIcon</key><false/>
+			</dict>
+			<key>PlantLavender</key>
+			<dict>
+				<key>CFBundleIconFiles</key>
+				<array><string>PlantLavender</string></array>
+				<key>UIPrerenderedIcon</key><false/>
+			</dict>
+			<key>PlantStorm</key>
+			<dict>
+				<key>CFBundleIconFiles</key>
+				<array><string>PlantStorm</string></array>
+				<key>UIPrerenderedIcon</key><false/>
+			</dict>
+			<key>PlantTeal</key>
+			<dict>
+				<key>CFBundleIconFiles</key>
+				<array><string>PlantTeal</string></array>
+				<key>UIPrerenderedIcon</key><false/>
+			</dict>
 		</dict>
 	</dict>
 	<key>CFBundleExecutable</key>
@@ -117,8 +172,35 @@
 	<string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
 	<key>CFBundleShortVersionString</key>
 	<string>$(MARKETING_VERSION)</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<!--
+			OAuth callback scheme. Supabase redirects back to
+			`com.jonsung.dailycadence://login-callback` after Google
+			sign-in completes; ASWebAuthenticationSession listens on
+			this scheme and hands the URL back to the SDK, which
+			exchanges the code for a session.
+			-->
+			<key>CFBundleURLName</key>
+			<string>com.jonsung.dailycadence.oauth</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>com.jonsung.dailycadence</string>
+			</array>
+		</dict>
+	</array>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<!--
+	Encryption export compliance. App only uses Apple's standard
+	HTTPS/Keychain/CryptoKit cryptography, all of which are exempt
+	under the U.S. Export Administration Regulations. Setting this
+	to false short-circuits the TestFlight prompt that otherwise
+	appears on every upload.
+	-->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSCameraUsageDescription</key>

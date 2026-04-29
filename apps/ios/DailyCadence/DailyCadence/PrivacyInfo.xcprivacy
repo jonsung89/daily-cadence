@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!--
+    iOS 17+ Privacy Manifest. Declares "Required Reason API" usage so
+    Apple can verify the app accesses these APIs only for the
+    documented purposes. Enforced at upload starting May 2024.
+
+    DailyCadence currently uses one Required Reason API:
+    UserDefaults (CA92.1 — "Access info from same app, per
+    documentation"). This covers ThemeStore, AppPreferencesStore,
+    NoteTypeStyleStore, the onboarding-completed flag, etc.
+
+    Other categories that may apply later (file timestamps for media
+    capture, disk space for upload bookkeeping) aren't currently in
+    use; add to this manifest as those features land.
+    -->
+    <key>NSPrivacyAccessedAPITypes</key>
+    <array>
+        <dict>
+            <key>NSPrivacyAccessedAPIType</key>
+            <string>NSPrivacyAccessedAPICategoryUserDefaults</string>
+            <key>NSPrivacyAccessedAPITypeReasons</key>
+            <array>
+                <string>CA92.1</string>
+            </array>
+        </dict>
+    </array>
+    <!--
+    Tracking + collected data declarations. App does not track users
+    across other apps or websites. Data we collect (email, name,
+    notes, photos, videos) is collected for app functionality only;
+    those declarations live in the App Store Connect "App Privacy"
+    section, not in this manifest.
+    -->
+    <key>NSPrivacyTracking</key>
+    <false/>
+    <key>NSPrivacyTrackingDomains</key>
+    <array/>
+    <key>NSPrivacyCollectedDataTypes</key>
+    <array/>
+</dict>
+</plist>

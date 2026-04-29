@@ -15,6 +15,12 @@ import TipKit
 /// Currently backed by `MockNotes.today`. Swap to real Supabase-backed data
 /// once the `notes` table + Swift SDK are wired (see `docs/PROGRESS.md`).
 struct TimelineScreen: View {
+    /// Optional closure invoked when the top-bar gear is tapped.
+    /// `RootView` wires this to switch the active `RootTab` to
+    /// `.settings`. Optional + default-nil so previews and any tests
+    /// that instantiate `TimelineScreen()` directly keep compiling.
+    var onOpenSettings: (() -> Void)? = nil
+
     @State private var viewMode: TimelineViewMode = AppPreferencesStore.shared.defaultTodayView
     @State private var boardLayout: BoardLayoutMode = .cards
     @State private var isEditorPresented = false
@@ -987,9 +993,7 @@ struct TimelineScreen: View {
     // MARK: - Actions
 
     private func openSettings() {
-        // TODO: push the Settings screen once navigation destinations are wired.
-        // (For Phase C: Settings is reached via the bottom tab bar; this top
-        // button is a future quick-access shortcut.)
+        onOpenSettings?()
     }
 }
 

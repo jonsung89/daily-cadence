@@ -44,6 +44,23 @@ final class AppPreferencesStore {
         }
     }
 
+    // MARK: - Onboarding (Phase F.3.onboarding)
+
+    private static let hasCompletedOnboardingKey = "DailyCadence.hasCompletedOnboarding"
+
+    /// True once the user has reached the Done page of the onboarding
+    /// flow at least once on this device. RootView's gate uses this to
+    /// decide whether to show the onboarding flow or the main app
+    /// shell on launch. Quitting mid-flow leaves this false so users
+    /// resume from the start on next launch — intentional, the flow is
+    /// short and skipping is supported, no need for partial state
+    /// recovery.
+    var hasCompletedOnboarding: Bool = false {
+        didSet {
+            UserDefaults.standard.set(hasCompletedOnboarding, forKey: Self.hasCompletedOnboardingKey)
+        }
+    }
+
     init(defaults: UserDefaults = .standard) {
         if let raw = defaults.string(forKey: Self.defaultTodayViewKey),
            let mode = Self.parse(raw) {
@@ -52,6 +69,7 @@ final class AppPreferencesStore {
             self.defaultTodayView = .timeline
         }
         self.iconSyncPromptDismissed = defaults.bool(forKey: Self.iconSyncPromptDismissedKey)
+        self.hasCompletedOnboarding = defaults.bool(forKey: Self.hasCompletedOnboardingKey)
     }
 
     // MARK: - Codec

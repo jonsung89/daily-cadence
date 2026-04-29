@@ -27,6 +27,13 @@ struct RootView: View {
     /// changed.
     @Environment(\.scenePhase) private var scenePhase
 
+    /// Tracks keyboard visibility so the custom TabBar can hide while
+    /// typing — the standard iOS pattern (Mail, Notes, Messages all do
+    /// this). System `TabView` handles this automatically; our custom
+    /// `safeAreaInset`-mounted TabBar doesn't, so we observe keyboard
+    /// notifications and conditionally render the TabBar instead.
+    @State private var keyboardVisible = false
+
     /// Drives the open animation + steady-state viewer. Set/cleared
     /// alongside `openProgress` for the matched-geo zoom feel.
     @State private var presentedMedia: PresentedMedia?
@@ -43,6 +50,43 @@ struct RootView: View {
     @State private var openProgress: CGFloat = 0
 
     var body: some View {
+        gatedContent
+    }
+
+    /// Auth + onboarding gate. Three terminal states once `isReady`:
+    /// signed-out → `OnboardingScreen` (sign-in), signed-in and needs
+    /// onboarding → `OnboardingFlow`, otherwise → app shell.
+    ///
+    /// "Needs onboarding" is the OR of two signals:
+    /// - `!hasCompletedOnboarding` — device-local `UserDefaults` flag.
+    ///   Goes false on a fresh install / new device, even for an
+    ///   existing user.
+    /// - `!auth.hasName` — server-side check via
+    ///   `auth.users.raw_user_meta_data`. If we don't even know the
+    ///   user's name, we definitely haven't onboarded them.
+    ///
+    /// The OR means a returning user on a new device skips onboarding
+    /// (their names are already on the server), AND a fresh user who
+    /// somehow had the flag set without going through the flow still
+    /// gets shown it. Both edges covered.
+    @ViewBuilder
+    private var gatedContent: some View {
+        let auth = AuthStore.shared
+        if !auth.isReady {
+            ZStack {
+                Color.DS.bg1.ignoresSafeArea()
+                ProgressView().tint(Color.DS.sage)
+            }
+        } else if auth.currentUserId == nil {
+            OnboardingScreen()
+        } else if !AppPreferencesStore.shared.hasCompletedOnboarding || !auth.hasName {
+            OnboardingFlow()
+        } else {
+            appShell
+        }
+    }
+
+    private var appShell: some View {
         content
             .environment(\.mediaTapHandler, mediaTapHandler)
             // Phase F.1.2.zoomfix — write to the non-observable
@@ -59,7 +103,19 @@ struct RootView: View {
                 CardFrameStore.shared.frames = newFrames
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                TabBar(items: tabItems, selection: $selection)
+                // Hide the TabBar while the keyboard is up — iOS Mail /
+                // Notes / Messages all do this. A tab bar isn't useful
+                // mid-type, and removing it from the safe-area inset
+                // cleanly recovers the screen real estate so focused
+                // fields + adjacent action buttons (the Delete Account
+                // confirmation, future search bars, etc.) sit above the
+                // keyboard without being sandwiched. System `TabView`
+                // gets this for free; our custom TabBar needs the
+                // observation in `keyboardVisible`.
+                if !keyboardVisible {
+                    TabBar(items: tabItems, selection: $selection)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
             }
             .overlay {
                 if let displayed = presentedMedia ?? hidingMedia {
@@ -110,12 +166,32 @@ struct RootView: View {
                     TimelineStore.shared.refreshCurrentDay()
                 }
             }
+            // Keyboard observers drive `keyboardVisible`, which
+            // toggles the TabBar visibility in the bottom safeAreaInset.
+            // `0.25s ease` matches iOS's default keyboard animation
+            // curve so the TabBar slide is visually in sync with the
+            // keyboard rise/fall.
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
+                withAnimation(.easeInOut(duration: 0.25)) {
+                    keyboardVisible = true
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+                withAnimation(.easeInOut(duration: 0.25)) {
+                    keyboardVisible = false
+                }
+            }
     }
 
     @ViewBuilder
     private var content: some View {
         switch selection {
-        case .today:    TimelineScreen()
+        case .today:
+            // Pass the tab-switch closure so the top-bar gear can
+            // jump straight to Settings (matches what most modern
+            // apps do — gear in upper-right is a shortcut, not a
+            // navigation push).
+            TimelineScreen(onOpenSettings: { selection = .settings })
         case .calendar: CalendarScreen()
         case .progress: DashboardScreen()
         case .library:  LibraryScreen()

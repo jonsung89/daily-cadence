@@ -61,6 +61,40 @@ Catching a doc/code drift later is much harder than keeping them in step.
 
 ---
 
+## Auth gate + onboarding
+
+**Owns:** `Features/Onboarding/OnboardingScreen.swift`, `Services/AuthStore.swift`, `Services/AppleSignInNonce.swift`
+
+`RootView` reads `AuthStore.shared`:
+- `!isReady` → quiet loading (`ProgressView` on `bg1`) so users with a valid Keychain session don't see a flash of OnboardingScreen.
+- `isReady && currentUserId == nil` → `OnboardingScreen`.
+- `isReady && currentUserId != nil` → app shell.
+
+`OnboardingScreen` shows the brand logo + tagline, two stacked sign-in buttons, and a small terms disclaimer. Errors render inline below the buttons; user-cancelled is silent.
+
+### Continue with Apple
+
+- `SignInWithAppleButton(.continue)` — system-rendered. Style is `.black` on light, `.white` on dark.
+- Generates a fresh `AppleSignInNonce` per request (random 32-char raw + SHA-256 hex). Hashed half goes to Apple in `request.nonce`; raw half is kept and forwarded to Supabase.
+- On success, calls `AuthStore.signInWithApple(idToken:rawNonce:)` → `client.auth.signInWithIdToken(provider: .apple, ...)`. Supabase re-hashes raw and matches against the ID token's `nonce` claim — replay protection.
+- `ASAuthorizationError.canceled` is treated as silent.
+
+### Continue with Google
+
+- Custom button matching Apple's height + corner radius. Bundles the official 4-color G logo as a vector imageset (`Assets.xcassets/GoogleG.imageset/`).
+- Light: white background, near-black text, subtle 1pt border.
+- Dark: `#1F1F1F` background, white text, faint white border.
+- Calls `AuthStore.signInWithGoogle()` → `client.auth.signInWithOAuth(provider: .google, redirectTo: "com.jonsung.dailycadence://login-callback")`. Supabase Swift SDK wraps `ASWebAuthenticationSession` end-to-end (presents the browser sheet, listens for the redirect, exchanges the code, returns a session). Custom URL scheme registered via `Info.plist` `CFBundleURLTypes`; Supabase Auth → URL Configuration allowlist contains the same.
+- `ASWebAuthenticationSessionError.canceledLogin` is treated as silent.
+
+### Account collision strategy (Apple ↔ Google with same email)
+
+- **A. Auto-link by verified email.** Supabase default. When both providers verify the same email, identities merge to one user. Free for the common case.
+- **B. Manual `linkIdentity()` API.** Toggled ON in Supabase Auth → Sign In / Up → "Allow manual linking" so future Settings → Account "Connect provider" UI can attach a second provider to an existing session.
+- **Apple-with-relay edge case** (Hide-My-Email + Google with real Gmail) creates two separate accounts; Pattern B's manual link is the user-driven recovery path.
+
+---
+
 ## Navigation shell
 
 **Owns:** `Navigation/RootView.swift`, `Navigation/RootTab.swift`, `DesignSystem/Components/TabBar.swift`
@@ -70,6 +104,7 @@ Catching a doc/code drift later is much harder than keeping them in step.
 - The first tab's label + icon **mirror the user's chosen default Today view** — if the user picked Board, the first tab reads **Board** with `square.grid.2x2`; otherwise **Timeline** with `list.bullet`. Updates live when the preference changes.
 - Each feature screen owns its own `NavigationStack` so per-tab navigation history is independent (iOS standard).
 - Root applies `.tint(Color.DS.sage)` to propagate the user's primary color to all SwiftUI controls.
+- Mounted only when `AuthStore.shared.currentUserId != nil`. See the Auth gate section above.
 
 ---
 
@@ -483,7 +518,7 @@ Full-screen viewer presented as a `RootView` overlay (so the underlying timeline
 
 ### Today
 
-- **Default view** — `Picker` (Timeline / Board) bound to `AppPreferencesStore.shared.defaultTodayView`. Footer text: "Picks which view the Today tab opens in by default."
+- **Default view** — `Menu { Picker } label: …` row bound to `AppPreferencesStore.shared.defaultTodayView`. Built as a manual `Menu` rather than a plain `Picker` so the row's selected display uses the same icon-text spacing as the dropdown items (a `Picker`'s collapsed display ignores `currentValueLabel:` inside an inset-grouped list). Footer: "Picks which view the Today tab opens in by default."
 - Selection persists to `UserDefaults`. Affects:
   - The first bottom tab's label + icon.
   - The Today screen's initial `viewMode` on next open.
@@ -495,6 +530,14 @@ Full-screen viewer presented as a `RootView` overlay (so the underlying timeline
 - **Note Types** — `NavigationLink` to `NoteTypePickerScreen`. Row preview: 7 overlapping circles colored by current per-type colors + summary string ("Default" / "1 customized" / "N customized").
   - Detail screen lists all 6 types; tap any to push a `TextColorPickerScreen` to pick from any palette swatch or "Default."
   - "Reset all" action on the parent screen.
+- **App Icon** — `NavigationLink` to `AppIconPickerScreen`. Row preview: tiny tile of the currently-installed icon + name (`UIApplication.shared.alternateIconName`). Picker is an 8-cell grid (Sage default + 7 alternates); tap calls `setAlternateIconName(_:)`.
+
+### Account
+
+- **Signed in as** row — shows the user's email. Falls back to `Guest · {short-id}` for any leftover anonymous Keychain sessions; falls back to `—` / `Loading…` while `AuthStore` settles.
+- **Error** row — surfaces the latest `AuthStore.lastError` or sign-out error (workout-color text, monospaced small).
+- **Sign Out** button — destructive role. Calls `AuthStore.signOut()` → emits `.signedOut` → RootView swaps to `OnboardingScreen`. Disabled while in flight or when no user.
+- Account-deletion / connected-providers UI not shipped yet — see PROGRESS.md "Critical path → App Store."
 
 ### About
 

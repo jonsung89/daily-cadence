@@ -164,14 +164,27 @@ final class TimelineStore {
         lastError = nil
     }
 
-    /// Phase F.1.2.daycache — drops every cached day. Intended for
-    /// auth changes (real Sign in with Apple ships in a future round
-    /// and will need this hook so user A's cached days don't bleed into
-    /// user B's session). No-op-safe today since the anon-only flow
-    /// never changes user.
+    /// Phase F.1.2.daycache — drops every cached day. Used internally
+    /// by `resetForUserChange()` and exposed for tests.
     func clearDayCache() {
         notesByDay.removeAll()
         log.info("Cleared day cache")
+    }
+
+    /// Wipe ALL user-scoped state — current notes, per-day cache, load
+    /// flag, last error. Called from `RootView` when
+    /// `AuthStore.currentUserId` changes (sign-out → sign-in as a
+    /// different user, or any transition through nil). Without this,
+    /// user A's notes persist in the singleton's `notes` array and the
+    /// `hasLoaded` gate keeps the `.task(id:)` re-fetch from running,
+    /// so user B briefly sees A's data on the Today tab until they
+    /// navigate days.
+    func resetForUserChange() {
+        notes = []
+        notesByDay.removeAll()
+        hasLoaded = false
+        lastError = nil
+        log.info("Reset for user change")
     }
 
     /// Convenience: jumps to today. Used by the "Today" pill that appears

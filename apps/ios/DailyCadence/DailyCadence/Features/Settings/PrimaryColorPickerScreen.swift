@@ -31,7 +31,7 @@ struct PrimaryColorPickerScreen: View {
                         .listRowBackground(Color.DS.bg2)
                 }
             } footer: {
-                Text("Changes the app's accent color — buttons, the floating + button, selected tabs. Note-type colors (workout, meal, sleep, mood, activity) stay fixed so the timeline keeps its data legend.")
+                Text("Changes the app's accent color: buttons, the floating + button, selected tabs. Note-type colors (workout, meal, sleep, mood, activity) stay fixed so the timeline keeps its data legend.")
                     .font(.DS.small)
                     .foregroundStyle(Color.DS.fg2)
             }

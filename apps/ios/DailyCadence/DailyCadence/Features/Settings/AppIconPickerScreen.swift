@@ -30,14 +30,14 @@ struct AppIconPickerScreen: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                LazyVGrid(columns: columns, spacing: 20) {
-                    ForEach(AppIconChoice.allCases) { choice in
-                        cell(for: choice)
-                            .onTapGesture { select(choice) }
-                    }
-                }
-                .padding(.horizontal, 20)
-                .padding(.top, 8)
+                iconSection(
+                    title: "Quote",
+                    choices: AppIconChoice.allCases.filter { !$0.isPlant }
+                )
+                iconSection(
+                    title: "Plant",
+                    choices: AppIconChoice.allCases.filter { $0.isPlant }
+                )
 
                 if let lastError {
                     Text(lastError)
@@ -65,6 +65,26 @@ struct AppIconPickerScreen: View {
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
             current = AppIconChoice.from(alternateIconName: UIApplication.shared.alternateIconName)
+        }
+    }
+
+    // MARK: - Section
+
+    @ViewBuilder
+    private func iconSection(title: String, choices: [AppIconChoice]) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(title)
+                .font(.DS.caption)
+                .foregroundStyle(Color.DS.fg2)
+                .textCase(.uppercase)
+                .padding(.horizontal, 20)
+            LazyVGrid(columns: columns, spacing: 20) {
+                ForEach(choices) { choice in
+                    cell(for: choice)
+                        .onTapGesture { select(choice) }
+                }
+            }
+            .padding(.horizontal, 20)
         }
     }
 
@@ -132,13 +152,27 @@ struct ThemeIconPreview: View {
     var body: some View {
         ZStack {
             choice.tileColor
-            Text("\u{201C}")
-                .font(.DS.manropeExtraBold(size: size * 1.03))
-                .foregroundStyle(choice.glyphColor)
-                // Same downward optical-center nudge as the in-app
-                // `DailyCadenceLogomark` (SwiftUI Text positions by
-                // typographic bounds, leaving the ink visually high).
-                .offset(y: size * 0.185)
+            if choice.isPlant {
+                // Plant variant: same `PlantSprout` shape and exact
+                // proportions as the onboarding Profile-page
+                // default-state plant inside the avatar circle.
+                // 0.458 × 0.625 of tile, ~1.9% stroke at 55% opacity.
+                // Matches the bundled rendered PNGs.
+                PlantSprout()
+                    .stroke(
+                        choice.glyphColor.opacity(0.55),
+                        style: StrokeStyle(lineWidth: size * 0.019, lineCap: .round, lineJoin: .round)
+                    )
+                    .frame(width: size * 0.458, height: size * 0.625)
+            } else {
+                Text("\u{201C}")
+                    .font(.DS.manropeExtraBold(size: size * 1.03))
+                    .foregroundStyle(choice.glyphColor)
+                    // Same downward optical-center nudge as the in-app
+                    // `DailyCadenceLogomark` (SwiftUI Text positions by
+                    // typographic bounds, leaving the ink visually high).
+                    .offset(y: size * 0.185)
+            }
         }
         .frame(width: size, height: size)
     }

@@ -72,6 +72,12 @@ enum MediaStorageProvider {
     /// bucket parameter differs.
     static let backgrounds: any MediaStorage = SupabaseStorageImpl(bucket: SupabaseStorageImpl.backgroundsBucket)
 
+    /// Phase F.3.profile — `profile-images` bucket for user profile
+    /// photos. Same path layout (`{user_id}/{filename}`) and RLS
+    /// pattern as the other buckets. Photo path persists to
+    /// `auth.users.raw_user_meta_data.profile_image_path`.
+    static let profileImages: any MediaStorage = SupabaseStorageImpl(bucket: SupabaseStorageImpl.profileImagesBucket)
+
     /// Resolves a `MediaRef` to the right impl by provider id. Used on
     /// fetch — older refs from Supabase keep working even after `current`
     /// flips to R2 because each ref carries its provider. Note: this
@@ -97,6 +103,7 @@ struct SupabaseStorageImpl: MediaStorage {
     /// (`(storage.foldername(name))[1] = auth.uid()::text`).
     static let mediaBucket = "note-media"
     static let backgroundsBucket = "note-backgrounds"
+    static let profileImagesBucket = "profile-images"
 
     /// Bucket-scoped — one impl instance per bucket. Phase F.1.2.bgpersist
     /// added this so backgrounds can route to a separate bucket without

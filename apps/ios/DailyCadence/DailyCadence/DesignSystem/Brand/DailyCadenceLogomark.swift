@@ -24,16 +24,23 @@ struct DailyCadenceLogomark: View {
     var variant: Variant = .sage
 
     var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: size * 0.33, style: .continuous)
-                .fill(tileColor)
-            Text("\u{201C}")
-                .font(.DS.manropeExtraBold(size: size * 1.03))
-                .foregroundStyle(glyphColor)
-                .offset(y: size * 0.185)
-        }
-        .frame(width: size, height: size)
-        .accessibilityLabel("DailyCadence")
+        // RR drives the layout size; the glyph rides as an `.overlay` so
+        // its intrinsic line-height (Manrope at 1.03× tile is ~1.2× tile
+        // tall) can't pull the tile into a portrait rectangle. Earlier
+        // we used a ZStack with a trailing `.frame` — same intent, but
+        // the ZStack's own sizing logic still leaked the Text's height
+        // into the visible tile when the parent (e.g. an HStack with a
+        // shorter sibling) gave it room to grow.
+        RoundedRectangle(cornerRadius: size * 0.33, style: .continuous)
+            .fill(tileColor)
+            .frame(width: size, height: size)
+            .overlay(
+                Text("\u{201C}")
+                    .font(.DS.manropeExtraBold(size: size * 1.03))
+                    .foregroundStyle(glyphColor)
+                    .offset(y: size * 0.185)
+            )
+            .accessibilityLabel("DailyCadence")
     }
 
     private var tileColor: Color {

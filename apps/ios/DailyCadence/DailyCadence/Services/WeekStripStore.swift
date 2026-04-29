@@ -46,6 +46,16 @@ final class WeekStripStore {
         self.repository = repository
     }
 
+    /// Wipe user-scoped state — the dot set, the loaded-week marker.
+    /// Called from `RootView` when `AuthStore.currentUserId` changes so
+    /// user A's week dots don't bleed into user B's session.
+    func resetForUserChange() {
+        daysWithNotes = []
+        weekStart = nil
+        isLoading = false
+        log.info("Reset for user change")
+    }
+
     /// Fetches the days-with-notes set for the week containing `day`.
     /// Idempotent — same-week calls short-circuit. Cancellation-safe;
     /// failures keep the prior set rather than wiping to empty.

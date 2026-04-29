@@ -25,8 +25,27 @@ enum AppIconChoice: String, CaseIterable, Identifiable, Hashable {
     case lavender
     case storm
     case teal
+    // Phase F.5.planticons — same colors with the journal-pen
+    // growing-plant glyph instead of the opening-quote.
+    case plantSage, plantBlush, plantCoral, plantMulberry, plantTaupe, plantLavender, plantStorm, plantTeal
 
     var id: String { rawValue }
+
+    /// True for the growing-plant variants. Used by the picker to
+    /// group sections and by `ThemeIconPreview` to render the right
+    /// glyph. (Earlier attempts at procedurally-rendered Sun, Spiral,
+    /// and Cursive-d families looked computer-drawn and were dropped;
+    /// expanding the family count waits on hand-drawn vector assets
+    /// from an illustrator.)
+    var isPlant: Bool {
+        switch self {
+        case .plantSage, .plantBlush, .plantCoral, .plantMulberry,
+             .plantTaupe, .plantLavender, .plantStorm, .plantTeal:
+            return true
+        default:
+            return false
+        }
+    }
 
     /// The alternate-icon name passed to `UIApplication.setAlternateIconName(_:)`.
     /// Nil means "primary AppIcon" (Sage). Other names MUST match
@@ -48,6 +67,14 @@ enum AppIconChoice: String, CaseIterable, Identifiable, Hashable {
         case .lavender: return "Lavender"
         case .storm:    return "Storm"
         case .teal:     return "Teal"
+        case .plantSage:     return "PlantSage"
+        case .plantBlush:    return "PlantBlush"
+        case .plantCoral:    return "PlantCoral"
+        case .plantMulberry: return "PlantMulberry"
+        case .plantTaupe:    return "PlantTaupe"
+        case .plantLavender: return "PlantLavender"
+        case .plantStorm:    return "PlantStorm"
+        case .plantTeal:     return "PlantTeal"
         }
     }
 
@@ -62,6 +89,14 @@ enum AppIconChoice: String, CaseIterable, Identifiable, Hashable {
         case .lavender: return "Lavender"
         case .storm: return "Storm"
         case .teal: return "Teal"
+        case .plantSage: return "Sage"
+        case .plantBlush: return "Blush"
+        case .plantCoral: return "Coral"
+        case .plantMulberry: return "Mulberry"
+        case .plantTaupe: return "Taupe"
+        case .plantLavender: return "Lavender"
+        case .plantStorm: return "Storm"
+        case .plantTeal: return "Teal"
         }
     }
 
@@ -92,14 +127,14 @@ extension AppIconChoice {
     /// picker thumbnail matches what the home-screen icon shows.
     var tileColor: Color {
         switch self {
-        case .sage:     return Color(hex: 0x5A7B6D)
-        case .blush:    return Color(hex: 0xE89BB1)
-        case .coral:    return Color(hex: 0xD67B6F)
-        case .mulberry: return Color(hex: 0x7D3F4D)
-        case .taupe:    return Color(hex: 0x9E9289)
-        case .lavender: return Color(hex: 0x9C8AC0)
-        case .storm:    return Color(hex: 0x6D8AA1)
-        case .teal:     return Color(hex: 0x3F7A7C)
+        case .sage,     .plantSage:     return Color(hex: 0x5A7B6D)
+        case .blush,    .plantBlush:    return Color(hex: 0xE89BB1)
+        case .coral,    .plantCoral:    return Color(hex: 0xD67B6F)
+        case .mulberry, .plantMulberry: return Color(hex: 0x7D3F4D)
+        case .taupe,    .plantTaupe:    return Color(hex: 0x9E9289)
+        case .lavender, .plantLavender: return Color(hex: 0x9C8AC0)
+        case .storm,    .plantStorm:    return Color(hex: 0x6D8AA1)
+        case .teal,     .plantTeal:     return Color(hex: 0x3F7A7C)
         }
     }
 
@@ -111,9 +146,9 @@ extension AppIconChoice {
     /// - Taupe theme: ink (#2C2620) — taupe glyph on taupe tile would blend.
     var glyphColor: Color {
         switch self {
-        case .blush:    return Color(hex: 0xFAFAFA)
-        case .taupe:    return Color(hex: 0x2C2620)
-        default:        return Color(hex: 0xEAE6E1)
+        case .blush, .plantBlush: return Color(hex: 0xFAFAFA)
+        case .taupe, .plantTaupe: return Color(hex: 0x2C2620)
+        default:                   return Color(hex: 0xEAE6E1)
         }
     }
 }

@@ -13,7 +13,7 @@ struct DailyCadenceLogo: View {
     var markSize: CGFloat = 56
 
     var body: some View {
-        HStack(spacing: markSize * 0.32) {
+        HStack(spacing: markSize * 0.22) {
             DailyCadenceLogomark(size: markSize)
             DailyCadenceWordmark(layout: layout, size: markSize * 0.54)
         }

@@ -1,6 +1,6 @@
 # DailyCadence — Progress
 
-**Last updated:** 2026-04-28 (Phase F.1.2.appicon — brand app icon installed (sage tile + Manrope opening-quote glyph) + 7 alternate icons (one per primary theme color: Blush, Coral, Mulberry, Taupe, Lavender, Storm, Teal) registered as Asset Catalog alternates. New Settings → App Icon picker (8-cell grid, current selection highlighted) calls `UIApplication.setAlternateIconName(_:)` on tap. Icons rendered via Core Graphics + Core Text (no SwiftUI ImageRenderer — needed an NSApplication runloop the script couldn't easily provide); rendering script lives at `/tmp/render-app-icons.swift`. Phase 4 (auto-prompt on theme change with "Don't ask again") not shipped this session — captured as a TODO. Sign in with Apple wiring also captured as a TODO since Apple Developer enrollment is now complete and that's the next critical-path item before TestFlight.)
+**Last updated:** 2026-04-29 (🎉 **TestFlight 1.0 (1) shipped**. Jon + wife both have the app installed and running. Massive day: Phase F.2 real auth (Apple + Google + onboarding sign-in screen + Sign Out + cache reset on user-change + brand-correct scheme-aware buttons), Phase F.3 account deletion (Edge Function `delete-account` deployed via dashboard editor, JWT-verify toggle OFF, typed-email confirmation flow on dedicated DeleteAccountConfirmationScreen, Danger Zone section in Settings), Phase F.4 onboarding flow (6 pages: Welcome / Profile / Theme & Icon / Note Types / Reminders / Done; journal-pen illustration vocabulary established with sun/plant/squiggle/sparkle/dot/moon/bell motifs in `JournalShapes.swift`; chrome auto-applies corner ambient ornaments + theme-tinted gradient + scrollEdgeEffectStyle soft fade; PhotosPicker → circular crop → upload pipeline for profile photos with `ProfileImageCache` two-layer cache (UIImage + signed URL TTL); `profile-images` Storage bucket with RLS), Settings restructure (Profile row at top → ProfileEditorScreen with avatar + first/last + Save; gear icon on Today now actually navigates to Settings tab via callback closure; reusable `tabBarBottomClearance()` modifier; TabBar hides on keyboard show via NotificationCenter observer in RootView). App Store Connect ready: privacy manifest declares UserDefaults usage (CA92.1), `ITSAppUsesNonExemptEncryption = NO`. Build uploaded via Xcode Organizer, processed cleanly with one non-blocking warning (missing iPad 152×152 alternates — fine for iPhone-only TestFlight, address before App Store or drop iPad target).)
 **Current phase:** Phase 1 MVP — iOS app for Jon + wife, TestFlight distribution
 
 This is the living state of the project. Update at the end of every session.
@@ -2088,6 +2088,31 @@ Captured here so a fresh session can pick up the roadmap. Each line corresponds 
     
     **Recommendation:** combine **A + B**. Editor opens to writing immediately (no picker), with the current type as a small chip near the title field. Tap the chip → searchable sheet (option B) for explicit selection. Adds C as a Phase 2 enhancement once we have the parsing pass for time. This honors Jon's "free flow no disruption" goal without sacrificing power-user workflow. Same picker UI handles N types so it scales to custom user types automatically.
 
+### Phase F.2 — Real auth: Sign in with Apple + Google + onboarding (added this round)
+
+The dev-mode anonymous bootstrap is gone. New users land on a real onboarding screen and pick a provider; existing anonymous Keychain sessions still load gracefully so they're not forced into a re-sign on next launch.
+
+**Apple — native ID-token flow.** `Services/AppleSignInNonce.swift` generates a random raw nonce + its SHA-256 hex; the hashed half goes to Apple in the authorization request, the raw half to Supabase via `auth.signInWithIdToken(provider: .apple, idToken:, nonce:)`. Supabase re-hashes raw and matches against the ID token's `nonce` claim — replay-protection. We use the **native** flow, not OAuth, so no Services ID / client secret JWT was needed on Apple's side; just the App ID with the "Sign in with Apple" capability enabled and the bundle ID added to Supabase's "Authorized Client IDs" field. Xcode capability + entitlements file (`DailyCadence.entitlements`) added.
+
+**Google — Supabase OAuth + ASWebAuthenticationSession.** Supabase Swift SDK's `auth.signInWithOAuth(provider:redirectTo:)` overload wraps `ASWebAuthenticationSession` end-to-end (presents the system browser sheet, listens for the redirect, exchanges the code, returns the session). Required infra: Google Cloud Console **Web application** OAuth client (NOT iOS — Supabase does the server-side exchange), redirect URI = `https://zmlxnujheofgtrkrogdq.supabase.co/auth/v1/callback`. App registers the `com.jonsung.dailycadence://login-callback` custom scheme via `Info.plist` `CFBundleURLTypes`; Supabase's Auth → URL Configuration allowlist contains the same. No GoogleSignIn SDK — kept the dependency footprint flat.
+
+**Account-collision strategy (Pattern A + B + C, agreed upfront).**
+- **A. Auto-link by verified email** — Supabase's default behavior; when both providers report the same verified email, identities merge to one user. Free win for the common case.
+- **B. Manual `linkIdentity()` API** — toggled ON in Supabase Auth → Sign In / Up → "Allow manual linking" so a Settings → Account "Connect Apple/Google" button can attach a second provider to an existing session. UI for this is *not* shipped this round — the toggle is on so the API is available when we wire the UI.
+- **C. Last-used-provider memory at the sign-in screen** — *not* shipped this round either. We only have two providers and the OnboardingScreen surfaces both equally (Apple on top per HIG); the last-used nudge becomes useful when there are 3+ providers or when account-collision starts biting in practice.
+
+**`OnboardingScreen` — gated sign-in surface.** `Features/Onboarding/OnboardingScreen.swift`. Logo + tagline + two buttons (Apple, Google). Errors render inline below the buttons; user-cancelled is silent (`ASAuthorizationError.canceled` for Apple, `ASWebAuthenticationSessionError.canceledLogin` for Google). `RootView` shows it whenever `AuthStore.isReady && currentUserId == nil`; otherwise routes to the timeline.
+
+**Brand-correct, scheme-aware buttons.** Apple: `SignInWithAppleButton` with `.black` style on light, `.white` on dark (system component, never wrong). Google: bundled the official 4-color G logo as a vector imageset (`Assets.xcassets/GoogleG.imageset/google-g.svg`) so it stays sharp at any scale; light = white background + dark text + subtle border, dark = `#1F1F1F` background + white text + faint border, both per Google's brand guidelines. Same height + corner radius as Apple's button so they read as a pair.
+
+**Bootstrap rewrite — no more auto-anon.** `AuthStore.bootstrap()` no longer calls `signInAnonymously()` when there's no Keychain session — it just sets `isReady = true` with `currentUserId = nil` so RootView swaps in the OnboardingScreen. Existing dev-era anon sessions still load as `.initialSession` and continue to work; they don't get force-signed-out. `signedOut` / `userDeleted` events also stop the anon retry loop.
+
+**Settings → Account redesign.** Replaced the dev-mode "User ID" UUID display with a real "Signed in as" row showing `email` (or `Guest · {short-id}` for any leftover anon sessions). Added a destructive-style **Sign Out** button that calls `AuthStore.signOut()` → emits `.signedOut` → RootView swaps to OnboardingScreen.
+
+**One-time data migration: anon → Apple account (jonsung89@gmail.com).** Migrated 19 active + 5 deleted notes + 22 storage objects (102 MB across `note-media` HEIC/MP4/MOV) + 4 image backgrounds (813 kB in `note-backgrounds`) from anon `c621f238-…` to the new Apple `d9d71ad5-…`. Three layers had to flip together: (1) `notes.user_id` + `notes.body` JSONB media-ref paths, (2) the `backgrounds` table's `user_id` + `image_url` column, (3) Storage objects in both buckets. **Key gotcha learned:** `UPDATE storage.objects SET name = ...` only renames the metadata row; the underlying S3 blob is keyed by the original path, so signed URLs return 404 after a metadata-only rename. The correct primitive is Supabase's `storage.from(bucket).move()` API (or `POST /storage/v1/object/move` REST endpoint) which renames metadata AND copies+deletes the S3 object atomically. Final fix: SQL to reverse desynced metadata back to source prefix, then a Node script using built-in `fetch` against the storage REST API with the service-role key to call `move()` for each file. Memory entry [`feedback_migration_read_constants_from_source.md`](memory/feedback_migration_read_constants_from_source.md) captures this so future migration work doesn't repeat the mistake.
+
+**Default View picker — Menu-based row.** `Settings → Today → Default view` was a `Picker` whose collapsed display rendered the icon + title with system-tight spacing — visibly different from the dropdown menu's standard Label spacing. Tried iOS 17+ `currentValueLabel:` parameter first; built clean but iOS ignored it inside an inset-grouped list. Final fix: rebuilt as `Menu { Picker } label: { ... }`, where the menu's button label is a hand-laid `HStack(spacing: 8)` with the icon + title + manual chevron. Menu items inside still use `Label`. Two states are now visually consistent.
+
 ### Tests (79/79 passing — +3 this round)
 - `ColorHexTests` (16) — hex initializer, every palette family in light + dark, invariant tokens, role flips
 - `FontLoaderTests` (5) — bundled font registration + variable-axis weight
@@ -2101,6 +2126,7 @@ Captured here so a fresh session can pick up the roadmap. Each line corresponds 
 - `TextStyleTests` (10) — empty detection, MockNote auto-collapses empty styles, valid/unknown font + color id resolution, nil/empty optional fallback to default color, partial style preservation, store round-trip
 - `NoteTypeStyleStoreTests` (6) — empty default state, persistence across instances, nil/empty-string clears override, stale id resolves to nil at read time, reset-all clears every override
 - **`BoardLayoutModeTests` (3)** — declared case order (.stacked / .grouped / .free), every case has non-empty title + SF Symbol
+- **`AppleSignInNonceTests` (4)** — `hashed` equals SHA-256 of `raw`, raw is requested length, consecutive nonces differ, hashed is 64 hex chars
 
 ### Tests (21/21 passing)
 - `ColorHexTests` (16) — hex initializer, every palette family in light + dark, invariant tokens, role flips
@@ -2116,9 +2142,17 @@ Captured here so a fresh session can pick up the roadmap. Each line corresponds 
 
 ## 🚧 In flight
 
+**TestFlight 1.0 (1) live (2026-04-29).** Jon + wife installed via internal-tester group. Now collecting real-use feedback; iterations land as 1.0 (2), (3), etc. Bumped build numbers each upload.
+
+**Phase F.2 (real auth) — bundle complete; Pattern B account-linking UI in Settings deferred.** Sign in with Apple + Google + onboarding sign-in + Sign Out shipped + verified at runtime. Supabase manual-linking toggle ON in dashboard so the API is available; just no Settings UI calling `auth.linkIdentity(...)` yet. Lands when Apple-relay edge cases bite (rare for our 2-tester scenario).
+
+**Phase F.3 (account deletion) — bundle complete.** Edge Function deployed at `https://zmlxnujheofgtrkrogdq.supabase.co/functions/v1/delete-account`; Verify-JWT-with-legacy-secret toggle OFF (we do JWT verification inside the function via `auth.getUser()`, gateway-level legacy check rejected real user JWTs). DeleteAccountConfirmationScreen pushed from Settings → Danger Zone, requires typing the user's email to enable the destructive button.
+
+**Phase F.4 (onboarding flow + profile editor + journal illustrations) — bundle complete.** Six-page flow (Welcome / Profile / Theme & Icon / Note Types / Reminders / Done), gated by `AppPreferencesStore.hasCompletedOnboarding || !auth.hasName`. Profile photo upload via PhotosPicker → circular crop (`PhotoCropView(circular: true)`) → Storage; `ProfileImageCache` two-layer cache (NSCache UIImage + signed URL within 50min TTL) so Settings opens with the avatar instant after first load. Journal-pen illustration vocabulary captured in memory.
+
 **Phase F.1.1b' (media UX polish) — bundle complete.** Video trim sheet (over-60s rejection → trim flow), Apple Photos zoom + drag-dismiss for both image and video, camera capture from FAB, and inline video playback in cards (Phase F.1.2.inlinevideo) all shipped. Timeline media-width design call still pending — design decision more than build work.
 
-**Phase F (Supabase persistence) — text/stat/list/quote round-trip live; media + backgrounds + run-styling deferred.** `AppSupabase.client` + `AuthStore` + `NotesRepository` + the wired `TimelineStore` are all in place. The app signs in anonymously on launch, fetches the user's notes once `AuthStore.currentUserId` settles, and persists subsequent adds/deletes optimistically. Open Phase F+ persistence work captured in the Phase F+ TODO section: media-note Storage upload pipeline, image-background uploads, swatch-background-id resolution, AttributedString per-run styling round-trip (gated on Phase E.2 polish).
+**Phase F (Supabase persistence) — text/stat/list/quote + media + image-background round-trips live; run-styling still deferred.** `AppSupabase.client` + `AuthStore` + `NotesRepository` + the wired `TimelineStore` are all in place. After Phase F.2 the app no longer auto-signs in anonymously; users land on `OnboardingScreen` and pick a provider. Open Phase F+ persistence work in the Phase F+ TODO section: swatch-background-id resolution, AttributedString per-run styling round-trip (gated on Phase E.2 polish).
 
 Other open follow-ups (unchanged from prior rounds): per-block focused TextEditors (mid-paragraph image insertion — currently the model supports it but UI ships intro/attachments/outro three-zone layout), drag-to-reorder blocks, inline text formatting (bold/italic/underline/strikethrough), auto-bullet + checkboxes in text notes, auto-scroll the cards grid when dragging near a viewport edge.
 
@@ -2126,27 +2160,59 @@ Other open follow-ups (unchanged from prior rounds): per-block focused TextEdito
 
 ## 🧭 Next (Phase 1 roadmap, rough order)
 
-**Customization phases** (from the earlier design discussion):
+_Audited 2026-04-29. TestFlight internal shipped 🎉. Next blockers are App Store submission items (privacy policy, App Privacy questionnaire, support URL) + Phase F+ schema-ready features the user can request at any time._
 
-- **Phase B.2 polish (optional)** — extend overrides to `NoteType.softColor` so KeepCard fill tints + TypeChip icon circles match the user's chosen color, not just dots/borders/icons. ~½ round if/when the visual mismatch becomes annoying.
-- ~~**Phase D.2.2 — Interactive crop UX for image backgrounds.**~~ Shipped — see Phase D.2.2 entry above. (Approach changed: unified with the existing `PhotoCropView` so backgrounds are pre-cropped bytes, not transform metadata.)
-- **Phase E.2 polish (optional)** — custom `AttributedStringKey` (`fontId` / `colorId`) so the message's per-run app metadata round-trips through the document and the toolbar's chip highlight reflects whatever run the cursor is in (not just the most recent tap). Currently the chip highlight is mirrored from `@State` and goes stale when the user moves the cursor.
-- **Phase F — Remote config pipeline.** Host `palettes.json` / `primary-palettes.json` / `fonts.json` on Supabase Storage, client fetches + caches + falls back to bundle. Enables admin panel editing without App Store release. *1 round.*
+**Critical path → App Store / external TestFlight:**
 
-**Other roadmap items:**
+1. **Privacy Policy** — required for App Store review, external TestFlight, AND Google OAuth verification. Hand-write a 1-page version specific to DailyCadence (data we collect: email from Apple/Google, note content, optional photos/videos in Supabase Storage; no tracking, no third-party SDKs except Supabase). Host on Vercel / GitHub Pages / similar. ~30 min including hosting.
+2. **Support URL** — single page with a contact email. Same hosting as privacy policy.
+3. **App Privacy questionnaire** in App Store Connect — ~15 min. Categories: Identifiers (email, linked to user, app functionality), User Content (photos/videos + other content, linked, app functionality). No tracking.
+4. **iPad icon variants OR drop iPad target** — TestFlight upload showed warning "missing 152×152 alternates for iPad". Options: (a) generate iPad sizes via the icon-rendering script and add to Info.plist `CFBundleAlternateIcons`, OR (b) change `TARGETED_DEVICE_FAMILY` to iPhone-only (`1` not `1,2`) since the Phase 1 UX is iPhone-shaped anyway. Recommended: (b).
+5. **Pattern B account-linking UI** — Settings → Account "Connect Apple/Google" button calling `auth.linkIdentity(provider:)`. Toggle's already enabled in Supabase. Not strictly required for App Store but improves the Apple-relay edge case.
+6. **App Store submission** — first review takes 24-72 hours.
 
-- **Drag-to-reorder on the Keep grid** — matches `.keep.drag` CSS; long-press to enter reorder mode
-- **Inject mock data via view model** — replace hardcoded `MockNotes.today` with an `@Observable` `TimelineViewModel`
-- **Apple Developer enrollment** — $99/yr, blocker for TestFlight + Sign in with Apple Services ID
-5. **Supabase schema** — first SQL migration: `notes` table (with a `content_kind` column matching the four variants) + RLS policy (`user_id = auth.uid()`)
-6. **Supabase Swift SDK** — add via Swift Package Manager, build auth client
-7. **Auth providers** — configure Apple + Google in Supabase dashboard once bundle ID is registered with Apple
-8. **Wire notes CRUD** to Timeline + Editor (swap mock data for real)
-9. **Exercise tracking** (`exercises`, `workout_logs` tables) + Swift Charts progression view
-10. **Calendar view** (wireframe Screen 6) — replace `CalendarScreen` placeholder
-11. **Dashboard widgets** (wireframe Screen 7) — replace `DashboardScreen` placeholder
-12. **Settings screen** — replace `SettingsScreen` placeholder (wireframe Screen 9)
-13. **TestFlight submission**
+**Real-use TestFlight feedback (track here as it lands):**
+
+- _(none yet — Jon + wife just installed)_
+
+**Phase F+ feature TODO (schema-ready, UI not built — full list in `memory/project_phase_f.md`):**
+
+- **Image-background Storage upload pipeline** — currently inline `Data?`; needs `MediaRef`-style backfill mirroring F.1.1a, plus the `backgrounds` library entry.
+- **Swatch `background_id` linking** — color backgrounds aren't persisted yet; resolve through `backgrounds` table FK so the lib entry is reusable across notes.
+- **AttributedString per-run styling round-trip** — body jsonb encode/decode for inline runs; gated on Phase E.2 polish below.
+- **Recently Deleted UI** — list/restore/empty for `deleted_at IS NOT NULL`; `pg_cron` hard-delete after 30 days.
+- **Reschedule action menu + indicator** — push-to-date using `cancelled_at` + `rescheduled_from_id`.
+- **Evergreen toggle in editor** — clear time → `occurred_at = NULL`; separate "Notes" surface for evergreen rows.
+- **Per-day note-count dots** in the date picker.
+- **Custom user types / custom user backgrounds** — INSERT into `note_types` / `backgrounds` with `created_by_user_id = self`.
+- **Body-level checkboxes** — new block kind `{kind: 'checkbox', text, checked}`.
+- **Note detail page** — full-screen drill-in surface (full reschedule audit, full collaborator list, edit-history slot).
+- **`user_settings` table** — account-level prefs (default reminder offsets, default note type, tier).
+- **Realtime cross-device sync** — Supabase Realtime channel filtered by `user_id`.
+- **Sharing UI** (per-note + shared-groups) — schema in place, no UI.
+- **Push notifications scheduling** — onboarding pre-permission shipped; scheduling needs an Edge Function or Next.js for APNs (no client-side scheduling for "haven't logged in N days" prompts).
+- **Profile photo cleanup** — when user replaces their photo, the old Storage object orphans (current cache invalidates the path but the blob lingers). Add a pg_cron sweep or a delete-on-upload step in `ProfilePhotoPickerState.commitCrop`.
+
+**Customization polish (optional, queue-as-needed):**
+
+- **Phase B.2 polish** — extend per-type color overrides to `NoteType.softColor` so KeepCard fill tints + TypeChip unselected icon circles also pick up the user's chosen color.
+- **Phase E.2 polish** — custom `AttributedStringKey` (`fontId` / `colorId`) for per-run app metadata round-trip + cursor-aware toolbar chip highlight.
+- **Phase F — Remote config pipeline** — host `palettes.json` / `primary-palettes.json` / `fonts.json` on Supabase Storage; client fetch + cache + bundle fallback.
+- **App Icon Phase 4** — auto-prompt on theme change with "Don't ask again." Dismissal flag + Settings re-enable toggle already shipped; missing piece is the observer that fires the prompt when `ThemeStore.primary` changes.
+
+**Editor follow-ups (still in flight):**
+
+- Per-block focused TextEditors for mid-paragraph image insertion
+- Drag-to-reorder blocks within a note body
+- Inline text formatting (bold/italic/underline/strikethrough) in note body
+- Auto-bullet + checkboxes in text notes
+- Auto-scroll the cards grid when dragging near a viewport edge
+
+**Beyond MVP (Phase 1.x / Phase 2):**
+
+- Exercise tracking (`exercises`, `workout_logs` tables) + Swift Charts progression view
+- Calendar view (wireframe Screen 6) — replace `CalendarScreen` placeholder
+- Dashboard widgets (wireframe Screen 7) — replace `DashboardScreen` placeholder
 
 ## 🧊 Parked / Deferred
 

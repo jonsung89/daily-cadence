@@ -228,8 +228,17 @@ final class PhotoCropState {
 }
 
 /// SwiftUI surface for `PhotoCropState`.
+///
+/// Set `circular: true` to render the profile-photo cropper variant:
+/// the dim overlay punches a circle, the crop frame becomes a circular
+/// stroke, the aspect chips are hidden, and the corner handles are
+/// hidden (the crop window becomes fixed-size; user pans + pinches
+/// the image inside the circle, Apple-Contacts style). The output
+/// bytes are still square (cgImage cropping is rectangular), since
+/// the avatar's `Circle().clipShape` handles the circular display.
 struct PhotoCropView: View {
     @Bindable var state: PhotoCropState
+    var circular: Bool = false
 
     /// Crop rect at the moment a corner drag began. Snapshotted so the
     /// in-flight `DragGesture.translation` always applies to a stable
@@ -267,8 +276,15 @@ struct PhotoCropView: View {
             cropCanvas
                 .frame(maxWidth: .infinity)
                 .frame(height: 360)
-            aspectRow
-                .padding(.horizontal, 16)
+            if !circular {
+                aspectRow
+                    .padding(.horizontal, 16)
+            }
+        }
+        .onAppear {
+            // Profile-photo mode forces a square crop rect — the
+            // displayed circle is the inscribed circle of that square.
+            if circular { state.aspect = .square }
         }
     }
 
@@ -326,7 +342,14 @@ struct PhotoCropView: View {
         let r = state.cropRect
         return Canvas { ctx, size in
             var path = Path(CGRect(origin: .zero, size: size))
-            path.addRect(r)
+            // Even-odd fill rule punches whichever shape we add second.
+            // Circle = inscribed in the square crop rect; rectangle
+            // matches the rect's full extent.
+            if circular {
+                path.addEllipse(in: r)
+            } else {
+                path.addRect(r)
+            }
             ctx.fill(path, with: .color(.black.opacity(0.55)), style: FillStyle(eoFill: true))
         }
         .frame(width: canvas.width, height: canvas.height)
@@ -338,26 +361,35 @@ struct PhotoCropView: View {
     private func cropFrame(imageRect: CGRect) -> some View {
         let r = state.cropRect
         return ZStack {
-            // White outline border around the crop rect.
-            Rectangle()
-                .stroke(Color.white, lineWidth: 1)
-                .frame(width: r.width, height: r.height)
-                .position(x: r.midX, y: r.midY)
-                .allowsHitTesting(false)
+            // White outline — circle in profile-photo mode, rectangle
+            // otherwise. Stroke runs along the same crop rect either
+            // way; Circle/Rectangle just choose the visible shape.
+            if circular {
+                Circle()
+                    .stroke(Color.white, lineWidth: 1)
+                    .frame(width: r.width, height: r.height)
+                    .position(x: r.midX, y: r.midY)
+                    .allowsHitTesting(false)
+            } else {
+                Rectangle()
+                    .stroke(Color.white, lineWidth: 1)
+                    .frame(width: r.width, height: r.height)
+                    .position(x: r.midX, y: r.midY)
+                    .allowsHitTesting(false)
 
-            // Thirds guide for visual alignment.
-            ThirdsGuides()
-                .stroke(Color.white.opacity(0.4), lineWidth: 0.5)
-                .frame(width: r.width, height: r.height)
-                .position(x: r.midX, y: r.midY)
-                .allowsHitTesting(false)
+                // Thirds guide is meaningless inside a circle — only
+                // render it for the rectangular cropper.
+                ThirdsGuides()
+                    .stroke(Color.white.opacity(0.4), lineWidth: 0.5)
+                    .frame(width: r.width, height: r.height)
+                    .position(x: r.midX, y: r.midY)
+                    .allowsHitTesting(false)
+            }
 
-            // Image-pan area — invisible rectangle inside the crop rect,
-            // shrunk so it doesn't overlap the corner hit zones. Single-
-            // finger drag inside this area pans the *image* under the
-            // rect (Apple Photos pattern — the rect is fixed, the image
-            // moves).
-            let centerInset = handleHitSize / 2
+            // Image-pan area. In profile-photo mode the entire crop
+            // rect is the pan zone (no corner handles to dodge);
+            // otherwise we inset to keep the corner hit zones clear.
+            let centerInset: CGFloat = circular ? 0 : handleHitSize / 2
             let centerW = max(0, r.width - centerInset * 2)
             let centerH = max(0, r.height - centerInset * 2)
             if centerW > 0, centerH > 0 {
@@ -369,11 +401,15 @@ struct PhotoCropView: View {
                     .gesture(imagePanGesture())
             }
 
-            // Four corner handles.
-            cornerHandle(at: .topLeft,     position: CGPoint(x: r.minX, y: r.minY), imageRect: imageRect)
-            cornerHandle(at: .topRight,    position: CGPoint(x: r.maxX, y: r.minY), imageRect: imageRect)
-            cornerHandle(at: .bottomLeft,  position: CGPoint(x: r.minX, y: r.maxY), imageRect: imageRect)
-            cornerHandle(at: .bottomRight, position: CGPoint(x: r.maxX, y: r.maxY), imageRect: imageRect)
+            // Corner handles only render in rectangular mode. Profile-
+            // photo cropping uses a fixed-size circle (Apple Contacts
+            // pattern) — pan and pinch the image inside.
+            if !circular {
+                cornerHandle(at: .topLeft,     position: CGPoint(x: r.minX, y: r.minY), imageRect: imageRect)
+                cornerHandle(at: .topRight,    position: CGPoint(x: r.maxX, y: r.minY), imageRect: imageRect)
+                cornerHandle(at: .bottomLeft,  position: CGPoint(x: r.minX, y: r.maxY), imageRect: imageRect)
+                cornerHandle(at: .bottomRight, position: CGPoint(x: r.maxX, y: r.maxY), imageRect: imageRect)
+            }
         }
     }
 

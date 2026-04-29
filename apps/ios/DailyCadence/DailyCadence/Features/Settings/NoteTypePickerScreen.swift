@@ -26,7 +26,7 @@ struct NoteTypePickerScreen: View {
                     .listRowBackground(Color.DS.bg2)
                 }
             } footer: {
-                Text("Pick a color for each note type. The change applies everywhere that type appears — timeline dots, card borders, icons. Note backgrounds and text colors stay separate.")
+                Text("Pick a color for each note type. The change applies everywhere that type appears: timeline dots, card borders, icons. Note backgrounds and text colors stay separate.")
                     .font(.DS.small)
                     .foregroundStyle(Color.DS.fg2)
             }
