@@ -311,7 +311,7 @@ enum MediaImporter {
     private static func videoImportResult(from sourceURL: URL) async throws -> ImportResult {
         // sourceURL is a temp file we own (copied by VideoFile's
         // FileRepresentation). Two outcomes:
-        //   - duration ≤ cap: re-encode HEVC inline, generate poster,
+        //   - duration ≤ cap: re-encode (H.264 720p) inline, generate poster,
         //     clean up source URL, return payload.
         //   - duration > cap: hand the URL to VideoTrimSheet via
         //     VideoTrimSource — the sheet's confirm/cancel path owns
@@ -391,27 +391,38 @@ enum MediaImporter {
         )
     }
 
-    /// Re-encodes the asset to HEVC at 1080p max, optionally restricted
-    /// to `range`. Returns the encoded bytes, or `nil` if export failed.
+    /// Re-encodes the asset to H.264 720p, optionally restricted to
+    /// `range`. Returns the encoded bytes, or `nil` if export failed.
+    /// Function name predates the codec switch — see body comment.
     private static func reencodeHEVC(asset: AVURLAsset, range: CMTimeRange?) async -> Data? {
+        // 720p H.264 — was HEVC 1080p, but iPhone HDR HEVC at 1080p
+        // runs ~20 Mbps (a 21s clip exports as ~55 MB), which trips
+        // Supabase Storage's 50 MB free-tier upload cap. Apple
+        // doesn't ship a 720p HEVC preset, so we drop to H.264 at
+        // 720p — ~4-6 Mbps, ~10-15 MB for a full 60s clip, plenty of
+        // headroom under the cap and visually fine for inline-card
+        // playback at typical phone-screen sizes. Function name kept
+        // as `reencodeHEVC` for callsite stability; the codec choice
+        // can move back to HEVC 1080p if/when we upgrade to Supabase
+        // Pro (5 GB cap).
         guard let session = AVAssetExportSession(
             asset: asset,
-            presetName: AVAssetExportPresetHEVC1920x1080
+            presetName: AVAssetExportPreset1280x720
         ) else {
-            log.error("AVAssetExportSession init failed (HEVC 1080p preset)")
+            log.error("AVAssetExportSession init failed (H.264 720p preset)")
             return nil
         }
         let outputURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("dc-export-\(UUID().uuidString).mp4")
         defer { try? FileManager.default.removeItem(at: outputURL) }
         session.outputURL = outputURL
-        session.outputFileType = .mp4
+        session.outputFileType = AVFileType.mp4
         session.shouldOptimizeForNetworkUse = true
         if let range { session.timeRange = range }
 
         do {
             // iOS 18+ async export API.
-            try await session.export(to: outputURL, as: .mp4)
+            try await session.export(to: outputURL, as: AVFileType.mp4)
             return try Data(contentsOf: outputURL)
         } catch {
             log.error("HEVC export failed: \(error.localizedDescription)")

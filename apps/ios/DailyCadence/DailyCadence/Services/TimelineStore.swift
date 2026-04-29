@@ -99,6 +99,37 @@ final class TimelineStore {
     /// will provide explicit invalidation hooks.
     private var notesByDay: [Date: [MockNote]] = [:]
 
+    /// Note IDs whose optimistic insert is in flight to the server.
+    /// Two consumers respect this set:
+    ///
+    /// 1. `mergeFetched` — does NOT drop pending notes from `notes`,
+    ///    even if they're absent from the server response. Otherwise
+    ///    a refetch that lands while the insert is still uploading
+    ///    (common for video notes with HEVC re-encode + Storage upload)
+    ///    removes the optimistic row mid-flight.
+    /// 2. `persistAdd`'s race guard — only treats a missing-from-`notes`
+    ///    note as a user delete if the ID is no longer pending. A
+    ///    pending ID dropped by `mergeFetched` would otherwise
+    ///    trigger a phantom soft-delete the moment the insert
+    ///    completes, killing the just-uploaded video. Bug observed
+    ///    when adding gallery videos: note flashed in then vanished
+    ///    forever, even across relaunches.
+    ///
+    /// IDs are inserted in `add(_:)` and removed in `persistAdd`'s
+    /// `defer`. Set is never persisted; lifecycle is per-app-session.
+    private var pendingInsertIds: Set<UUID> = []
+
+    /// Note IDs the user explicitly deleted via `delete(noteId:)`
+    /// while their initial insert was still in flight. The
+    /// `persistAdd` race guard reads this set: if a note's insert
+    /// completes and the ID is here, the row exists on the server
+    /// but the user already deleted it locally, so we follow up with
+    /// a soft-delete to keep server state consistent. Without this
+    /// signal, we couldn't distinguish user-deleted-during-upload
+    /// from merge-dropped-during-upload (which we want to leave
+    /// alone). Cleared immediately when the soft-delete fires.
+    private var userDeletedDuringInsertIds: Set<UUID> = []
+
     private let repository: NotesRepository
     private let log = Logger(subsystem: "com.jonsung.DailyCadence", category: "TimelineStore")
 
@@ -182,6 +213,8 @@ final class TimelineStore {
     func resetForUserChange() {
         notes = []
         notesByDay.removeAll()
+        pendingInsertIds.removeAll()
+        userDeletedDuringInsertIds.removeAll()
         hasLoaded = false
         lastError = nil
         log.info("Reset for user change")
@@ -268,6 +301,10 @@ final class TimelineStore {
     /// the bottom until refresh.
     func add(_ note: MockNote) {
         notes.append(note)
+        // Mark in-flight so `mergeFetched` and the persistAdd race
+        // guard don't treat an incidental refetch (which won't have
+        // this note yet) as a user-deleted-it signal.
+        pendingInsertIds.insert(note.id)
         sortByOccurredAtAscending()
         notesByDay[selectedDate] = notes  // Phase F.1.2.daycache — keep cache in lock-step
         // Cross-day add (rare — editor defaults to selectedDate, but the
@@ -369,8 +406,14 @@ final class TimelineStore {
     private func mergeFetched(_ fetched: [MockNote]) {
         let fetchedById = Dictionary(uniqueKeysWithValues: fetched.map { ($0.id, $0) })
 
-        // Drop notes the server no longer has.
-        notes.removeAll { fetchedById[$0.id] == nil }
+        // Drop notes the server no longer has — EXCEPT pending optimistic
+        // inserts. The server response won't include them yet (insert
+        // hasn't completed), and dropping them here would also cause the
+        // post-insert race guard to soft-delete them as "user-deleted
+        // during upload." Bug previously observed with gallery video
+        // notes, where the upload+insert path is slow enough to overlap
+        // with most refetches.
+        notes.removeAll { fetchedById[$0.id] == nil && !pendingInsertIds.contains($0.id) }
 
         // Overwrite existing notes with the server's version, **only
         // when content actually differs**. The equality check matters
@@ -426,6 +469,13 @@ final class TimelineStore {
     func delete(noteId: UUID) {
         guard let index = notes.firstIndex(where: { $0.id == noteId }) else { return }
         let removed = notes.remove(at: index)
+        // If this note's initial insert is still in flight, mark it
+        // for the persistAdd race guard so the server row gets
+        // soft-deleted right after it lands. Without this flag the
+        // guard can't tell a real user-delete apart from a merge drop.
+        if pendingInsertIds.contains(noteId) {
+            userDeletedDuringInsertIds.insert(noteId)
+        }
         notesByDay[selectedDate] = notes  // Phase F.1.2.daycache — keep cache in lock-step
         // Defensive: if the deleted note was on a different day (rare —
         // pre-existing edge case where a note can be in `notes` despite
@@ -459,8 +509,14 @@ final class TimelineStore {
     private func persistAdd(_ note: MockNote) async {
         guard let userId = AuthStore.shared.currentUserId else {
             log.warning("Skipping persist for added note: auth not ready (note stays in-memory only)")
+            pendingInsertIds.remove(note.id)
+            userDeletedDuringInsertIds.remove(note.id)
             return
         }
+        // Always clear pending on the way out, regardless of outcome —
+        // `mergeFetched` reads it and a leaked entry would pin a
+        // phantom note in `notes`.
+        defer { pendingInsertIds.remove(note.id) }
         do {
             // No UUID swap — `note.id` is the client-supplied id used by
             // both client and server (NoteRowInsert.id = note.id). Same
@@ -469,24 +525,28 @@ final class TimelineStore {
             // actions (delete / edit while the upload is in flight).
             _ = try await repository.insert(note, userId: userId)
 
-            // Race guard: did the user delete this note during the
-            // upload? Local removal was a no-op against the server
-            // because the row didn't exist yet — now that it does,
-            // soft-delete it so the row doesn't resurrect on next
-            // fetch. Critical for media notes where uploads take real
-            // time. Fire-and-forget; if the follow-up delete fails
-            // we'll catch the orphan on a future cleanup pass.
-            if !notes.contains(where: { $0.id == note.id }) {
+            // Race guard: did the user explicitly delete this note
+            // while it was uploading? `delete(noteId:)` records that
+            // intent in `userDeletedDuringInsertIds` if the ID was
+            // still pending. We trust that signal — `notes.contains`
+            // alone produced false positives because `mergeFetched`
+            // also drops optimistic notes mid-upload, which would
+            // then trigger an unwanted soft-delete (the gallery-video
+            // disappearance bug).
+            if userDeletedDuringInsertIds.remove(note.id) != nil {
                 log.info("Note \(note.id) deleted during upload — soft-deleting server-side")
                 try? await repository.delete(id: note.id)
             }
             lastError = nil
         } catch {
             // Revert the optimistic insert so the timeline doesn't carry
-            // a phantom row that will never persist.
+            // a phantom row that will never persist. Also drop any
+            // user-delete-during-insert intent — the row never made it
+            // to the server, so there's nothing to soft-delete.
             if let idx = notes.firstIndex(where: { $0.id == note.id }) {
                 notes.remove(at: idx)
             }
+            userDeletedDuringInsertIds.remove(note.id)
             lastError = error.localizedDescription
             log.error("add failed, reverted: \(error.localizedDescription)")
         }

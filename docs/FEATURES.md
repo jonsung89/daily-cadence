@@ -410,7 +410,7 @@ Sheet presented from the FAB menu's **Photo or Video** path. Single-purpose — 
 - All video-capable `PhotosPicker` / `.photosPicker` call sites use **`preferredItemEncoding: .current`**. The default `.automatic` policy transcodes ProRes / ProRAW to H.264 before handoff (multi-minute server-side render); `.current` returns raw bytes — picker → ready typically <2 s for a 1 GB+ ProRes clip.
 - The picker hands back a `VideoFile: Transferable` (file-based, copies via `FileRepresentation`) — never `Data`. ProRes assets can be 1+ GB and the `Data` path materializes the whole thing in RAM.
 - `MediaImporter.videoImportResult(from url:)` opens an `AVURLAsset`, loads `.duration` + first track's `naturalSize` + `preferredTransform` for aspect ratio.
-- **Under-cap clips** (≤ 60 s): generates a first-frame poster JPEG, re-encodes to **HEVC 1080p** via `AVAssetExportSession` (~50% smaller than H.264), cleans up the temp file, returns `.payload(MediaPayload)`.
+- **Under-cap clips** (≤ 60 s): generates a first-frame poster JPEG, re-encodes to **H.264 720p** via `AVAssetExportSession` (`AVAssetExportPreset1280x720`), cleans up the temp file, returns `.payload(MediaPayload)`. Codec choice is sized to stay under Supabase Storage Free tier's 50 MB upload cap on a full 60 s clip; iPhone HDR HEVC at 1080p tripped that cap on clips as short as ~21 s. Reverts to HEVC 1080p when storage tier moves up (Pro / R2).
 - **Over-cap clips** (> 60 s): skips the upfront poster (saves a ProRes frame decode), returns `.needsTrim(VideoTrimSource)` — the [Video trim sheet](#video-trim-sheet) takes over.
 - Preview is read-only — poster image with `.ultraThinMaterial` play button overlay; tap opens the same `MediaViewerScreen` used from the timeline.
 - Save attaches caption + saves with the encoded video bytes + generated poster.
@@ -430,7 +430,7 @@ Shown automatically when the user picks a video longer than `MediaImporter.video
 - **Playhead**: 2 pt white bar inside the window, animated via a 30 Hz periodic time observer during playback; snaps to the dragged handle's time during scrubs.
 - **Duration label**: "0:43 of 1:00 max" plus current `start – end` timestamps (mm:ss, monospaced digits).
 - **Toolbar**: Cancel / Save. Save disabled if window is shorter than 1 s.
-- **Export**: confirm calls `MediaImporter.makeTrimmedVideoPayload(source:range:)` — sets `AVAssetExportSession.timeRange` and re-runs the same HEVC 1080p export, plus regenerates the poster from the new start frame. Cancel calls `MediaImporter.discardTrimSource(_:)` which removes the temp source file.
+- **Export**: confirm calls `MediaImporter.makeTrimmedVideoPayload(source:range:)` — sets `AVAssetExportSession.timeRange` and re-runs the same H.264 720p export, plus regenerates the poster from the new start frame. Cancel calls `MediaImporter.discardTrimSource(_:)` which removes the temp source file.
 
 ### MediaImporter return shape
 
