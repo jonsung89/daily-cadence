@@ -48,6 +48,7 @@ struct DatePickerSheet: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { onSelect(picked) }
                         .fontWeight(.semibold)
+                        .tint(Color.DS.sageDeep)
                 }
             }
         }

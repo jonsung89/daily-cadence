@@ -99,6 +99,7 @@ struct ProfileEditorScreen: View {
                     Task { await runSave() }
                 }
                 .fontWeight(.semibold)
+                .tint(Color.DS.sageDeep)
                 .disabled(!canSave)
             }
         }

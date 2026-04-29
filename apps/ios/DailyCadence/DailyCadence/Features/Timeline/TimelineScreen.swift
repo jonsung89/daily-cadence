@@ -52,11 +52,11 @@ struct TimelineScreen: View {
     /// the dialog calls `TimelineStore.shared.delete(noteId:)`.
     @State private var pendingDeleteId: UUID? = nil
 
-    /// Phase F.1.2.caption — id of the media note whose caption the
-    /// user is editing. When non-nil, presents `CaptionEditSheet`. On
-    /// save, the sheet's callback reconstructs the `MockNote` with an
-    /// updated payload and forwards to `TimelineStore.update`.
-    @State private var editingCaptionNoteId: UUID? = nil
+    /// Phase F.1.2.caption — id of the media note whose caption + time
+    /// the user is editing. When non-nil, presents `MediaDetailsEditSheet`.
+    /// On save, the sheet's callback reconstructs the `MockNote` with an
+    /// updated payload + occurredAt and forwards to `TimelineStore.update`.
+    @State private var editingMediaDetailsNoteId: UUID? = nil
 
     /// Phase F.1.0 — note the user has tapped to view+edit. When
     /// non-nil, presents `NoteEditorScreen(editing:)` as a sheet.
@@ -115,12 +115,12 @@ struct TimelineScreen: View {
         )
     }
 
-    /// Boolean projection of `editingCaptionNoteId` for the
-    /// `CaptionEditSheet`'s `isPresented:` binding.
-    private var editingCaptionPresented: Binding<Bool> {
+    /// Boolean projection of `editingMediaDetailsNoteId` for the
+    /// `MediaDetailsEditSheet`'s `isPresented:` binding.
+    private var editingMediaDetailsPresented: Binding<Bool> {
         Binding(
-            get: { editingCaptionNoteId != nil },
-            set: { if !$0 { editingCaptionNoteId = nil } }
+            get: { editingMediaDetailsNoteId != nil },
+            set: { if !$0 { editingMediaDetailsNoteId = nil } }
         )
     }
 
@@ -132,15 +132,17 @@ struct TimelineScreen: View {
     }
 
     /// Phase F.1.2.caption — closure passed to media cards' long-press
-    /// menu via `onRequestEditCaption:`. Arms the caption-edit sheet.
-    private func requestEditCaption(_ noteId: UUID) {
-        editingCaptionNoteId = noteId
+    /// menu via `onRequestEditMediaDetails:`. Arms the details-edit sheet
+    /// (caption + occurredAt).
+    private func requestEditMediaDetails(_ noteId: UUID) {
+        editingMediaDetailsNoteId = noteId
     }
 
     /// Reconstructs the media note with the user's edited caption and
-    /// forwards to `TimelineStore.update`. No-op if the note vanished
-    /// between menu open and save (deleted in another tab, etc.).
-    private func saveCaption(noteId: UUID, newCaption: String?) {
+    /// timestamp and forwards to `TimelineStore.update`. No-op if the
+    /// note vanished between menu open and save (deleted in another
+    /// tab, etc.).
+    private func saveMediaDetails(noteId: UUID, newCaption: String?, newOccurredAt: Date) {
         guard let note = TimelineStore.shared.notes.first(where: { $0.id == noteId }),
               let payload = note.mediaPayload
         else { return }
@@ -158,7 +160,7 @@ struct TimelineScreen: View {
         )
         let updated = MockNote(
             id: note.id,
-            occurredAt: note.occurredAt,
+            occurredAt: newOccurredAt,
             type: note.type,
             content: .media(updatedPayload),
             background: note.background,
@@ -372,18 +374,25 @@ struct TimelineScreen: View {
         .sheet(item: $pendingCapture, onDismiss: { mediaPickerItem = nil }) { capture in
             MediaNoteEditorScreen(initialMedia: capture)
         }
-        // Phase F.1.2.caption — long-press → "Edit caption" sheet for
-        // media notes. Light-weight: just a multi-line caption field +
+        // Phase F.1.2.caption — long-press → "Edit details" sheet for
+        // media notes. Light-weight: caption field + date+time picker +
         // Cancel/Save. Reconstructs the MockNote with the updated
-        // payload and routes through `TimelineStore.update` (which
-        // handles the optimistic in-memory swap + background persist).
-        .sheet(isPresented: editingCaptionPresented) {
-            if let id = editingCaptionNoteId,
+        // payload + occurredAt and routes through `TimelineStore.update`
+        // (which handles the optimistic in-memory swap + background
+        // persist).
+        .sheet(isPresented: editingMediaDetailsPresented) {
+            if let id = editingMediaDetailsNoteId,
                let note = TimelineStore.shared.notes.first(where: { $0.id == id }) {
-                CaptionEditSheet(
+                MediaDetailsEditSheet(
                     initialCaption: note.mediaPayload?.caption,
-                    onSave: { newCaption in
-                        saveCaption(noteId: id, newCaption: newCaption)
+                    initialOccurredAt: note.occurredAt,
+                    initialCapturedAt: note.mediaPayload?.capturedAt,
+                    onSave: { newCaption, newOccurredAt in
+                        saveMediaDetails(
+                            noteId: id,
+                            newCaption: newCaption,
+                            newOccurredAt: newOccurredAt
+                        )
                     }
                 )
             }
@@ -698,7 +707,7 @@ struct TimelineScreen: View {
                     onRequestDelete: { requestDelete($0) },
                     onRequestEdit: { requestEdit($0) },
                     mediaTapHandler: mediaTapHandler,
-                    onRequestEditCaption: { requestEditCaption($0) }
+                    onRequestEditMediaDetails: { requestEditMediaDetails($0) }
                 )
             }
         }
@@ -763,7 +772,7 @@ struct TimelineScreen: View {
                                 onRequestDelete: { requestDelete($0.id) },
                                 onTap: tapHandler(for: note),
                                 mediaTapHandler: mediaTapHandler,
-                                onRequestEditCaption: { requestEditCaption($0.id) }
+                                onRequestEditMediaDetails: { requestEditMediaDetails($0.id) }
                             )
                                 .containerRelativeFrame(.horizontal, alignment: .leading) { width, _ in
                                     width * 0.55
@@ -779,7 +788,7 @@ struct TimelineScreen: View {
                                 note: note,
                                 onRequestDelete: { requestDelete($0.id) },
                                 onTap: tapHandler(for: note),
-                                onRequestEditCaption: { requestEditCaption($0.id) }
+                                onRequestEditMediaDetails: { requestEditMediaDetails($0.id) }
                             )
                 }
             }
@@ -800,7 +809,7 @@ struct TimelineScreen: View {
             onRequestDelete: requestDelete,
             onRequestEdit: requestEdit,
             mediaTapHandler: mediaTapHandler,
-            onRequestEditCaption: requestEditCaption
+            onRequestEditMediaDetails: requestEditMediaDetails
         )
     }
 
@@ -884,7 +893,7 @@ struct TimelineScreen: View {
                                 onRequestDelete: { requestDelete($0.id) },
                                 onTap: tapHandler(for: note),
                                 mediaTapHandler: mediaTapHandler,
-                                onRequestEditCaption: { requestEditCaption($0.id) }
+                                onRequestEditMediaDetails: { requestEditMediaDetails($0.id) }
                             )
                                     // ~55% of the visible scroll width:
                                     // shows ~2 cards with a peek of the
@@ -957,7 +966,7 @@ struct TimelineScreen: View {
                         onRequestDelete: requestDelete,
                         onTap: tapHandler(for: note),
                         mediaTapHandler: mediaTapHandler,
-                        onRequestEditCaption: requestEditCaption
+                        onRequestEditMediaDetails: requestEditMediaDetails
                     )
                 }
             }

@@ -112,6 +112,7 @@ struct BackgroundPickerView: View {
                         ToolbarItem(placement: .confirmationAction) {
                             Button("Done", action: confirmCrop)
                                 .fontWeight(.semibold)
+                                .tint(Color.DS.sageDeep)
                         }
                     }
             }

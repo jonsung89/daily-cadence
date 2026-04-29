@@ -156,6 +156,7 @@ struct ProfilePhotoCropSheet: ViewModifier {
                                 Task { await state.commitCrop(userId: userId) }
                             }
                             .fontWeight(.semibold)
+                            .tint(Color.DS.sageDeep)
                             .disabled(userId == nil)
                         }
                     }

@@ -668,6 +668,7 @@ struct NoteEditorScreen: View {
                         ToolbarItem(placement: .confirmationAction) {
                             Button("Add", action: confirmCrop)
                                 .fontWeight(.semibold)
+                                .tint(Color.DS.sageDeep)
                         }
                     }
             }
@@ -740,6 +741,7 @@ struct NoteEditorScreen: View {
         ToolbarItem(placement: .confirmationAction) {
             Button(editing == nil ? "Save" : "Done", action: save)
                 .fontWeight(.semibold)
+                .tint(Color.DS.sageDeep)
                 .disabled(!isSaveEnabled)
         }
     }

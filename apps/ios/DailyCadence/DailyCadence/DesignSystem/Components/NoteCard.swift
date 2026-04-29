@@ -49,7 +49,7 @@ struct NoteCard: View {
     /// Phase F.1.2.caption — long-press menu entry for editing the
     /// caption of a media note. Only surfaced when `media != nil` AND
     /// this callback is set; text variants don't carry captions.
-    let onRequestEditCaption: ((UUID) -> Void)?
+    let onRequestEditMediaDetails: ((UUID) -> Void)?
 
     /// Optional tap callback (Phase F.1.0). Fires on tap of the text
     /// scaffold; the media scaffold keeps its existing
@@ -92,7 +92,7 @@ struct NoteCard: View {
         onRequestDelete: ((UUID) -> Void)? = nil,
         onTap: (() -> Void)? = nil,
         mediaTapHandler: MediaTapHandler? = nil,
-        onRequestEditCaption: ((UUID) -> Void)? = nil
+        onRequestEditMediaDetails: ((UUID) -> Void)? = nil
     ) {
         self.type = type
         self.title = title
@@ -105,7 +105,7 @@ struct NoteCard: View {
         self.onRequestDelete = onRequestDelete
         self.onTap = onTap
         self.mediaTapHandler = mediaTapHandler
-        self.onRequestEditCaption = onRequestEditCaption
+        self.onRequestEditMediaDetails = onRequestEditMediaDetails
     }
 
     /// Reads pin state through `PinStore.shared` inside `body` so the card
@@ -182,11 +182,11 @@ struct NoteCard: View {
                 } label: {
                     Label(isPinned ? "Unpin" : "Pin", systemImage: isPinned ? "pin.slash" : "pin")
                 }
-                if media != nil, let onRequestEditCaption {
+                if media != nil, let onRequestEditMediaDetails {
                     Button {
-                        onRequestEditCaption(noteId)
+                        onRequestEditMediaDetails(noteId)
                     } label: {
-                        Label("Edit caption", systemImage: "text.bubble")
+                        Label("Edit details", systemImage: "text.bubble")
                     }
                 }
                 if let onRequestDelete {

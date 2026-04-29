@@ -339,6 +339,7 @@ struct MediaNoteEditorScreen: View {
         ToolbarItem(placement: .confirmationAction) {
             Button("Save", action: save)
                 .fontWeight(.semibold)
+                .tint(Color.DS.sageDeep)
                 .disabled(payload == nil)
         }
     }
@@ -370,6 +371,7 @@ struct MediaNoteEditorScreen: View {
                     self.cropState = payload.kind == .image
                         ? payload.data.flatMap(PhotoCropState.init(data:))
                         : nil
+                    self.seedOccurredAtFromCaptureIfUnset(payload.capturedAt)
                 case .needsTrim(let source):
                     // Hand off to VideoTrimSheet. Picker item is consumed —
                     // clear it so a re-pick of the same asset re-fires.
@@ -411,6 +413,7 @@ struct MediaNoteEditorScreen: View {
                 await MainActor.run {
                     self.payload = payload
                     self.cropState = nil
+                    self.seedOccurredAtFromCaptureIfUnset(payload.capturedAt)
                 }
             } catch {
                 await MainActor.run {
@@ -460,7 +463,9 @@ struct MediaNoteEditorScreen: View {
         dismiss()
     }
 
-    /// "Selected day, current time-of-day" — the picker's default.
+    /// "Selected day, current time-of-day" — the picker's default when
+    /// the imported media has no `capturedAt` metadata (screenshots,
+    /// edited exports, etc.).
     private var defaultOccurredAt: Date {
         NoteEditorScreen.combine(
             day: TimelineStore.shared.selectedDate,
@@ -468,29 +473,74 @@ struct MediaNoteEditorScreen: View {
         )
     }
 
+    /// Auto-seeds the time picker from the imported media's capture
+    /// moment (EXIF `DateTimeOriginal` for images, `AVAsset.creationDate`
+    /// for videos), but only when the user hasn't manually touched the
+    /// picker. Replacing the photo after manually editing the time
+    /// preserves the user's choice. When metadata is missing, the
+    /// picker keeps falling back to `defaultOccurredAt` via the binding.
+    private func seedOccurredAtFromCaptureIfUnset(_ capturedAt: Date?) {
+        guard occurredAt == nil, let capturedAt else { return }
+        occurredAt = capturedAt
+    }
+
     /// Date+time row at the bottom of the editor. Same pattern as
     /// `NoteEditorScreen.occurredAtRow` so the two editors stay
-    /// visually consistent.
+    /// visually consistent. When the picker still reflects the
+    /// imported media's `capturedAt` (auto-seeded, untouched), a
+    /// relative-time hint appears below the picker to make the gap
+    /// from "now" obvious — surfaces the fact that the time isn't
+    /// the user's wall-clock now without forcing them to read the
+    /// full date.
     private var occurredAtRow: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "clock")
-                .font(.system(size: 14, weight: .regular))
-                .foregroundStyle(Color.DS.fg2)
-            Text("Time")
-                .font(.DS.body)
-                .foregroundStyle(Color.DS.ink)
-            Spacer(minLength: 8)
-            DatePicker(
-                "Time",
-                selection: Binding(
-                    get: { occurredAt ?? defaultOccurredAt },
-                    set: { occurredAt = $0 }
-                ),
-                displayedComponents: [.date, .hourAndMinute]
-            )
-            .datePickerStyle(.compact)
-            .labelsHidden()
+        VStack(alignment: .trailing, spacing: 4) {
+            HStack(spacing: 10) {
+                Image(systemName: "clock")
+                    .font(.system(size: 14, weight: .regular))
+                    .foregroundStyle(Color.DS.fg2)
+                Text("Time")
+                    .font(.DS.body)
+                    .foregroundStyle(Color.DS.ink)
+                Spacer(minLength: 8)
+                DatePicker(
+                    "Time",
+                    selection: Binding(
+                        get: { occurredAt ?? defaultOccurredAt },
+                        set: { occurredAt = $0 }
+                    ),
+                    displayedComponents: [.date, .hourAndMinute]
+                )
+                .datePickerStyle(.compact)
+                .labelsHidden()
+            }
+            if let hint = relativeTimeHint {
+                Text(hint)
+                    .font(.DS.caption)
+                    .foregroundStyle(Color.DS.fg2)
+            }
         }
+        .animation(.easeInOut(duration: 0.2), value: relativeTimeHint)
+    }
+
+    /// Friendly "X days ago" / "yesterday" annotation under the time
+    /// picker. Visible only while the picker still reflects the
+    /// imported media's `capturedAt` AND the gap from now is at least
+    /// 60 seconds — the threshold suppresses the hint for camera
+    /// captures (which set `capturedAt = Date()` at shutter, so the
+    /// gap is essentially zero). User edits to the picker break the
+    /// equality check and hide the hint; replacing the photo while
+    /// the picker shows the prior media's timestamp also breaks the
+    /// equality and hides the hint, signalling that something needs
+    /// attention. `.named` presentation prefers friendly strings
+    /// ("yesterday", "today") and falls back to "X units ago" beyond.
+    private var relativeTimeHint: String? {
+        guard let occurredAt,
+              let capturedAt = payload?.capturedAt,
+              occurredAt == capturedAt
+        else { return nil }
+        let delta = abs(capturedAt.timeIntervalSinceNow)
+        guard delta >= 60 else { return nil }
+        return capturedAt.formatted(.relative(presentation: .named))
     }
 }
 

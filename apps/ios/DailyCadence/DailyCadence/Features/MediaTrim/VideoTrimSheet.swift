@@ -514,6 +514,7 @@ struct VideoTrimSheet: View {
                 onConfirm(range)
             }
             .fontWeight(.semibold)
+            .tint(Color.DS.sageDeep)
             .disabled((endSeconds - startSeconds) < minTrimSeconds)
         }
     }
