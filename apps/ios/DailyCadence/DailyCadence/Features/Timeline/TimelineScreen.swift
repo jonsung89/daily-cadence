@@ -523,7 +523,9 @@ struct TimelineScreen: View {
     /// Observation framework re-renders the strip when a note add /
     /// delete / week-change updates the set. Phase F.1.2.midnight —
     /// also reads `TimelineStore.currentDay` so the today indicator
-    /// re-positions when midnight rolls over.
+    /// re-positions when midnight rolls over. Phase F.1.2.daymarks —
+    /// reads `DayMarkStore.shared.marks` so the per-day emoji badge
+    /// re-renders on long-press → pick / clear.
     private var weekStrip: some View {
         let selected = TimelineStore.shared.selectedDate
         let days = WeekStripView.days(forWeekContaining: selected)
@@ -534,7 +536,8 @@ struct TimelineScreen: View {
             filledDays: WeekStripStore.shared.daysWithNotes,
             onTap: { tapped in
                 TimelineStore.shared.selectDate(tapped)
-            }
+            },
+            dayMarks: DayMarkStore.shared.marks
         )
     }
 

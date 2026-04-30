@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// Phase F.1.2.weekstrip — motivational indicator above the Today
 /// screen's view toggle. Renders the current week as 7 columns,
@@ -30,12 +31,43 @@ struct WeekStripView: View {
     let filledDays: Set<Date>
     /// Tap handler — caller routes to `TimelineStore.selectDate(...)`.
     let onTap: (Date) -> Void
+    /// Phase F.1.2.daymarks — emoji-by-day map, keyed by `startOfDay`.
+    /// Defaults empty so existing callers (previews, tests) don't need
+    /// to thread it through. Caller passes `DayMarkStore.shared.marks`
+    /// in production wiring; mutations route directly through
+    /// `DayMarkStore.shared.set/clear` from inside the picker (same
+    /// singleton-mutation pattern the rest of the strip uses for
+    /// `WeekStripStore`).
+    var dayMarks: [Date: String] = [:]
+
+    /// Phase F.1.2.daymarks — id of the day whose `EmojiPickerSheet`
+    /// is open. Internal state because the picker is purely week-strip
+    /// UX; parents only inject `dayMarks` for display.
+    @State private var pickerDay: Date? = nil
+
+    /// Phase F.1.2.daymarks — id of the day currently being held down
+    /// for a potential long-press. Drives the scale-down feedback so
+    /// the user feels the press registering before the picker opens.
+    @State private var pressingDay: Date? = nil
 
     private let cal = Calendar.current
     /// Locale-aware single-character day labels (e.g. ["S","M","T","W","T","F","S"]
     /// in en_US). Cached once per render — `veryShortWeekdaySymbols`
     /// is a Foundation lookup, not free in tight loops.
     private var weekdaySymbols: [String] { cal.veryShortWeekdaySymbols }
+
+    /// Day-mark feature constants for the shared `EmojiPickerSheet`.
+    /// Curated quick-picks tuned for "mark a special day" intents
+    /// (birthday / anniversary / milestone / alert). The recent-
+    /// storage key is per-feature so future emoji-picker callers
+    /// (reactions, mood tagging) get their own history.
+    private static let dayMarkCommonlyUsed: [String] = [
+        "🎂", "🎉", "❤️", "💍", "⭐",
+        "✨", "🎁", "🎈", "🍾", "🥂",
+        "👶", "🎓", "🌈", "✈️", "🏠",
+        "❗", "📅", "🏆", "💐", "🌙",
+    ]
+    private static let dayMarkRecentStorageKey = "com.jonsung.DailyCadence.daymarks.recentEmojis"
 
     /// Phase F.1.2.midnight — namespace for the today-ring matched-geo.
     /// When midnight advances `currentDay` from one column to an adjacent
@@ -48,14 +80,125 @@ struct WeekStripView: View {
     var body: some View {
         HStack(spacing: 0) {
             ForEach(days, id: \.self) { day in
+                let normalized = cal.startOfDay(for: day)
                 column(for: day)
+                    // Phase F.1.2.daymarks — visual feedback during a
+                    // long-press hold. Scales the cell to 0.94×
+                    // (matches iOS's context-menu lift feel) so the
+                    // user knows the press is registering before the
+                    // picker pops at 0.35s. Spring back when released
+                    // or when the popover takes over.
+                    .scaleEffect(pressingDay == normalized ? 0.94 : 1.0)
+                    .animation(.spring(response: 0.3, dampingFraction: 0.7), value: pressingDay)
                     .frame(maxWidth: .infinity)
+                    // Pad the hit area beyond the visual (4pt vertical,
+                    // 2pt horizontal) before stamping the contentShape
+                    // so a slightly-off finger still registers. Doesn't
+                    // shift the visual layout — `column` already owns
+                    // its visible padding inside its body.
+                    .padding(.vertical, 4)
+                    .padding(.horizontal, 2)
                     .contentShape(Rectangle())
                     .onTapGesture { onTap(day) }
+                    // Phase F.1.2.daymarks — long-press opens the emoji
+                    // picker. 0.35s is slightly snappier than iOS's
+                    // 0.4s context-menu default, paired with the
+                    // scale-down + medium haptic so the gesture feels
+                    // instant. `maximumDistance: 50` (vs SwiftUI's 10pt
+                    // default) tolerates the finger jitter that's
+                    // normal during a 0.35s hold — without this the
+                    // gesture silently cancels mid-press and the user
+                    // has to retry. `onPressingChanged` drives the
+                    // visual feedback during the hold; the perform
+                    // closure fires the haptic + opens the popover.
+                    .onLongPressGesture(minimumDuration: 0.35, maximumDistance: 50) {
+                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                        pickerDay = normalized
+                        pressingDay = nil
+                    } onPressingChanged: { isPressing in
+                        // Light haptic on touch-down — the missing
+                        // "I felt that" feedback that iOS context
+                        // menus give. Pairs with the medium haptic
+                        // on long-press completion to make the
+                        // 0.35s threshold feel like the gesture is
+                        // actively responding rather than waiting.
+                        if isPressing, pressingDay != normalized {
+                            UIImpactFeedbackGenerator(style: .soft).impactOccurred()
+                        }
+                        pressingDay = isPressing ? normalized : nil
+                    }
+                    .sheet(isPresented: pickerPresentedBinding(for: day)) {
+                        // Bottom sheet (vs. popover) — matches iOS-
+                        // native reaction tray UX (Messenger, Discord,
+                        // iMessage). Slide-up animation, drag indicator,
+                        // dimmed backdrop, swipe-down to dismiss are
+                        // all free with `.sheet`. Detents start at
+                        // `.medium` (matches the reaction-tray feel)
+                        // and let the user drag up to `.large` for the
+                        // full catalog. `EmojiPickerSheet` is the
+                        // reusable component — day-marks supplies its
+                        // own quick-pick set + storage key for recents
+                        // so future features (reactions, mood tags)
+                        // can pass their own without polluting each
+                        // other's history.
+                        EmojiPickerSheet(
+                            subtitle: "Mark this day",
+                            title: normalized.formatted(.dateTime.weekday(.wide).month().day()),
+                            commonlyUsed: Self.dayMarkCommonlyUsed,
+                            recentStorageKey: Self.dayMarkRecentStorageKey,
+                            currentSelection: dayMarks[normalized],
+                            onSelect: { emoji in
+                                DayMarkStore.shared.set(day: day, emoji: emoji)
+                                pickerDay = nil
+                            },
+                            onRemove: dayMarks[normalized] != nil ? {
+                                DayMarkStore.shared.clear(day: day)
+                                pickerDay = nil
+                            } : nil
+                        )
+                        .presentationDetents([.medium, .large])
+                        .presentationDragIndicator(.visible)
+                    }
             }
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .padding(.vertical, 4)
+        // Phase F.1.2.weekstrip — horizontal swipe between weeks.
+        // Mirrors the timeline's day-swipe gesture (TimelineScreen
+        // ~line 261): same `simultaneousGesture` + horizontal-
+        // dominance guard so per-cell taps and long-presses still
+        // arbitrate cleanly. Same-weekday selection in the new week
+        // (Apple Calendar pattern): on Wed → swipe → Wed of new
+        // week. Soft haptic on success matches iOS Calendar's feel.
+        // Selection update flows through `TimelineStore.shiftSelectedDate(byDays:)`
+        // which the upstream `weekStrip` accessor reads to recompute
+        // the displayed days, so the strip re-renders automatically.
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 30, coordinateSpace: .local)
+                .onEnded { value in
+                    let dx = value.translation.width
+                    let dy = value.translation.height
+                    guard abs(dx) > abs(dy) * 1.5, abs(dx) > 60 else { return }
+                    UIImpactFeedbackGenerator(style: .soft).impactOccurred()
+                    TimelineStore.shared.shiftSelectedDate(byDays: dx > 0 ? -7 : 7)
+                }
+        )
+    }
+
+    /// One binding per day so each column's `.popover` modifier can
+    /// fire independently without thrashing the others. Reads true
+    /// when this column owns the open picker; setter resets when
+    /// the popover dismisses (tap-outside, swipe-down).
+    private func pickerPresentedBinding(for day: Date) -> Binding<Bool> {
+        let normalized = cal.startOfDay(for: day)
+        return Binding(
+            get: { pickerDay == normalized },
+            set: { newValue in
+                if !newValue, pickerDay == normalized {
+                    pickerDay = nil
+                }
+            }
+        )
     }
 
     @ViewBuilder
@@ -132,6 +275,33 @@ struct WeekStripView: View {
                     .matchedGeometryEffect(id: "today-ring", in: todayRingNamespace)
             }
         }
+        // Phase F.1.2.daymarks — emoji badge in the top-right corner
+        // of each marked day's cell. Bumped 2pt up/right of the corner
+        // so it reads as a stamp on top of the container rather than
+        // crammed inside. `.transition` + `.animation` give a bouncy
+        // scale-in on add and a fade-out on remove. `id: emoji` on the
+        // Text forces SwiftUI to treat an emoji change as add+remove,
+        // so swapping (e.g., 🎂 → ❗) animates rather than snaps.
+        .overlay(alignment: .topTrailing) {
+            if let emoji = dayMarks[cal.startOfDay(for: day)] {
+                Text(emoji)
+                    .font(.system(size: 14))
+                    .id(emoji)
+                    .padding(2)
+                    .transition(
+                        .asymmetric(
+                            insertion: .scale(scale: 0.5).combined(with: .opacity),
+                            removal: .opacity
+                        )
+                    )
+                    .offset(x: 2, y: -2)
+                    .accessibilityLabel("Marked with \(emoji)")
+            }
+        }
+        .animation(
+            .bouncy(duration: 0.4, extraBounce: 0.2),
+            value: dayMarks[cal.startOfDay(for: day)]
+        )
         .accessibilityLabel(accessibilityLabel(day: day, isToday: isToday, isSelected: isSelected, hasNotes: hasNotes))
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
@@ -142,6 +312,9 @@ struct WeekStripView: View {
         if isToday { label += ", today" }
         if isSelected && !isToday { label += ", selected" }
         label += hasNotes ? ". Has notes." : ". No notes."
+        if let emoji = dayMarks[cal.startOfDay(for: day)] {
+            label += " Marked with \(emoji)."
+        }
         return label
     }
 }

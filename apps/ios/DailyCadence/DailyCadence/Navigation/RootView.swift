@@ -160,6 +160,14 @@ struct RootView: View {
                     userId: userId,
                     day: TimelineStore.shared.selectedDate
                 )
+                // Phase F.1.2.daymarks — bulk fetch of per-day emoji
+                // markers. Set is small (most users have <50 marked
+                // days), so a single load on launch + user-change
+                // covers the whole UX. `hasLoaded` short-circuits
+                // re-fires from selectedDate changes.
+                if !DayMarkStore.shared.hasLoaded {
+                    await DayMarkStore.shared.load(userId: userId)
+                }
             }
             .onChange(of: scenePhase) { _, newPhase in
                 if newPhase == .active {

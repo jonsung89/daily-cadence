@@ -109,6 +109,7 @@ final class AuthStore {
                 if hadUser {
                     TimelineStore.shared.resetForUserChange()
                     WeekStripStore.shared.resetForUserChange()
+                    DayMarkStore.shared.resetForUserChange()
                     Task { @MainActor in ProfileImageCache.shared.invalidate() }
                 }
             default:
@@ -282,6 +283,7 @@ final class AuthStore {
         if let prev = currentUserId, prev != session.user.id {
             TimelineStore.shared.resetForUserChange()
             WeekStripStore.shared.resetForUserChange()
+            DayMarkStore.shared.resetForUserChange()
             Task { @MainActor in ProfileImageCache.shared.invalidate() }
         }
         currentUserId = session.user.id
