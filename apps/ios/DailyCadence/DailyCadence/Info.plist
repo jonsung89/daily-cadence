@@ -191,7 +191,7 @@
 		</dict>
 	</array>
 	<key>CFBundleVersion</key>
-	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<string>2</string>
 	<!--
 	Encryption export compliance. App only uses Apple's standard
 	HTTPS/Keychain/CryptoKit cryptography, all of which are exempt
