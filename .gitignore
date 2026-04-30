@@ -72,12 +72,13 @@ Carthage/Build/
 # For more information about the recommended setup visit:
 # https://docs.fastlane.tools/best-practices/source-control/#source-control
 
-fastlane/report.xml
-fastlane/Preview.html
-fastlane/screenshots/**/*.png
-fastlane/test_output
-fastlane/README.md
+**/fastlane/report.xml
+**/fastlane/Preview.html
+**/fastlane/screenshots/**/*.png
+**/fastlane/test_output
+**/fastlane/README.md
 **/fastlane/.env
 **/fastlane/.env.local
 *.xcarchive
 **/fastlane/AuthKey_*.p8
+**/fastlane/build/
