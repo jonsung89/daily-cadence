@@ -160,6 +160,125 @@
 			</dict>
 		</dict>
 	</dict>
+	<!--
+	iPad alternate-icon manifest. Mirrors `CFBundleIcons` above but
+	references `~ipad`-suffixed bundle-root files (152×152 @2x +
+	76×76 @1x for each alternate). iOS picks this dictionary on
+	iPad and falls back to `CFBundleIcons` on iPhone.
+
+	Without this entry, App Store Connect emits ITMS-90892 every
+	upload ("Missing recommended icon ... 152×152 pixels"). The
+	primary icon (Sage / AppIcon) ships its iPad sizes via the
+	asset catalog auto-generation and doesn't need a `~ipad`
+	override here.
+
+	Phase 1 is iPhone-shaped UX. iPad target is kept open
+	(`TARGETED_DEVICE_FAMILY = "1,2"`) so a future iPad UX pass
+	doesn't have to reverse a target removal — providing the
+	icons now keeps the binary honest about what it claims to
+	support.
+	-->
+	<key>CFBundleIcons~ipad</key>
+	<dict>
+		<key>CFBundlePrimaryIcon</key>
+		<dict>
+			<key>CFBundleIconName</key>
+			<string>AppIcon</string>
+		</dict>
+		<key>CFBundleAlternateIcons</key>
+		<dict>
+			<key>BlushPink</key>
+			<dict>
+				<key>CFBundleIconFiles</key>
+				<array><string>BlushPink~ipad</string></array>
+				<key>UIPrerenderedIcon</key><false/>
+			</dict>
+			<key>Coral</key>
+			<dict>
+				<key>CFBundleIconFiles</key>
+				<array><string>Coral~ipad</string></array>
+				<key>UIPrerenderedIcon</key><false/>
+			</dict>
+			<key>Mulberry</key>
+			<dict>
+				<key>CFBundleIconFiles</key>
+				<array><string>Mulberry~ipad</string></array>
+				<key>UIPrerenderedIcon</key><false/>
+			</dict>
+			<key>Taupe</key>
+			<dict>
+				<key>CFBundleIconFiles</key>
+				<array><string>Taupe~ipad</string></array>
+				<key>UIPrerenderedIcon</key><false/>
+			</dict>
+			<key>Lavender</key>
+			<dict>
+				<key>CFBundleIconFiles</key>
+				<array><string>Lavender~ipad</string></array>
+				<key>UIPrerenderedIcon</key><false/>
+			</dict>
+			<key>Storm</key>
+			<dict>
+				<key>CFBundleIconFiles</key>
+				<array><string>Storm~ipad</string></array>
+				<key>UIPrerenderedIcon</key><false/>
+			</dict>
+			<key>Teal</key>
+			<dict>
+				<key>CFBundleIconFiles</key>
+				<array><string>Teal~ipad</string></array>
+				<key>UIPrerenderedIcon</key><false/>
+			</dict>
+			<key>PlantSage</key>
+			<dict>
+				<key>CFBundleIconFiles</key>
+				<array><string>PlantSage~ipad</string></array>
+				<key>UIPrerenderedIcon</key><false/>
+			</dict>
+			<key>PlantBlush</key>
+			<dict>
+				<key>CFBundleIconFiles</key>
+				<array><string>PlantBlush~ipad</string></array>
+				<key>UIPrerenderedIcon</key><false/>
+			</dict>
+			<key>PlantCoral</key>
+			<dict>
+				<key>CFBundleIconFiles</key>
+				<array><string>PlantCoral~ipad</string></array>
+				<key>UIPrerenderedIcon</key><false/>
+			</dict>
+			<key>PlantMulberry</key>
+			<dict>
+				<key>CFBundleIconFiles</key>
+				<array><string>PlantMulberry~ipad</string></array>
+				<key>UIPrerenderedIcon</key><false/>
+			</dict>
+			<key>PlantTaupe</key>
+			<dict>
+				<key>CFBundleIconFiles</key>
+				<array><string>PlantTaupe~ipad</string></array>
+				<key>UIPrerenderedIcon</key><false/>
+			</dict>
+			<key>PlantLavender</key>
+			<dict>
+				<key>CFBundleIconFiles</key>
+				<array><string>PlantLavender~ipad</string></array>
+				<key>UIPrerenderedIcon</key><false/>
+			</dict>
+			<key>PlantStorm</key>
+			<dict>
+				<key>CFBundleIconFiles</key>
+				<array><string>PlantStorm~ipad</string></array>
+				<key>UIPrerenderedIcon</key><false/>
+			</dict>
+			<key>PlantTeal</key>
+			<dict>
+				<key>CFBundleIconFiles</key>
+				<array><string>PlantTeal~ipad</string></array>
+				<key>UIPrerenderedIcon</key><false/>
+			</dict>
+		</dict>
+	</dict>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
