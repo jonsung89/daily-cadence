@@ -31,12 +31,12 @@ struct AppIconPickerScreen: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 iconSection(
-                    title: "Quote",
-                    choices: AppIconChoice.allCases.filter { !$0.isPlant }
-                )
-                iconSection(
                     title: "Plant",
                     choices: AppIconChoice.allCases.filter { $0.isPlant }
+                )
+                iconSection(
+                    title: "Quote",
+                    choices: AppIconChoice.allCases.filter { !$0.isPlant }
                 )
 
                 if let lastError {
