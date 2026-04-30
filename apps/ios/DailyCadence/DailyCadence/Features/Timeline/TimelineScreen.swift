@@ -527,11 +527,8 @@ struct TimelineScreen: View {
     /// reads `DayMarkStore.shared.marks` so the per-day emoji badge
     /// re-renders on long-press → pick / clear.
     private var weekStrip: some View {
-        let selected = TimelineStore.shared.selectedDate
-        let days = WeekStripView.days(forWeekContaining: selected)
-        return WeekStripView(
-            days: days,
-            selectedDay: selected,
+        WeekStripView(
+            selectedDay: TimelineStore.shared.selectedDate,
             currentDay: TimelineStore.shared.currentDay,
             filledDays: WeekStripStore.shared.daysWithNotes,
             onTap: { tapped in

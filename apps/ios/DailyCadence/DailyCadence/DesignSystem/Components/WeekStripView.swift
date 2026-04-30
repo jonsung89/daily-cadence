@@ -2,24 +2,34 @@ import SwiftUI
 import UIKit
 
 /// Phase F.1.2.weekstrip — motivational indicator above the Today
-/// screen's view toggle. Renders the current week as 7 columns,
-/// each showing weekday letter (S M T W T F S, locale-aware first
-/// day), day-of-month number, and a dot indicating whether that day
-/// has any notes. Today gets a stronger background tint; the user's
-/// selected day (when not today) gets a subtle ring; tapping any
-/// column navigates the timeline to that day.
+/// screen's view toggle. Renders the user's week as a paged dial:
+/// the day-of-week letters (S M T W T F S, locale-aware first day)
+/// stay fixed at the top while the date numbers slide horizontally
+/// in response to swipes — same visual + interaction model as Apple
+/// Calendar's week strip. Tapping any column navigates the timeline
+/// to that day; long-pressing opens the emoji picker (`EmojiPickerSheet`)
+/// to mark the day.
 ///
-/// Reads `WeekStripStore.shared.daysWithNotes` and
-/// `TimelineStore.shared.selectedDate` — Observation wires re-renders
-/// automatically on either change.
+/// **Paged via `TabView`.** Each "page" is one week of date numbers.
+/// `TabView`'s page style gives the interactive drag, peek-of-adjacent-
+/// weeks during the swipe, snap-on-release physics, and velocity-based
+/// commit — all native, no custom gesture math. Static letter row
+/// sits above the TabView so it never moves with the date row.
+///
+/// **Selection sync.** The TabView's selection (`visibleWeekStart`) is
+/// the start of the currently-displayed week. When the user pages,
+/// `selectedDay` shifts by the matching day delta to preserve the
+/// weekday (Apple Calendar pattern: viewing Wed → swipe → Wed of new
+/// week). When `selectedDay` changes externally (chevron tap, day
+/// picker, etc.), `visibleWeekStart` snaps to that week so the dial
+/// stays in sync.
+///
+/// Reads `WeekStripStore.shared.daysWithNotes`, `TimelineStore.shared.selectedDate`,
+/// `DayMarkStore.shared.marks` upstream — Observation wires re-renders.
 struct WeekStripView: View {
-    /// The full set of seven days in the user's current week, sorted
-    /// chronologically (locale-aware first day). Computed from
-    /// `Calendar.current.dateInterval(of: .weekOfYear)` based on the
-    /// timeline's selected date.
-    let days: [Date]
-    /// The currently-selected day (drives the "selected" highlight).
-    /// `Calendar.current.startOfDay(for:)`-normalized.
+    /// The currently-selected day. Drives both the "selected" highlight
+    /// AND the dial's visible-week sync. `Calendar.current.startOfDay(for:)`-
+    /// normalized.
     let selectedDay: Date
     /// Phase F.1.2.midnight — observed source of "what is today."
     /// Passed in (rather than reading `Calendar.current.isDateInToday`
@@ -30,15 +40,23 @@ struct WeekStripView: View {
     /// Days with at least one note. Match-by-startOfDay equality.
     let filledDays: Set<Date>
     /// Tap handler — caller routes to `TimelineStore.selectDate(...)`.
+    /// Also fired internally when the user pages between weeks (we
+    /// shift the selection by the day delta, then call this so the
+    /// upstream store updates).
     let onTap: (Date) -> Void
     /// Phase F.1.2.daymarks — emoji-by-day map, keyed by `startOfDay`.
     /// Defaults empty so existing callers (previews, tests) don't need
     /// to thread it through. Caller passes `DayMarkStore.shared.marks`
     /// in production wiring; mutations route directly through
-    /// `DayMarkStore.shared.set/clear` from inside the picker (same
-    /// singleton-mutation pattern the rest of the strip uses for
-    /// `WeekStripStore`).
+    /// `DayMarkStore.shared.set/clear` from inside the picker.
     var dayMarks: [Date: String] = [:]
+
+    /// Phase F.1.2.weekstrip.dial — the start-of-week (Sunday in en_US,
+    /// locale-aware elsewhere) of the currently-displayed page.
+    /// `TabView` selection binds to this; mutations come from either
+    /// the user paging the TabView or external `selectedDay` changes
+    /// landing the strip on a different week.
+    @State private var visibleWeekStart: Date
 
     /// Phase F.1.2.daymarks — id of the day whose `EmojiPickerSheet`
     /// is open. Internal state because the picker is purely week-strip
@@ -70,31 +88,133 @@ struct WeekStripView: View {
     private static let dayMarkRecentStorageKey = "com.jonsung.DailyCadence.daymarks.recentEmojis"
 
     /// Phase F.1.2.midnight — namespace for the today-ring matched-geo.
-    /// When midnight advances `currentDay` from one column to an adjacent
-    /// column within the displayed week (e.g., Mon → Tue), SwiftUI slides
-    /// the sage ring between cells instead of fading out + fading in.
-    /// Cross-week rollovers (today moves outside the displayed days) just
-    /// fade the ring out — no destination to slide to.
+    /// Within a single page, the sage ring slides between adjacent
+    /// columns at midnight rollover (Mon → Tue inside the same week).
+    /// Cross-page rollovers (Sat → Sun across the Sunday week
+    /// boundary) fade the ring out instead — `matchedGeometryEffect`
+    /// doesn't bridge separate `TabView` pages.
     @Namespace private var todayRingNamespace
 
+    /// Range of paged weeks: ±52 weeks from this view's mount-time
+    /// "current week." 105 total — covers a full year of paging in
+    /// either direction. `TabView` is lazy so off-screen pages don't
+    /// pay layout / observation costs.
+    private static let weekOffsets = Array(-52...52)
+    /// Anchor week for the dial range. Captured once at init so the
+    /// available `weekStartDates` stay stable across renders.
+    private let baseWeekStart: Date
+
+    init(
+        selectedDay: Date,
+        currentDay: Date,
+        filledDays: Set<Date>,
+        onTap: @escaping (Date) -> Void,
+        dayMarks: [Date: String] = [:]
+    ) {
+        self.selectedDay = selectedDay
+        self.currentDay = currentDay
+        self.filledDays = filledDays
+        self.onTap = onTap
+        self.dayMarks = dayMarks
+        let cal = Calendar.current
+        let initialWeek = Self.startOfWeek(for: selectedDay, calendar: cal)
+        self._visibleWeekStart = State(initialValue: initialWeek)
+        self.baseWeekStart = Self.startOfWeek(for: .now, calendar: cal)
+    }
+
     var body: some View {
+        VStack(spacing: 4) {
+            weekdayLetterRow
+                .padding(.horizontal, 12)
+
+            TabView(selection: $visibleWeekStart) {
+                ForEach(weekStartDates, id: \.self) { weekStart in
+                    weekDateRow(weekStart: weekStart)
+                        .padding(.horizontal, 12)
+                        .tag(weekStart)
+                }
+            }
+            .tabViewStyle(.page(indexDisplayMode: .never))
+            // Fixed height so the TabView doesn't expand vertically.
+            // Sized for 13pt number + 9pt dot + spacing + per-cell
+            // vertical padding (8pt × 2) + hit-area pad (4pt × 2).
+            .frame(height: 60)
+        }
+        .padding(.vertical, 4)
+        .onChange(of: visibleWeekStart) { oldValue, newValue in
+            // User paged the dial. Shift `selectedDay` by the same
+            // day delta so the weekday is preserved (Wed → Wed in the
+            // new week — Apple Calendar pattern). The upstream
+            // `onTap` callback updates `TimelineStore.selectedDate`,
+            // which then re-flows back as the new `selectedDay` prop
+            // — but `visibleWeekStart` already equals the new week,
+            // so the `.onChange(of: selectedDay)` handler short-
+            // circuits without re-animating.
+            guard oldValue != newValue else { return }
+            let dayDelta = cal.dateComponents([.day], from: oldValue, to: newValue).day ?? 0
+            guard dayDelta != 0 else { return }
+            UIImpactFeedbackGenerator(style: .soft).impactOccurred()
+            let newSelected = cal.date(byAdding: .day, value: dayDelta, to: selectedDay) ?? selectedDay
+            onTap(newSelected)
+        }
+        .onChange(of: selectedDay) { _, newValue in
+            // External `selectedDay` change (chevron tap, date picker,
+            // etc.). If it lands in a different week than the dial is
+            // showing, animate the dial to that week. Same-week tap
+            // is a no-op for the dial (just the highlight moves).
+            let newWeekStart = Self.startOfWeek(for: newValue, calendar: cal)
+            guard newWeekStart != visibleWeekStart else { return }
+            withAnimation(.easeOut(duration: 0.25)) {
+                visibleWeekStart = newWeekStart
+            }
+        }
+    }
+
+    // MARK: - Static letter row
+
+    private var weekdayLetterRow: some View {
         HStack(spacing: 0) {
-            ForEach(days, id: \.self) { day in
+            ForEach(0..<7, id: \.self) { idx in
+                Text(weekdaySymbols.indices.contains(idx) ? weekdaySymbols[idx] : "")
+                    .font(.DS.sans(size: 10, weight: .regular))
+                    .foregroundStyle(Color.DS.fg2)
+                    .frame(maxWidth: .infinity)
+            }
+        }
+    }
+
+    // MARK: - Paged date rows
+
+    private var weekStartDates: [Date] {
+        Self.weekOffsets.compactMap { offset in
+            cal.date(byAdding: .day, value: offset * 7, to: baseWeekStart)
+        }
+    }
+
+    private func daysInWeek(starting weekStart: Date) -> [Date] {
+        (0..<7).compactMap { offset in
+            cal.date(byAdding: .day, value: offset, to: weekStart)
+        }
+    }
+
+    private func weekDateRow(weekStart: Date) -> some View {
+        HStack(spacing: 0) {
+            ForEach(daysInWeek(starting: weekStart), id: \.self) { day in
                 let normalized = cal.startOfDay(for: day)
-                column(for: day)
+                dateCell(for: day)
                     // Phase F.1.2.daymarks — visual feedback during a
                     // long-press hold. Scales the cell to 0.94×
                     // (matches iOS's context-menu lift feel) so the
                     // user knows the press is registering before the
                     // picker pops at 0.35s. Spring back when released
-                    // or when the popover takes over.
+                    // or when the sheet takes over.
                     .scaleEffect(pressingDay == normalized ? 0.94 : 1.0)
                     .animation(.spring(response: 0.3, dampingFraction: 0.7), value: pressingDay)
                     .frame(maxWidth: .infinity)
                     // Pad the hit area beyond the visual (4pt vertical,
                     // 2pt horizontal) before stamping the contentShape
                     // so a slightly-off finger still registers. Doesn't
-                    // shift the visual layout — `column` already owns
+                    // shift the visual layout — `dateCell` already owns
                     // its visible padding inside its body.
                     .padding(.vertical, 4)
                     .padding(.horizontal, 2)
@@ -108,39 +228,22 @@ struct WeekStripView: View {
                     // default) tolerates the finger jitter that's
                     // normal during a 0.35s hold — without this the
                     // gesture silently cancels mid-press and the user
-                    // has to retry. `onPressingChanged` drives the
-                    // visual feedback during the hold; the perform
-                    // closure fires the haptic + opens the popover.
+                    // has to retry.
                     .onLongPressGesture(minimumDuration: 0.35, maximumDistance: 50) {
                         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                         pickerDay = normalized
                         pressingDay = nil
                     } onPressingChanged: { isPressing in
-                        // Light haptic on touch-down — the missing
+                        // Soft haptic on touch-down — the missing
                         // "I felt that" feedback that iOS context
                         // menus give. Pairs with the medium haptic
-                        // on long-press completion to make the
-                        // 0.35s threshold feel like the gesture is
-                        // actively responding rather than waiting.
+                        // on long-press completion.
                         if isPressing, pressingDay != normalized {
                             UIImpactFeedbackGenerator(style: .soft).impactOccurred()
                         }
                         pressingDay = isPressing ? normalized : nil
                     }
                     .sheet(isPresented: pickerPresentedBinding(for: day)) {
-                        // Bottom sheet (vs. popover) — matches iOS-
-                        // native reaction tray UX (Messenger, Discord,
-                        // iMessage). Slide-up animation, drag indicator,
-                        // dimmed backdrop, swipe-down to dismiss are
-                        // all free with `.sheet`. Detents start at
-                        // `.medium` (matches the reaction-tray feel)
-                        // and let the user drag up to `.large` for the
-                        // full catalog. `EmojiPickerSheet` is the
-                        // reusable component — day-marks supplies its
-                        // own quick-pick set + storage key for recents
-                        // so future features (reactions, mood tags)
-                        // can pass their own without polluting each
-                        // other's history.
                         EmojiPickerSheet(
                             subtitle: "Mark this day",
                             title: normalized.formatted(.dateTime.weekday(.wide).month().day()),
@@ -161,63 +264,16 @@ struct WeekStripView: View {
                     }
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 4)
-        // Phase F.1.2.weekstrip — horizontal swipe between weeks.
-        // Mirrors the timeline's day-swipe gesture (TimelineScreen
-        // ~line 261): same `simultaneousGesture` + horizontal-
-        // dominance guard so per-cell taps and long-presses still
-        // arbitrate cleanly. Same-weekday selection in the new week
-        // (Apple Calendar pattern): on Wed → swipe → Wed of new
-        // week. Soft haptic on success matches iOS Calendar's feel.
-        // Selection update flows through `TimelineStore.shiftSelectedDate(byDays:)`
-        // which the upstream `weekStrip` accessor reads to recompute
-        // the displayed days, so the strip re-renders automatically.
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 30, coordinateSpace: .local)
-                .onEnded { value in
-                    let dx = value.translation.width
-                    let dy = value.translation.height
-                    guard abs(dx) > abs(dy) * 1.5, abs(dx) > 60 else { return }
-                    UIImpactFeedbackGenerator(style: .soft).impactOccurred()
-                    TimelineStore.shared.shiftSelectedDate(byDays: dx > 0 ? -7 : 7)
-                }
-        )
-    }
-
-    /// One binding per day so each column's `.popover` modifier can
-    /// fire independently without thrashing the others. Reads true
-    /// when this column owns the open picker; setter resets when
-    /// the popover dismisses (tap-outside, swipe-down).
-    private func pickerPresentedBinding(for day: Date) -> Binding<Bool> {
-        let normalized = cal.startOfDay(for: day)
-        return Binding(
-            get: { pickerDay == normalized },
-            set: { newValue in
-                if !newValue, pickerDay == normalized {
-                    pickerDay = nil
-                }
-            }
-        )
     }
 
     @ViewBuilder
-    private func column(for day: Date) -> some View {
+    private func dateCell(for day: Date) -> some View {
         let isToday = cal.isDate(day, inSameDayAs: currentDay)
         let isSelected = cal.isDate(day, inSameDayAs: selectedDay)
         let hasNotes = filledDays.contains(cal.startOfDay(for: day))
-        let weekdayIndex = cal.component(.weekday, from: day) - 1 // 1...7 → 0...6
-        let letter = weekdaySymbols.indices.contains(weekdayIndex)
-            ? weekdaySymbols[weekdayIndex]
-            : ""
 
         VStack(spacing: 4) {
-            Text(letter)
-                .font(.DS.sans(size: 10, weight: isToday ? .bold : .regular))
-                .foregroundStyle(isToday ? Color.DS.ink : Color.DS.fg2)
-
-            // Phase F.1.2.weekstrip.dates — day-of-month number, primary
-            // info row of the strip. Today bolds + uses ink; other days
+            // Day-of-month number. Today bolds + uses ink; other days
             // stay regular + fg2 so today still reads first at a glance
             // even before the user notices the ring/pill chrome.
             Text(day.formatted(.dateTime.day()))
@@ -228,8 +284,6 @@ struct WeekStripView: View {
             // Dot states:
             // - has notes: filled with the user's primary theme color (sage by default)
             // - no notes: hollow ring in fg2 @ 0.4 opacity
-            // Bumped 6→9pt this round so the dot holds its own next to
-            // the letter + number rows rather than disappearing.
             ZStack {
                 if hasNotes {
                     Circle()
@@ -248,11 +302,9 @@ struct WeekStripView: View {
         .background(
             // Selected-day highlight: subtle sage soft fill that fills
             // the column's allocated width (with a 3pt inset so adjacent
-            // selected pills wouldn't touch). Earlier 4pt-padded version
-            // read as a skinny tall oval; this one feels like a proper
-            // bubble around the day. Today AND selected = full pill;
-            // selected (different day from today) also gets the pill so
-            // the user sees which day they're navigating.
+            // selected pills wouldn't touch). Today AND selected = full
+            // pill; selected (different day from today) also gets the
+            // pill so the user sees which day they're navigating.
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .fill(isSelected ? Color.DS.sageSoft : Color.clear)
                 .padding(.horizontal, 3)
@@ -261,13 +313,6 @@ struct WeekStripView: View {
             // Today gets a 1pt sage-tinted ring on TOP of the selected
             // fill — makes "today" identifiable even when the user is
             // viewing a different day (no fill on this column).
-            // Phase F.1.2.midnight — `matchedGeometryEffect` so the ring
-            // slides between adjacent columns at midnight rollover
-            // within the displayed week (Mon → Tue, etc.). When the new
-            // today is outside the displayed week (week-boundary
-            // rollover), the ring fades out — no destination to slide
-            // to. Only the today column attaches the modifier; non-today
-            // columns render no ring at all.
             if isToday {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .stroke(Color.DS.sage.opacity(0.5), lineWidth: 1)
@@ -306,6 +351,20 @@ struct WeekStripView: View {
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
+    // MARK: - Helpers
+
+    private func pickerPresentedBinding(for day: Date) -> Binding<Bool> {
+        let normalized = cal.startOfDay(for: day)
+        return Binding(
+            get: { pickerDay == normalized },
+            set: { newValue in
+                if !newValue, pickerDay == normalized {
+                    pickerDay = nil
+                }
+            }
+        )
+    }
+
     private func accessibilityLabel(day: Date, isToday: Bool, isSelected: Bool, hasNotes: Bool) -> String {
         let weekday = day.formatted(.dateTime.weekday(.wide))
         var label = weekday
@@ -317,6 +376,13 @@ struct WeekStripView: View {
         }
         return label
     }
+
+    /// Locale-aware "first day of the week containing `date`" — Sun
+    /// in en_US, Mon elsewhere. Normalized to `startOfDay`.
+    private static func startOfWeek(for date: Date, calendar: Calendar) -> Date {
+        let interval = calendar.dateInterval(of: .weekOfYear, for: date)
+        return calendar.startOfDay(for: interval?.start ?? date)
+    }
 }
 
 // MARK: - Convenience builder
@@ -324,7 +390,10 @@ struct WeekStripView: View {
 extension WeekStripView {
     /// Builds the seven-day array for the week containing `date`,
     /// normalized to `startOfDay` and ordered locale-first (Sun-first
-    /// in en_US, Mon-first elsewhere).
+    /// in en_US, Mon-first elsewhere). Kept as a public helper for
+    /// any caller that wants the same week math the strip uses
+    /// internally; the strip itself no longer requires callers to
+    /// pre-compute this (see paged `TabView` body).
     static func days(forWeekContaining date: Date) -> [Date] {
         let cal = Calendar.current
         guard let interval = cal.dateInterval(of: .weekOfYear, for: date) else { return [] }
@@ -337,10 +406,8 @@ extension WeekStripView {
 
 #Preview("Today's week, light") {
     let today = Calendar.current.startOfDay(for: .now)
-    let days = WeekStripView.days(forWeekContaining: today)
     let cal = Calendar.current
     return WeekStripView(
-        days: days,
         selectedDay: today,
         currentDay: today,
         filledDays: Set([
@@ -355,9 +422,8 @@ extension WeekStripView {
 
 #Preview("Today's week, dark") {
     let today = Calendar.current.startOfDay(for: .now)
-    let days = WeekStripView.days(forWeekContaining: today)
+    let cal = Calendar.current
     return WeekStripView(
-        days: days,
         selectedDay: cal.date(byAdding: .day, value: -2, to: today)!,
         currentDay: today,
         filledDays: Set([today]),
@@ -366,5 +432,3 @@ extension WeekStripView {
     .background(Color.DS.bg1)
     .preferredColorScheme(.dark)
 }
-
-private let cal = Calendar.current
