@@ -226,6 +226,18 @@ struct TimelineScreen: View {
 
                     content
                         .padding(.horizontal, horizontalPadding(for: viewMode))
+                        // Phase F.1.2.pageflip — `.id(selectedDate)`
+                        // forces SwiftUI to treat each day's content
+                        // as a new view identity, which lets the
+                        // crossfade transition fire on day-switches
+                        // rather than animating individual cards in/
+                        // out. Combined with the ±7 day prefetch in
+                        // RootView, the new day's notes are usually
+                        // already cached by the time the transition
+                        // starts — so the user sees content fade in,
+                        // not the empty state flash.
+                        .id(TimelineStore.shared.selectedDate)
+                        .transition(.opacity)
                 }
             }
             // Phase E.5.3 — iOS 17+ `.contentMargins(.bottom, _:, for: .scrollContent)`
@@ -254,6 +266,11 @@ struct TimelineScreen: View {
             .animation(.easeOut(duration: 0.2), value: isLoadingNotes)
             .animation(.easeOut(duration: 0.18), value: viewMode)
             .animation(.easeOut(duration: 0.18), value: boardLayout)
+            // Phase F.1.2.pageflip — drives the `.id(selectedDate)`
+            // crossfade on content. Slightly longer than the view-
+            // mode animation so the day-switch reads as a deliberate
+            // content change rather than a snap.
+            .animation(.easeInOut(duration: 0.28), value: TimelineStore.shared.selectedDate)
             // Phase F.0.3 — horizontal swipe between days. `simultaneous`
             // so vertical scroll keeps working; the strict horizontal-
             // dominance guard (1.5× the vertical translation, plus a
@@ -463,6 +480,10 @@ struct TimelineScreen: View {
                     .tracking(0.88)
                     .textCase(.uppercase)
                     .foregroundStyle(Color.DS.fg2)
+                    // Phase F.1.2.pageflip — same opt-out as the
+                    // big date title below; the caption snaps with
+                    // it so they read as a single coherent label.
+                    .contentTransition(.identity)
                 Spacer(minLength: 8)
                 if viewMode == .board {
                     boardSubModeMenu
@@ -489,6 +510,13 @@ struct TimelineScreen: View {
                         .font(.DS.serif(size: 28, weight: .bold))
                         .tracking(-0.56)  // -0.02em at 28pt
                         .foregroundStyle(Color.DS.ink)
+                        // Phase F.1.2.pageflip — opt the date title
+                        // out of the header's selectedDate-keyed
+                        // animation. Other header pieces (Today pill,
+                        // Board sub-mode menu, week strip) still
+                        // animate; the title swaps instantly so day-
+                        // switches feel snappy rather than fade-in.
+                        .contentTransition(.identity)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)

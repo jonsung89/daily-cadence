@@ -168,6 +168,26 @@ struct RootView: View {
                 if !DayMarkStore.shared.hasLoaded {
                     await DayMarkStore.shared.load(userId: userId)
                 }
+                // Phase F.1.2.pageflip — warm the cache for the days
+                // adjacent to `selectedDate` so the timeline doesn't
+                // show empty state while a day's notes load mid-
+                // navigation. ±7 days covers the dial's week-swipes
+                // (the new selection lands at exactly +7/-7 from the
+                // current week's same weekday) AND casual day-to-day
+                // navigation in either direction. Concurrent + best-
+                // effort — prefetch failures are silent inside the
+                // store; the next on-demand `load(userId:)` will
+                // surface any real error.
+                let cal = Calendar.current
+                let center = TimelineStore.shared.selectedDate
+                await withTaskGroup(of: Void.self) { group in
+                    for offset in (-7...7) where offset != 0 {
+                        guard let day = cal.date(byAdding: .day, value: offset, to: center) else { continue }
+                        group.addTask {
+                            await TimelineStore.shared.prefetch(userId: userId, day: day)
+                        }
+                    }
+                }
             }
             .onChange(of: scenePhase) { _, newPhase in
                 if newPhase == .active {

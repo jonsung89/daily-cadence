@@ -97,7 +97,11 @@ final class TimelineStore {
     /// changes made by another device until they sign out + back in.
     /// Acceptable until pull-to-refresh / realtime sync ship — both
     /// will provide explicit invalidation hooks.
-    private var notesByDay: [Date: [MockNote]] = [:]
+    /// Phase F.1.2.pageflip — bumped from `private` to `private(set)`
+    /// so the timeline's paged `TabView` can read each adjacent day's
+    /// notes per page. `@Observable` tracks reads, so a page that
+    /// reads `notesByDay[itsDay]` re-renders when that key mutates.
+    private(set) var notesByDay: [Date: [MockNote]] = [:]
 
     /// Note IDs whose optimistic insert is in flight to the server.
     /// Two consumers respect this set:
@@ -245,6 +249,42 @@ final class TimelineStore {
     /// when midnight rolls over.
     var isViewingToday: Bool {
         selectedDate == currentDay
+    }
+
+    // MARK: - Multi-day reads (paged timeline)
+
+    /// Phase F.1.2.pageflip — read accessor for any day's notes,
+    /// reading from the `notesByDay` cache. Returns `[]` for days
+    /// not yet loaded. The paged `TabView` in `TimelineScreen`
+    /// reads via this so each page renders its own day's content
+    /// from the same store. For `selectedDate` specifically the
+    /// caller should still read `notes` (which the mutation
+    /// helpers keep in lock-step with `notesByDay[selectedDate]`).
+    func notes(for day: Date) -> [MockNote] {
+        let key = Calendar.current.startOfDay(for: day)
+        return notesByDay[key] ?? []
+    }
+
+    /// Phase F.1.2.pageflip — fills `notesByDay[day]` from the
+    /// server without touching `selectedDate` / `notes` / `hasLoaded`.
+    /// Used by `RootView` to warm the cache for ±N days adjacent
+    /// to the selection so the paged timeline doesn't show empty
+    /// state while a day's notes load mid-swipe. Skips the network
+    /// round-trip when the day is already cached. Failures are
+    /// silent — prefetch is best-effort, the next on-demand load
+    /// will surface any real error.
+    func prefetch(userId: UUID, day: Date) async {
+        let key = Calendar.current.startOfDay(for: day)
+        guard notesByDay[key] == nil else { return }
+        do {
+            let fetched = try await repository.fetchForDay(userId: userId, day: key)
+            notesByDay[key] = fetched
+            log.debug("Prefetched \(fetched.count) notes for day=\(key)")
+        } catch is CancellationError {
+            log.debug("prefetch cancelled day=\(key)")
+        } catch {
+            log.debug("prefetch failed day=\(key): \(error.localizedDescription)")
+        }
     }
 
     // MARK: - Live load
